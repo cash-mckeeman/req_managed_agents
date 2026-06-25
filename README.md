@@ -15,7 +15,7 @@ end
 ## The pattern
 
 1. Create a versioned agent once (model, system prompt, custom-tool definitions); store its id.
-2. Start a session; Claude drives the loop and emits `agent.custom_tool_use`.
+2. Start a session; this needs an `environment_id`, so create an environment once with `Client.create_environment/2` and reuse it. Claude drives the loop and emits `agent.custom_tool_use`.
 3. The library runs your tool locally via a `ReqManagedAgents.Handler` callback and posts the result back.
 4. On `end_turn`, you're notified.
 

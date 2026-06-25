@@ -31,6 +31,20 @@ defmodule ReqManagedAgents.ClientTest do
              Client.create_session(client, %{agent: "agent_1"})
   end
 
+  test "create_environment/2 posts to /v1/environments", %{client: client} do
+    Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+      assert conn.method == "POST"
+      assert conn.request_path == "/v1/environments"
+      Req.Test.json(conn, %{"id" => "env_1"})
+    end)
+
+    assert {:ok, %{"id" => "env_1"}} =
+             Client.create_environment(client, %{
+               name: "t",
+               config: %{type: "cloud", networking: %{type: "unrestricted"}}
+             })
+  end
+
   test "send_events/3 posts the events envelope", %{client: client} do
     Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
       assert conn.request_path == "/v1/sessions/sess_1/events"

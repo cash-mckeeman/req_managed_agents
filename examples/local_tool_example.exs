@@ -49,10 +49,18 @@ client = ReqManagedAgents.new()
 
 IO.puts("Created agent #{agent_id}")
 
+# Environments persist — create once and reuse (store the id), like the agent.
+{:ok, %{"id" => env_id}} =
+  ReqManagedAgents.Client.create_environment(client, %{
+    name: "billing-support-env",
+    config: %{type: "cloud", networking: %{type: "unrestricted"}}
+  })
+
 {:ok, _pid} =
   ReqManagedAgents.start_session(
     client: client,
     agent_id: agent_id,
+    environment_id: env_id,
     prompt: "What plan is jane@acme.com on, and when was she last billed?",
     handler: Demo.Handler,
     notify: self()

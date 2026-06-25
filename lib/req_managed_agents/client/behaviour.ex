@@ -12,6 +12,9 @@ defmodule ReqManagedAgents.Client.Behaviour do
   @callback update_agent(Client.t(), String.t(), map()) :: result()
   @callback list_agents(Client.t(), map()) :: result()
 
+  @callback create_environment(Client.t(), map()) :: result()
+  @callback get_environment(Client.t(), String.t()) :: result()
+
   @callback create_session(Client.t(), map()) :: result()
   @callback get_session(Client.t(), String.t()) :: result()
   @callback list_sessions(Client.t(), map()) :: result()

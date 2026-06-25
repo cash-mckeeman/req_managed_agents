@@ -4,8 +4,9 @@ defmodule ReqManagedAgents.Session do
   open the stream, run custom tools locally via a `ReqManagedAgents.Handler`, post
   results, and reconnect-with-consolidation on stream loss.
 
-  Required opts: `:client` (a `ReqManagedAgents.Client`), `:agent_id`, `:handler`
-  (a module implementing `ReqManagedAgents.Handler`). Optional: `:prompt` (initial
+  Required opts: `:client` (a `ReqManagedAgents.Client`), `:agent_id`,
+  `:environment_id` (required for a fresh session; not needed to resume),
+  `:handler` (a module implementing `ReqManagedAgents.Handler`). Optional: `:prompt` (initial
   user message; default "Begin."), `:context` (passed to the handler), `:notify`
   (pid to receive `{:managed_agents_session, terminal_atom}`), `:session_id`
   (resume an existing session), `:name`.
@@ -60,7 +61,12 @@ defmodule ReqManagedAgents.Session do
 
     case opts[:session_id] do
       nil ->
-        case Client.create_session(client, %{agent: Keyword.fetch!(opts, :agent_id)}) do
+        body = %{
+          agent: Keyword.fetch!(opts, :agent_id),
+          environment_id: Keyword.fetch!(opts, :environment_id)
+        }
+
+        case Client.create_session(client, body) do
           {:ok, %{"id" => session_id}} ->
             {:ok, %{state | session_id: session_id, prompt: opts[:prompt] || "Begin."},
              {:continue, :connect}}

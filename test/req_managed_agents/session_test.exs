@@ -41,6 +41,8 @@ defmodule ReqManagedAgents.SessionTest do
 
     # create_session
     Bypass.expect_once(bypass, "POST", "/v1/sessions", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      assert %{"environment_id" => "env_1"} = Jason.decode!(body)
       Req.Test.json(conn, %{"id" => "s1", "status" => "running"})
     end)
 
@@ -67,6 +69,7 @@ defmodule ReqManagedAgents.SessionTest do
       Session.start_link(
         client: client,
         agent_id: "agent_1",
+        environment_id: "env_1",
         prompt: "go",
         handler: EchoHandler,
         context: %{test_pid: parent},
@@ -164,6 +167,7 @@ defmodule ReqManagedAgents.SessionTest do
       Session.start_link(
         client: client,
         agent_id: "agent_1",
+        environment_id: "env_1",
         prompt: "go",
         handler: FailHandler,
         context: %{test_pid: parent},

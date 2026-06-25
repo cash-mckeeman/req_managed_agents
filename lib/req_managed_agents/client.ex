@@ -64,6 +64,12 @@ defmodule ReqManagedAgents.Client do
   @impl true
   def list_agents(c, params \\ %{}), do: get(c, "/v1/agents", params)
 
+  # ---- Environments ----------------------------------------------------------
+  @impl true
+  def create_environment(c, body), do: post(c, "/v1/environments", body)
+  @impl true
+  def get_environment(c, id), do: get(c, "/v1/environments/#{id}")
+
   # ---- Sessions --------------------------------------------------------------
   @impl true
   def create_session(c, body), do: post(c, "/v1/sessions", body)

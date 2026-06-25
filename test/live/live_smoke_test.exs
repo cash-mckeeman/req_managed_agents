@@ -15,6 +15,12 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     {:ok, _} = Application.ensure_all_started(:req_managed_agents)
     client = ReqManagedAgents.new()
 
+    {:ok, %{"id" => env_id}} =
+      ReqManagedAgents.Client.create_environment(client, %{
+        name: "req-managed-agents-live-smoke",
+        config: %{type: "cloud", networking: %{type: "unrestricted"}}
+      })
+
     {:ok, %{"id" => agent_id}} =
       ReqManagedAgents.Client.create_agent(client, %{
         name: "req-managed-agents-live-smoke",
@@ -38,6 +44,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
       ReqManagedAgents.start_session(
         client: client,
         agent_id: agent_id,
+        environment_id: env_id,
         prompt: "Please echo: hello-managed-agents",
         handler: Handler,
         notify: self()
