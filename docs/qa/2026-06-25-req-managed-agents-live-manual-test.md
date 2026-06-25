@@ -65,7 +65,9 @@ cd /Users/ryanmckeeman/src/bizinsights/req_managed_agents \
    and a top-level `name: "req-managed-agents-live-smoke"` field (fix applied since run A).
 3. Calls `ReqManagedAgents.start_session/1` with `prompt: "Please echo: hello-managed-agents"`.
    Internally `Session.init/1` calls `Client.create_session/2` with body
-   `%{agent: agent_id, events: [user_message]}`.
+   `%{agent: agent_id}` (BUG-2 fixed — no `events` in the create body). The initial user
+   message is sent separately via `Client.send_event/3` after the SSE stream attaches
+   (triggered by the `:connected` signal).
 4. The `Session` GenServer opens an SSE stream, receives `session.status_idle` with
    `stop_reason.type = "requires_action"`, dispatches the `echo` tool call through the
    local `Handler`, posts `user.custom_tool_result` back to the API, then waits for
@@ -89,6 +91,60 @@ agent itself. The fix was to add `name: "req-managed-agents-live-smoke"` to the
 `create_agent` map in `test/live/live_smoke_test.exs`.
 
 **Classification:** wire-shape mismatch at `create_agent`.
+
+---
+
+### Run C — 2026-06-25 (re-run after BUG-2 fix — bare create + :connected kickoff)
+
+**Result:** FAIL — exit code 2
+
+**Key confirmed present:** yes (without printing value)
+
+**Error:** `create_session` → EXIT `{:create_session_failed, {:http_error, 400, ...}}`
+
+**API error message (verbatim, no secrets):**
+```
+"environment_id: Field required"
+```
+
+**Request ID:** `req_011CcQ1LtvEcVst33ULYs5Dp`
+
+**Root cause:** BUG-2 fix is confirmed to have landed — `Session.init/1` now calls
+`Client.create_session/2` with body `%{agent: agent_id}` only (no `events` key).
+However the live API (`POST /v1/sessions`) now requires an additional field:
+`environment_id`. This field is not present in the current `create_session` call, nor
+anywhere in the library source code. The planning doc (`docs/planning/managed_agents/client.ex`
+line 66) mentions an optional `environment` field but treats it as optional.
+The live API now treats it as **required**.
+
+**Progress since Run B:** `create_agent` continues to succeed (the `name` fix from
+BUG-1 is still correct). The "events" rejection from BUG-2 is gone — the session body
+shape is now correct in that dimension. The failure point advanced from "unknown field
+events" to "environment_id: Field required". A new required field has been identified.
+
+**Classification:** wire-shape mismatch at `create_session` — third distinct
+API-shape issue discovered via live testing. The API schema changed or the field
+was never optional.
+
+**Captured test output (exit code 2):**
+```
+Running ExUnit with seed: 677844, max_cases: 40
+Excluding tags: [:test]
+Including tags: [:live]
+
+  1) test full cycle against the live beta (ReqManagedAgents.LiveSmokeTest)
+     test/live/live_smoke_test.exs:14
+     ** (EXIT from #PID<0.287.0>) {:create_session_failed, {:http_error, 400,
+          %{"error" => %{"message" => "environment_id: Field required",
+                         "type" => "invalid_request_error"},
+            "request_id" => "req_011CcQ1LtvEcVst33ULYs5Dp",
+            "type" => "error"}}}
+
+Finished in 0.5 seconds (0.00s async, 0.5s sync)
+
+Result: 0/1 passed
+Failed: 1 test
+```
 
 ---
 
@@ -191,13 +247,13 @@ execution advanced to `create_session`. This directly confirms:
   "content" => [...], "is_error" => true}
 ```
 
-**Observed:** Session creation failed in Run B before any SSE stream was opened or
-any `custom_tool_result` event was sent. Neither the happy-path (`is_error: false`)
+**Observed:** Session creation failed in Runs B and C before any SSE stream was opened
+or any `custom_tool_result` event was sent. Neither the happy-path (`is_error: false`)
 nor the error-path (`is_error: true`) branch was exercised live.
 
-**Status:** not exercised live — blocked by the `create_session` wire-shape mismatch.
-Once `create_session` is fixed (remove `events:` from body, send initial message via
-`send_events` separately), this question becomes testable.
+**Status:** not exercised live — blocked by `create_session` wire-shape mismatches
+(BUG-2 fixed; BUG-3 open). Once `create_session` succeeds (also requires `environment_id`),
+this question becomes testable.
 
 **Assumption:** `Event.custom_tool_result/3` builds `%{"is_error" => boolean()}`.
 Live acceptance is unconfirmed. Mark: **success-path and error-path both unconfirmed**.
@@ -212,11 +268,12 @@ Live acceptance is unconfirmed. Mark: **success-path and error-path both unconfi
 ```
 Expects a `"data"` array key at the top level.
 
-**Observed:** No session was created (blocked at `create_session`), so `list_events`
-was not called against the live API in either run.
+**Observed:** No session was created (blocked at `create_session`) in any of Runs A,
+B, or C, so `list_events` was not called against the live API.
 
-Run B confirms `create_agent` now succeeds, so once the `create_session` body is
-corrected, an actual session_id will be available and `list_events` can be exercised.
+All three runs confirm `create_agent` succeeds. Once `create_session` succeeds (requires
+`environment_id` fix per BUG-3), an actual session_id will be available and `list_events`
+can be exercised.
 
 **Status:** not determinable in this run. The unit test stub in
 `test/req_managed_agents/client_test.exs` line 54 confirms we assert
@@ -233,7 +290,7 @@ pattern match. Real API cursor/`has_more` fields: not confirmed.
 - Comment lines (`:`) ignored
 - Non-`data:` lines (including `event:` lines) ignored
 
-**Observed:** No real SSE stream was opened in either run (blocked before
+**Observed:** No real SSE stream was opened in any of Runs A, B, or C (blocked before
 `start_consumer/1` in `Session`). SSE decode fidelity against the live API remains
 unconfirmed.
 
@@ -246,7 +303,7 @@ Whether the live beta uses this exact frame shape, emits additional event types
 (e.g. `"ping"`), or uses different line endings remains unconfirmed.
 
 **Status:** not determinable in this run. OQ-4 becomes testable only after both
-`create_agent` + `create_session` succeed.
+`create_agent` + `create_session` succeed (requires BUG-3 fix first).
 
 ---
 
@@ -260,17 +317,37 @@ Whether the live beta uses this exact frame shape, emits additional event types
   `Session.init/1` generic path doesn't include a name — but `create_agent` is called
   by the caller, not Session, so this is caller-side.
 
-### BUG-2: Session create body includes unknown `events` field (OPEN — not fixed)
-- **Where:** `lib/req_managed_agents/session.ex` lines 62–65
+### BUG-2: Session create body includes unknown `events` field (FIXED — confirmed in Run C)
+- **Where:** `lib/req_managed_agents/session.ex` lines 62–65 (pre-fix)
 - **Symptom:** HTTP 400 `"Failed to parse request body: unknown field \"events\""` on
   `POST /v1/sessions`
-- **Root cause:** `Session.init/1` bundles the initial user message inside the create_session
-  body as `%{agent: agent_id, events: [user_message]}`. The live API does not accept an
-  `events` key at session-creation time.
-- **Expected fix:** Create the session with `%{agent: agent_id}` only (no `events`), then
-  immediately call `Client.send_events/3` with the initial user message before opening the
-  SSE stream. The test stub in `client_test.exs:31` uses `%{agent: "agent_1", events: []}`,
-  which would also need updating if this mock is changed.
+- **Root cause:** `Session.init/1` was bundling the initial user message inside the
+  create_session body as `%{agent: agent_id, events: [user_message]}`. The live API
+  does not accept an `events` key at session-creation time.
+- **Fix applied:** `Session.init/1` now calls `Client.create_session/2` with body
+  `%{agent: agent_id}` only (no `events`). The `:connected` signal handler in
+  `handle_info/2` (line 97–108) sends the initial user message via
+  `Client.send_event/3` after the SSE stream attaches.
+- **Confirmed fixed:** Run C no longer saw the "unknown field events" error. The session
+  creation body is now accepted in that dimension (new failure at `environment_id`).
+- **Blocker for:** OQ-2, OQ-3, OQ-4, and the full `end_turn` cycle — now blocked by BUG-3 instead.
+
+### BUG-3: Session create body missing required `environment_id` field (OPEN — new finding from Run C)
+- **Where:** `lib/req_managed_agents/session.ex` line 63 / `lib/req_managed_agents/client.ex` line 69
+- **Symptom:** HTTP 400 `"environment_id: Field required"` on `POST /v1/sessions`
+- **Request ID:** `req_011CcQ1LtvEcVst33ULYs5Dp`
+- **Root cause:** `Client.create_session/2` is called with body `%{agent: agent_id}` only.
+  The live `POST /v1/sessions` endpoint now requires an `environment_id` field. This field
+  does not exist anywhere in the library source code. The planning doc
+  (`docs/planning/managed_agents/client.ex` line 66) mentions `environment` as optional, but
+  the live API treats `environment_id` (an ID string, not an object) as **required**.
+- **Expected fix:** Obtain an `environment_id` from the Managed Agents API (likely via a
+  `POST /v1/environments` or similar endpoint) and include it in the `create_session` body:
+  `%{agent: agent_id, environment_id: env_id}`. The live test and `Session.init/1` must be
+  updated with a valid `environment_id`. The `create_session` API spec needs to be consulted
+  for how to create/reference environments.
+- **Classification:** wire-shape mismatch — a required field was unknown at implementation time.
+  Not an auth issue; the key is valid (create_agent still succeeds with the same key).
 - **Blocker for:** OQ-2, OQ-3, OQ-4, and the full `end_turn` cycle.
 
 ---
@@ -278,14 +355,16 @@ Whether the live beta uses this exact frame shape, emits additional event types
 ## Checklist
 
 - [x] Key present (confirmed without printing — `test -n "$ANTHROPIC_API_KEY"` returned "key present")
-- [x] Live test invoked with the sourced-key command (Run B)
-- [x] Exit code captured (exit code 2 — test failure)
-- [x] Test output captured (verbatim above, no secrets in output)
+- [x] Live test invoked with the sourced-key command (Runs B and C)
+- [x] Exit code captured (exit code 2 — test failure in all runs to date)
+- [x] Test output captured (verbatim for Runs B and C; no secrets in output)
 - [x] OQ-1 partially answered: tool definition fields confirmed accepted; agent `name` confirmed required
-- [ ] OQ-2 not yet determinable (create_session blocked)
-- [ ] OQ-3 not yet determinable (no session id obtained)
-- [ ] OQ-4 not yet determinable (no SSE stream opened)
-- [x] BUG-1 documented (fixed in test); BUG-2 documented (open, blocks full cycle)
+- [ ] OQ-2 not yet determinable (create_session still blocked — now by BUG-3)
+- [ ] OQ-3 not yet determinable (no session id obtained in any run)
+- [ ] OQ-4 not yet determinable (no SSE stream opened in any run)
+- [x] BUG-1 documented (fixed in test)
+- [x] BUG-2 documented and confirmed FIXED (Run C no longer shows "events" rejection)
+- [x] BUG-3 documented (new finding from Run C — `environment_id: Field required`; open, blocks full cycle)
 
 ---
 
@@ -294,7 +373,7 @@ Whether the live beta uses this exact frame shape, emits additional event types
 ```yaml
 # QA-CHECKPOINT-B findings
 # Status values: pass | fail | deferred | skip
-# Run B results below (supersedes Run A)
+# Run C results below (supersedes Runs A and B)
 
 - step_id: "B.0"
   status: pass
@@ -306,6 +385,45 @@ Whether the live beta uses this exact frame shape, emits additional event types
   evidence: |
     Bash: test -n "$ANTHROPIC_API_KEY" && echo "key present" || echo "key MISSING"
     Result: "key present"
+
+- step_id: "C.1a"
+  status: pass
+  observed: |
+    create_agent/2 returned {:ok, %{"id" => agent_id}} — HTTP 201/200 success.
+    The agent body with top-level name: "req-managed-agents-live-smoke", model:,
+    system:, and tools: [...] was accepted. Execution advanced to create_session.
+    This is the third consecutive run in which create_agent has succeeded — BUG-1
+    fix is stable.
+  expected: |
+    {:ok, %{"id" => agent_id}} from create_agent/2.
+  evidence: |
+    The test advanced past line 18 (the create_agent match). The next failure was
+    at create_session, confirming create_agent succeeded in Run C.
+
+- step_id: "C.1b"
+  status: fail
+  observed: |
+    create_session/2 returned {:error, {:http_error, 400, ...}} with message:
+    "environment_id: Field required"
+    The Session GenServer stopped with {:create_session_failed, reason}.
+    The test received an EXIT from the session pid and surfaced as a test failure.
+    No SSE stream was opened. No tool dispatch occurred. No end_turn was received.
+    NOTE: The "events" rejection from BUG-2 is gone — BUG-2 fix is confirmed working.
+    Body now sent is %{agent: agent_id} only. New failure: missing environment_id.
+  expected: |
+    {:ok, %{"id" => session_id}} from create_session/2, followed by SSE stream
+    open, requires_action -> echo -> custom_tool_result -> end_turn cycle, and
+    assert_receive {:managed_agents_session, :end_turn} within 90s.
+  evidence: |
+    Command (key sourced, not printed):
+      cd /Users/ryanmckeeman/src/bizinsights/req_managed_agents &&
+      set -a && source /Users/ryanmckeeman/src/bizinsights/.env.local && set +a &&
+      mix test --only live test/live/live_smoke_test.exs
+    Failure classification: wire-shape mismatch — POST /v1/sessions now requires
+    "environment_id" which is not present in the request body.
+    Request ID: req_011CcQ1LtvEcVst33ULYs5Dp (redacted key not present in this ID).
+    Fix required: obtain a valid environment_id from the Managed Agents API and
+    include it in create_session body: %{agent: agent_id, environment_id: env_id}.
 
 - step_id: "B.1a"
   status: pass
@@ -345,53 +463,53 @@ Whether the live beta uses this exact frame shape, emits additional event types
     Fix required: create session with %{agent: agent_id} only; send initial
     user message separately via send_events/3 after session is created.
 
-- step_id: "B.OQ1"
+- step_id: "C.OQ1"
   status: pass
   observed: |
-    Run B: create_agent succeeded (advanced past line 18 of the live test).
+    Run C (and Run B): create_agent succeeded (advanced past line 18 of the live test).
     This directly confirms the tool definition shape:
       %{type: "custom", name: "echo", description: "...", input_schema: %{...}}
     is accepted by the API without validation error.
     It also confirms the agent body requires a top-level "name" field (Run A
-    confirmed this from the 400 error; Run B confirmed the fix works).
+    confirmed this from the 400 error; Runs B and C confirmed the fix is stable).
   expected: |
     create_agent/2 succeeds. Tool definition shape accepted.
     Agent body requires top-level "name".
   evidence: |
     Run A: HTTP 400 "name: Field required" proved name is required.
-    Run B: create_agent advanced past the match — the agent was created.
+    Runs B + C: create_agent advanced past the match — the agent was created.
 
-- step_id: "B.OQ2"
+- step_id: "C.OQ2"
   status: skip
   observed: |
-    Session never created (blocked at create_session); no custom_tool_result
+    Session never created (blocked at create_session by BUG-3); no custom_tool_result
     events were sent. The is_error field could not be exercised live.
   expected: |
     is_error field accepted by the API in user.custom_tool_result events.
   evidence: |
-    Not exercised — blocked by BUG-2 (create_session body shape mismatch).
+    Not exercised — blocked by BUG-3 (environment_id required by create_session).
     Assumption: Event.custom_tool_result/3 builds %{"is_error" => boolean()}.
     Live acceptance unconfirmed.
 
-- step_id: "B.OQ3"
+- step_id: "C.OQ3"
   status: skip
   observed: |
-    No session created; list_events was not called against the live API.
+    No session created; list_events was not called against the live API in any run.
     Unit test stub in client_test.exs:54 asserts {:ok, %{"data" => []}}
     which matches the Session reconnect code's pattern match on %{"data" => past}.
-    Real API pagination shape (cursor? has_more?) is not determinable in this run.
+    Real API pagination shape (cursor? has_more?) is not determinable.
   expected: |
     GET /v1/sessions/{id}/events returns %{"data" => [...]} at minimum.
   evidence: |
     test/req_managed_agents/client_test.exs:54 (stub only, not live).
     lib/req_managed_agents/session.ex:84-96 (pattern match on "data").
-    Not determinable live in this run. Requires BUG-2 fix first.
+    Not determinable live. Requires BUG-3 fix first.
 
-- step_id: "B.OQ4"
+- step_id: "C.OQ4"
   status: skip
   observed: |
-    No real SSE stream was opened (no session obtained). SSE decode fidelity
-    against the live API is not determinable.
+    No real SSE stream was opened (no session obtained in any run). SSE decode
+    fidelity against the live API is not determinable.
     From test/support/sse_fixtures.ex:6-8, expected wire format:
       "event: <type>\ndata: <json>\n\n"
     SSE.decode/1 ignores the "event:" line and parses only "data:" lines.
@@ -403,5 +521,5 @@ Whether the live beta uses this exact frame shape, emits additional event types
     test/req_managed_agents/stream_test.exs (Bypass, not live).
     test/support/sse_fixtures.ex wire/1 helper.
     lib/req_managed_agents/sse.ex (decoder source).
-    Not determinable live in this run. Requires BUG-2 fix first.
+    Not determinable live. Requires BUG-3 fix first.
 ```
