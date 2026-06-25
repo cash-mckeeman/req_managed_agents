@@ -9,6 +9,7 @@ defmodule ReqManagedAgents.Stream do
 
   Messages sent to `subscriber`, tagged with the caller-supplied `ref`:
 
+      {:managed_agents, ref, :connected}   # sent once, when the stream attaches, before any event
       {:managed_agents, ref, {:event, decoded_map}}
       {:managed_agents, ref, :done}
       {:managed_agents, ref, {:error, reason}}
@@ -44,6 +45,7 @@ defmodule ReqManagedAgents.Stream do
 
     case Req.get(req) do
       {:ok, %Req.Response{status: status} = resp} when status in 200..299 ->
+        send(subscriber, {:managed_agents, ref, :connected})
         drain(resp, subscriber, ref, "", receive_timeout)
 
       {:ok, %Req.Response{status: status} = resp} ->

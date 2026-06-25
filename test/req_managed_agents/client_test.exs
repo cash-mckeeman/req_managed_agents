@@ -28,7 +28,7 @@ defmodule ReqManagedAgents.ClientTest do
     end)
 
     assert {:ok, %{"id" => "sess_1"}} =
-             Client.create_session(client, %{agent: "agent_1", events: []})
+             Client.create_session(client, %{agent: "agent_1"})
   end
 
   test "send_events/3 posts the events envelope", %{client: client} do

@@ -55,8 +55,8 @@ defmodule ReqManagedAgents.SessionTest do
       conn
     end)
 
-    # the tool result POST back
-    Bypass.expect_once(bypass, "POST", "/v1/sessions/s1/events", fn conn ->
+    # the kickoff user.message POST, then the tool result POST back
+    Bypass.expect(bypass, "POST", "/v1/sessions/s1/events", fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       decoded = Jason.decode!(body)
       send(parent, {:posted, decoded})
@@ -154,7 +154,7 @@ defmodule ReqManagedAgents.SessionTest do
       conn
     end)
 
-    Bypass.expect_once(bypass, "POST", "/v1/sessions/s2/events", fn conn ->
+    Bypass.expect(bypass, "POST", "/v1/sessions/s2/events", fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       send(parent, {:posted, Jason.decode!(body)})
       Req.Test.json(conn, %{"ok" => true})

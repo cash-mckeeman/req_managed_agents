@@ -21,6 +21,7 @@ defmodule ReqManagedAgents.Session do
     :context,
     :notify,
     :session_id,
+    :prompt,
     :stream_ref,
     :consumer,
     tool_uses: %{},
@@ -59,14 +60,10 @@ defmodule ReqManagedAgents.Session do
 
     case opts[:session_id] do
       nil ->
-        body = %{
-          agent: Keyword.fetch!(opts, :agent_id),
-          events: [Event.user_message(opts[:prompt] || "Begin.")]
-        }
-
-        case Client.create_session(client, body) do
+        case Client.create_session(client, %{agent: Keyword.fetch!(opts, :agent_id)}) do
           {:ok, %{"id" => session_id}} ->
-            {:ok, %{state | session_id: session_id}, {:continue, :connect}}
+            {:ok, %{state | session_id: session_id, prompt: opts[:prompt] || "Begin."},
+             {:continue, :connect}}
 
           {:error, reason} ->
             {:stop, {:create_session_failed, reason}}
@@ -97,6 +94,20 @@ defmodule ReqManagedAgents.Session do
   end
 
   @impl true
+  def handle_info({:managed_agents, ref, :connected}, %{stream_ref: ref} = state) do
+    state =
+      case state.prompt do
+        nil ->
+          state
+
+        text ->
+          _ = Client.send_event(state.client, state.session_id, Event.user_message(text))
+          %{state | prompt: nil}
+      end
+
+    {:noreply, state}
+  end
+
   def handle_info({:managed_agents, ref, msg}, %{stream_ref: ref} = state) do
     {:noreply, handle_stream(msg, state)}
   end

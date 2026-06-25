@@ -26,6 +26,8 @@ defmodule ReqManagedAgents.StreamTest do
         Stream.stream(client, "s1", parent, ref: ref, finch: ReqManagedAgents.StreamFinch)
       end)
 
+    assert_receive {:managed_agents, ^ref, :connected}, 2000
+
     assert_receive {:managed_agents, ^ref,
                     {:event, %{"type" => "agent.custom_tool_use", "id" => "u1"}}},
                    2000
