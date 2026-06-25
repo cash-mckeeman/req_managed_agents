@@ -32,11 +32,22 @@ defmodule ReqManagedAgents.Session do
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: opts[:name])
 
+  def child_spec(opts) do
+    %{
+      id: opts[:name] || {__MODULE__, make_ref()},
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :transient
+    }
+  end
+
   @doc "Send a follow-up user message into a running session."
   def message(pid, text), do: GenServer.cast(pid, {:user_message, text})
 
   @impl true
   def init(opts) do
+    # Trap exits so an abnormal SSE-consumer crash arrives as an {:EXIT, ...}
+    # message and drives reconnect, instead of killing this GenServer via the link.
+    Process.flag(:trap_exit, true)
     client = opts[:client] || Client.new()
 
     state = %__MODULE__{
@@ -93,6 +104,21 @@ defmodule ReqManagedAgents.Session do
   def handle_info({:managed_agents, _stale_ref, _msg}, state), do: {:noreply, state}
 
   def handle_info(:do_reconnect, state), do: {:noreply, state, {:continue, :reconnect}}
+
+  # A normal consumer exit means the stream ended cleanly; the next step was
+  # already driven by its :done/{:error,_} message, so ignore.
+  def handle_info({:EXIT, _pid, :normal}, state), do: {:noreply, state}
+
+  # The SSE consumer Task crashed abnormally. The link would otherwise kill us
+  # and bypass reconnect; instead schedule a reconnect with backoff.
+  def handle_info({:EXIT, pid, reason}, %{consumer: pid} = state) do
+    Logger.warning("[req_managed_agents] consumer crashed: #{inspect(reason)}; reconnecting")
+    Process.send_after(self(), :do_reconnect, backoff_ms(state))
+    {:noreply, %{state | reconnect_attempts: state.reconnect_attempts + 1}}
+  end
+
+  # Any other linked exit (parent/supervisor) is a real shutdown signal.
+  def handle_info({:EXIT, _pid, reason}, state), do: {:stop, reason, state}
 
   @impl true
   def handle_cast({:user_message, text}, state) do
@@ -191,6 +217,8 @@ defmodule ReqManagedAgents.Session do
 
   defp start_consumer(state) do
     parent = self()
+    # A fresh stream_ref fences any in-flight messages from a prior consumer:
+    # the {:managed_agents, stale_ref, _} clause drops them, so no kill is needed.
     ref = make_ref()
     client = state.client
 
