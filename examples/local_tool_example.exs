@@ -28,6 +28,7 @@ client = ReqManagedAgents.new()
 # One-time: create the agent (store the id in real apps).
 {:ok, %{"id" => agent_id}} =
   ReqManagedAgents.Client.create_agent(client, %{
+    name: "billing-support",
     model: "claude-opus-4-8",
     system: "You are a concise billing-support agent. Use tools for customer data.",
     tools: [

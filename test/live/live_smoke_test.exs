@@ -17,6 +17,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
 
     {:ok, %{"id" => agent_id}} =
       ReqManagedAgents.Client.create_agent(client, %{
+        name: "req-managed-agents-live-smoke",
         model: "claude-opus-4-8",
         system: "When asked to echo, call the echo tool with the user's text.",
         tools: [
