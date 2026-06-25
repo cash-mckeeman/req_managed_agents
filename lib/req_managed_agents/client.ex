@@ -86,6 +86,7 @@ defmodule ReqManagedAgents.Client do
     do: post(c, "/v1/sessions/#{session_id}/events", %{events: events})
 
   @doc "Convenience for a single event."
+  @impl true
   def send_event(c, session_id, event) when is_map(event),
     do: send_events(c, session_id, [event])
 

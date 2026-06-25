@@ -190,6 +190,10 @@ defmodule ReqManagedAgents.Session do
   defp stash(state, %{"id" => id} = ev),
     do: %{state | tool_uses: Map.put(state.tool_uses, id, ev)}
 
+  # Defensive: an id-less event (only possible via reconnect history, which
+  # `Consolidate.dedupe/2` passes through) is nothing we resolve by id — skip it.
+  defp stash(state, _ev), do: state
+
   # ---- resolve a requires_action pause --------------------------------------
 
   defp resolve(state, ids) do

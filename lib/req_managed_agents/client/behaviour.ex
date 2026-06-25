@@ -21,5 +21,6 @@ defmodule ReqManagedAgents.Client.Behaviour do
   @callback delete_session(Client.t(), String.t()) :: result()
 
   @callback send_events(Client.t(), String.t(), [map()]) :: result()
+  @callback send_event(Client.t(), String.t(), map()) :: result()
   @callback list_events(Client.t(), String.t(), map()) :: result()
 end
