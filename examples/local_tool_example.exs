@@ -1,0 +1,64 @@
+# Headline pattern: a custom tool whose code + data never leave your node.
+# Run with: ANTHROPIC_API_KEY=... mix run examples/local_tool_example.exs
+#
+# This uses a plain-function handler — no Jido. (For Jido, implement the same
+# ReqManagedAgents.Handler callback by delegating to Jido.Action.Tool.execute_action/3.)
+
+defmodule Demo.Handler do
+  @behaviour ReqManagedAgents.Handler
+
+  @impl true
+  def handle_tool_call("lookup_customer", %{"email" => email}, _ctx) do
+    # YOUR private DB; Claude never sees this code or the row.
+    {:ok, "Customer #{email}: Pro plan, active, last invoice $49.00 on 2026-05-01."}
+  end
+
+  @impl true
+  def handle_event(%{"type" => "agent.message"} = ev, _ctx) do
+    IO.inspect(ev["content"], label: "assistant")
+    :ok
+  end
+
+  def handle_event(_ev, _ctx), do: :ok
+end
+
+{:ok, _} = Application.ensure_all_started(:req_managed_agents)
+client = ReqManagedAgents.new()
+
+# One-time: create the agent (store the id in real apps).
+{:ok, %{"id" => agent_id}} =
+  ReqManagedAgents.Client.create_agent(client, %{
+    model: "claude-opus-4-8",
+    system: "You are a concise billing-support agent. Use tools for customer data.",
+    tools: [
+      %{
+        type: "custom",
+        name: "lookup_customer",
+        description:
+          "Look up a customer by email and return plan, status, and last invoice. " <>
+            "Always call this for customer data; never guess.",
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{"email" => %{"type" => "string"}},
+          "required" => ["email"]
+        }
+      }
+    ]
+  })
+
+IO.puts("Created agent #{agent_id}")
+
+{:ok, _pid} =
+  ReqManagedAgents.start_session(
+    client: client,
+    agent_id: agent_id,
+    prompt: "What plan is jane@acme.com on, and when was she last billed?",
+    handler: Demo.Handler,
+    notify: self()
+  )
+
+receive do
+  {:managed_agents_session, terminal} -> IO.puts("session finished: #{terminal}")
+after
+  60_000 -> IO.puts("timed out")
+end
