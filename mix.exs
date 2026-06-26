@@ -36,6 +36,7 @@ defmodule ReqManagedAgents.MixProject do
       {:req, "~> 0.5"},
       {:finch, "~> 0.18"},
       {:jason, "~> 1.4"},
+      {:telemetry, "~> 1.0"},
       # Req.Test (used to stub HTTP in unary tests) needs Plug; Req lists it as
       # optional, so declare it explicitly rather than relying on a transitive dep.
       {:plug, "~> 1.0", only: :test},

@@ -22,11 +22,6 @@ defmodule ReqManagedAgents.RunToCompletion do
         ref = make_ref()
         parent = self()
 
-        {:ok, _task} =
-          Task.start_link(fn -> Stream.stream(client, session_id, parent, ref: ref) end)
-
-        deadline = System.monotonic_time(:millisecond) + timeout
-
         state = %{
           client: client,
           session_id: session_id,
@@ -36,8 +31,19 @@ defmodule ReqManagedAgents.RunToCompletion do
           prompt: opts[:prompt] || "Begin.",
           tool_uses: %{},
           seen: MapSet.new(),
-          events: []
+          events: [],
+          tel: opts[:telemetry_metadata] || %{}
         }
+
+        {:ok, _task} =
+          Task.start_link(fn ->
+            Stream.stream(client, session_id, parent,
+              ref: ref,
+              telemetry_metadata: tel_meta(state)
+            )
+          end)
+
+        deadline = System.monotonic_time(:millisecond) + timeout
 
         loop(state, deadline)
 
@@ -98,6 +104,12 @@ defmodule ReqManagedAgents.RunToCompletion do
         loop(resolve(state, ids), deadline)
 
       terminal when terminal in [:end_turn, :terminated, :error, :retries_exhausted] ->
+        :telemetry.execute(
+          [:req_managed_agents, :session, :terminal],
+          %{},
+          Map.put(tel_meta(state), :terminal, terminal)
+        )
+
         {:ok, %{terminal: terminal, stop_reason: event["stop_reason"], events: state.events}}
 
       _other ->
@@ -111,10 +123,12 @@ defmodule ReqManagedAgents.RunToCompletion do
       |> Enum.map(&{&1, state.tool_uses[&1]})
       |> Enum.filter(fn {_id, ev} -> match?(%{"type" => "agent.custom_tool_use"}, ev) end)
       |> Enum.map(fn {id, %{"name" => name, "input" => input}} ->
-        Tools.run(state.handler, id, name, input, state.context)
+        Tools.run(state.handler, id, name, input, state.context, tel_meta(state))
       end)
 
     if results != [], do: Client.send_events(state.client, state.session_id, results)
     %{state | tool_uses: Map.drop(state.tool_uses, ids)}
   end
+
+  defp tel_meta(s), do: Map.put(s.tel, :session_id, s.session_id)
 end

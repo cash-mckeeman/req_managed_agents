@@ -25,6 +25,7 @@ defmodule ReqManagedAgents.Session do
     :prompt,
     :stream_ref,
     :consumer,
+    telemetry_meta: %{},
     tool_uses: %{},
     seen_ids: MapSet.new(),
     reconnect_attempts: 0
@@ -56,7 +57,8 @@ defmodule ReqManagedAgents.Session do
       client: client,
       handler: Keyword.fetch!(opts, :handler),
       context: opts[:context],
-      notify: opts[:notify]
+      notify: opts[:notify],
+      telemetry_meta: opts[:telemetry_metadata] || %{}
     }
 
     case opts[:session_id] do
@@ -177,6 +179,12 @@ defmodule ReqManagedAgents.Session do
         resolve(state, ids)
 
       terminal when terminal in [:end_turn, :terminated, :error, :retries_exhausted] ->
+        :telemetry.execute(
+          [:req_managed_agents, :session, :terminal],
+          %{},
+          Map.put(tel_meta(state), :terminal, terminal)
+        )
+
         notify(state, terminal)
         maybe_handle_event(state, event)
         %{state | reconnect_attempts: 0}
@@ -216,7 +224,7 @@ defmodule ReqManagedAgents.Session do
   end
 
   defp run_tool(state, id, name, input),
-    do: Tools.run(state.handler, id, name, input, state.context)
+    do: Tools.run(state.handler, id, name, input, state.context, tel_meta(state))
 
   defp redrive_pending(state, past) do
     case Consolidate.pending_requires_action(past) do
@@ -235,10 +243,17 @@ defmodule ReqManagedAgents.Session do
     client = state.client
 
     {:ok, consumer} =
-      Task.start_link(fn -> Stream.stream(client, state.session_id, parent, ref: ref) end)
+      Task.start_link(fn ->
+        Stream.stream(client, state.session_id, parent,
+          ref: ref,
+          telemetry_metadata: tel_meta(state)
+        )
+      end)
 
     %{state | consumer: consumer, stream_ref: ref}
   end
+
+  defp tel_meta(s), do: Map.put(s.telemetry_meta, :session_id, s.session_id)
 
   defp notify(%{notify: nil}, _terminal), do: :ok
   defp notify(%{notify: pid}, terminal), do: send(pid, {:managed_agents_session, terminal})

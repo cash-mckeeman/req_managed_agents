@@ -166,20 +166,22 @@ defmodule ReqManagedAgents.Client do
   # ---- Files (separate beta) -------------------------------------------------
   @impl true
   def upload_file(c, %{purpose: purpose, file: file}) do
-    c
-    |> file_req("/v1/files", file_headers(c, c.files_beta), [])
-    |> Req.post(form_multipart: [purpose: purpose, file: file_part(file)])
-    |> handle()
+    span(:post, "/v1/files", fn ->
+      c
+      |> file_req("/v1/files", file_headers(c, c.files_beta), [])
+      |> Req.post(form_multipart: [purpose: purpose, file: file_part(file)])
+    end)
   end
 
   @impl true
   def download_file(c, file_id) do
     combined = "#{c.files_beta},#{c.beta}"
 
-    c
-    |> file_req("/v1/files/#{file_id}/content", file_headers(c, combined), decode_body: false)
-    |> Req.get()
-    |> handle()
+    span(:get, "/v1/files/#{file_id}/content", fn ->
+      c
+      |> file_req("/v1/files/#{file_id}/content", file_headers(c, combined), decode_body: false)
+      |> Req.get()
+    end)
   end
 
   @impl true
@@ -193,9 +195,24 @@ defmodule ReqManagedAgents.Client do
 
   # ---- HTTP primitives -------------------------------------------------------
 
-  defp post(c, path, body), do: c |> req(path) |> Req.post(json: body) |> handle()
-  defp get(c, path, params \\ %{}), do: c |> req(path) |> Req.get(params: params) |> handle()
-  defp delete(c, path), do: c |> req(path) |> Req.delete() |> handle()
+  defp post(c, path, body),
+    do: span(:post, path, fn -> c |> req(path) |> Req.post(json: body) end)
+
+  defp get(c, path, params \\ %{}),
+    do: span(:get, path, fn -> c |> req(path) |> Req.get(params: params) end)
+
+  defp delete(c, path), do: span(:delete, path, fn -> c |> req(path) |> Req.delete() end)
+
+  defp span(method, path, fun) do
+    :telemetry.span([:req_managed_agents, :request], %{method: method, path: path}, fn ->
+      result = handle(fun.())
+      {result, %{method: method, path: path, status: status_for(result)}}
+    end)
+  end
+
+  defp status_for({:ok, _}), do: 200
+  defp status_for({:error, {:http_error, s, _}}), do: s
+  defp status_for(_), do: nil
 
   defp req(c, path) do
     [
