@@ -138,6 +138,59 @@ defmodule ReqManagedAgents.SessionTest do
     assert_receive {:managed_agents_session, :end_turn}, 3000
   end
 
+  test "resume pages full history via list_all_events before redriving", %{
+    bypass: bypass,
+    client: client
+  } do
+    parent = self()
+
+    Bypass.expect(bypass, "GET", "/v1/sessions/s7/events", fn conn ->
+      conn = Plug.Conn.fetch_query_params(conn)
+
+      case conn.query_params["after_id"] do
+        nil ->
+          Req.Test.json(conn, %{
+            "data" => [%{"id" => "old", "type" => "agent.message"}],
+            "has_more" => true
+          })
+
+        "old" ->
+          Req.Test.json(conn, %{
+            "data" => [
+              custom_tool_use("u1", "lookup", %{"q" => 9}) |> Map.put("id", "u1"),
+              requires_action(["u1"]) |> Map.put("id", "idle1")
+            ],
+            "has_more" => false
+          })
+      end
+    end)
+
+    Bypass.expect_once(bypass, "GET", "/v1/sessions/s7/events/stream", fn conn ->
+      conn = Plug.Conn.send_chunked(conn, 200)
+      Process.sleep(200)
+      {:ok, conn} = Plug.Conn.chunk(conn, wire([end_turn()]))
+      conn
+    end)
+
+    Bypass.expect(bypass, "POST", "/v1/sessions/s7/events", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(parent, {:posted, Jason.decode!(body)})
+      Req.Test.json(conn, %{"ok" => true})
+    end)
+
+    {:ok, _pid} =
+      Session.start_link(
+        client: client,
+        session_id: "s7",
+        handler: EchoHandler,
+        context: %{test_pid: parent},
+        notify: parent
+      )
+
+    assert_receive {:tool_called, "lookup", %{"q" => 9}}, 3000
+    assert_receive {:managed_agents_session, :end_turn}, 3000
+  end
+
   test "a handler {:error, _} posts a tool result with is_error: true", %{
     bypass: bypass,
     client: client

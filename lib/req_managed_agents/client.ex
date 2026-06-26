@@ -102,6 +102,45 @@ defmodule ReqManagedAgents.Client do
   def list_events(c, session_id, params \\ %{}),
     do: get(c, "/v1/sessions/#{session_id}/events", params)
 
+  @page_limit 100
+
+  @doc """
+  Fetch ALL events for a session, paging via `has_more` (limit #{@page_limit}/page).
+
+  Stops on `has_more: false`, an empty page, or no forward progress (a guard
+  against an unknown cursor field). Returns the flat event list.
+  """
+  @impl true
+  def list_all_events(c, session_id, params \\ %{}) do
+    do_list_all(c, session_id, Map.put(params, :limit, @page_limit), [], nil)
+  end
+
+  defp do_list_all(c, session_id, params, acc, last_seen) do
+    params = if last_seen, do: Map.put(params, :after_id, last_seen), else: params
+
+    case list_events(c, session_id, params) do
+      {:ok, %{"data" => page} = body} when is_list(page) ->
+        new_last =
+          case List.last(page) do
+            nil -> nil
+            ev -> ev["id"]
+          end
+
+        cond do
+          page == [] -> {:ok, acc}
+          new_last == last_seen -> {:ok, acc}
+          body["has_more"] != true -> {:ok, acc ++ page}
+          true -> do_list_all(c, session_id, params, acc ++ page, new_last)
+        end
+
+      {:ok, _other} ->
+        {:ok, acc}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
   # ---- HTTP primitives -------------------------------------------------------
 
   defp post(c, path, body), do: c |> req(path) |> Req.post(json: body) |> handle()

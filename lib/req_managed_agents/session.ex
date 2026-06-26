@@ -84,8 +84,8 @@ defmodule ReqManagedAgents.Session do
   def handle_continue(:connect, state), do: {:noreply, start_consumer(state)}
 
   def handle_continue(:reconnect, state) do
-    case Client.list_events(state.client, state.session_id, %{limit: 1000}) do
-      {:ok, %{"data" => past}} ->
+    case Client.list_all_events(state.client, state.session_id) do
+      {:ok, past} ->
         {fresh, seen} = Consolidate.dedupe(past, state.seen_ids)
         state = %{state | seen_ids: seen}
         state = Enum.reduce(fresh, state, &stash(&2, &1))

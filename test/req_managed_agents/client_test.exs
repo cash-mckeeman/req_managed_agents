@@ -106,4 +106,40 @@ defmodule ReqManagedAgents.ClientTest do
 
     assert {:ok, %{"data" => []}} = ReqManagedAgents.Client.list_environments(client)
   end
+
+  test "list_all_events/3 pages through has_more using the last id as cursor" do
+    bypass = Bypass.open()
+
+    client =
+      ReqManagedAgents.Client.new(api_key: "sk", base_url: "http://localhost:#{bypass.port}")
+
+    Bypass.expect(bypass, "GET", "/v1/sessions/s1/events", fn conn ->
+      conn = Plug.Conn.fetch_query_params(conn)
+      assert conn.query_params["limit"] == "100"
+
+      case conn.query_params["after_id"] do
+        nil ->
+          Req.Test.json(conn, %{"data" => [%{"id" => "e1"}, %{"id" => "e2"}], "has_more" => true})
+
+        "e2" ->
+          Req.Test.json(conn, %{"data" => [%{"id" => "e3"}], "has_more" => false})
+      end
+    end)
+
+    assert {:ok, events} = ReqManagedAgents.Client.list_all_events(client, "s1")
+    assert Enum.map(events, & &1["id"]) == ["e1", "e2", "e3"]
+  end
+
+  test "list_all_events/3 stops if a has_more page makes no progress (wrong-cursor guard)" do
+    bypass = Bypass.open()
+
+    client =
+      ReqManagedAgents.Client.new(api_key: "sk", base_url: "http://localhost:#{bypass.port}")
+
+    Bypass.expect(bypass, "GET", "/v1/sessions/s1/events", fn conn ->
+      Req.Test.json(conn, %{"data" => [%{"id" => "e1"}], "has_more" => true})
+    end)
+
+    assert {:ok, [%{"id" => "e1"}]} = ReqManagedAgents.Client.list_all_events(client, "s1")
+  end
 end
