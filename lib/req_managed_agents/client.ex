@@ -127,32 +127,27 @@ defmodule ReqManagedAgents.Client do
   @page_limit 100
 
   @doc """
-  Fetch ALL events for a session, paging via `has_more` (limit #{@page_limit}/page).
-
-  Stops on `has_more: false`, an empty page, or no forward progress (a guard
-  against an unknown cursor field). Returns the flat event list.
+  Fetch ALL events for a session, paging via the API's opaque `next_page` cursor
+  (limit #{@page_limit}/page). Passes the cursor back as the `page` query param;
+  stops when `next_page` is absent/blank, or if a cursor repeats (a guard against
+  a pathological server). Returns the flat event list.
   """
   @impl true
   def list_all_events(c, session_id, params \\ %{}) do
     do_list_all(c, session_id, Map.put(params, :limit, @page_limit), [], nil)
   end
 
-  defp do_list_all(c, session_id, params, acc, last_seen) do
-    params = if last_seen, do: Map.put(params, :after_id, last_seen), else: params
-
+  defp do_list_all(c, session_id, params, acc, last_cursor) do
     case list_events(c, session_id, params) do
       {:ok, %{"data" => page} = body} when is_list(page) ->
-        new_last =
-          case List.last(page) do
-            nil -> nil
-            ev -> ev["id"]
-          end
+        acc = acc ++ page
 
-        cond do
-          page == [] -> {:ok, acc}
-          new_last == last_seen -> {:ok, acc}
-          body["has_more"] != true -> {:ok, acc ++ page}
-          true -> do_list_all(c, session_id, params, acc ++ page, new_last)
+        case body["next_page"] do
+          cursor when is_binary(cursor) and cursor != "" and cursor != last_cursor ->
+            do_list_all(c, session_id, Map.put(params, :page, cursor), acc, cursor)
+
+          _ ->
+            {:ok, acc}
         end
 
       {:ok, _other} ->

@@ -107,7 +107,7 @@ defmodule ReqManagedAgents.ClientTest do
     assert {:ok, %{"data" => []}} = ReqManagedAgents.Client.list_environments(client)
   end
 
-  test "list_all_events/3 pages through has_more using the last id as cursor" do
+  test "list_all_events/3 pages through the next_page cursor" do
     bypass = Bypass.open()
 
     client =
@@ -117,12 +117,15 @@ defmodule ReqManagedAgents.ClientTest do
       conn = Plug.Conn.fetch_query_params(conn)
       assert conn.query_params["limit"] == "100"
 
-      case conn.query_params["after_id"] do
+      case conn.query_params["page"] do
         nil ->
-          Req.Test.json(conn, %{"data" => [%{"id" => "e1"}, %{"id" => "e2"}], "has_more" => true})
+          Req.Test.json(conn, %{
+            "data" => [%{"id" => "e1"}, %{"id" => "e2"}],
+            "next_page" => "cur2"
+          })
 
-        "e2" ->
-          Req.Test.json(conn, %{"data" => [%{"id" => "e3"}], "has_more" => false})
+        "cur2" ->
+          Req.Test.json(conn, %{"data" => [%{"id" => "e3"}]})
       end
     end)
 
@@ -130,17 +133,21 @@ defmodule ReqManagedAgents.ClientTest do
     assert Enum.map(events, & &1["id"]) == ["e1", "e2", "e3"]
   end
 
-  test "list_all_events/3 stops if a has_more page makes no progress (wrong-cursor guard)" do
+  test "list_all_events/3 stops when a next_page cursor repeats (no infinite loop)" do
     bypass = Bypass.open()
 
     client =
       ReqManagedAgents.Client.new(api_key: "sk", base_url: "http://localhost:#{bypass.port}")
 
+    # pathological server: always returns the same next_page cursor
     Bypass.expect(bypass, "GET", "/v1/sessions/s1/events", fn conn ->
-      Req.Test.json(conn, %{"data" => [%{"id" => "e1"}], "has_more" => true})
+      Req.Test.json(conn, %{"data" => [%{"id" => "e1"}], "next_page" => "same"})
     end)
 
-    assert {:ok, [%{"id" => "e1"}]} = ReqManagedAgents.Client.list_all_events(client, "s1")
+    # the cursor-repeat guard stops it after fetching the repeated cursor once,
+    # so it terminates (bounded) rather than looping forever
+    assert {:ok, events} = ReqManagedAgents.Client.list_all_events(client, "s1")
+    assert length(events) == 2
   end
 
   test "upload_file/2 posts multipart to /v1/files with the files beta", %{client: client} do

@@ -147,20 +147,19 @@ defmodule ReqManagedAgents.SessionTest do
     Bypass.expect(bypass, "GET", "/v1/sessions/s7/events", fn conn ->
       conn = Plug.Conn.fetch_query_params(conn)
 
-      case conn.query_params["after_id"] do
+      case conn.query_params["page"] do
         nil ->
           Req.Test.json(conn, %{
             "data" => [%{"id" => "old", "type" => "agent.message"}],
-            "has_more" => true
+            "next_page" => "p2"
           })
 
-        "old" ->
+        "p2" ->
           Req.Test.json(conn, %{
             "data" => [
               custom_tool_use("u1", "lookup", %{"q" => 9}) |> Map.put("id", "u1"),
               requires_action(["u1"]) |> Map.put("id", "idle1")
-            ],
-            "has_more" => false
+            ]
           })
       end
     end)
