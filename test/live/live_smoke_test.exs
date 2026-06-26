@@ -104,7 +104,11 @@ defmodule ReqManagedAgents.LiveSmokeTest do
 
   @tag timeout: 60_000
   @tag :live_files
-  test "file upload -> attach -> download round-trips" do
+  test "file upload -> attach to a session" do
+    # Note: a `purpose: "agent"` file is an INPUT for the agent, not retrievable
+    # via the content endpoint (the API returns "File ... is not downloadable").
+    # download_file/2's wire behavior is covered by the unit suite; here we prove
+    # the live write path: upload then attach to a session.
     {:ok, _} = Application.ensure_all_started(:req_managed_agents)
     client = ReqManagedAgents.new()
 
@@ -114,6 +118,29 @@ defmodule ReqManagedAgents.LiveSmokeTest do
         file: {"note.txt", "hello-from-test"}
       })
 
-    assert {:ok, "hello-from-test"} = ReqManagedAgents.Client.download_file(client, file_id)
+    {:ok, %{"id" => env_id}} =
+      ReqManagedAgents.Client.create_environment(client, %{
+        name: "rma-v02-file",
+        config: %{type: "cloud", networking: %{type: "unrestricted"}}
+      })
+
+    # File resources require the session's agent to have a built-in toolset with
+    # the `read` tool enabled, so declare the built-in agent toolset here.
+    {:ok, %{"id" => agent_id}} =
+      ReqManagedAgents.Client.create_agent(client, %{
+        name: "rma-v02-file",
+        model: "claude-opus-4-8",
+        system: "x",
+        tools: [%{type: "agent_toolset_20260401"}]
+      })
+
+    {:ok, %{"id" => session_id}} =
+      ReqManagedAgents.Client.create_session(client, %{agent: agent_id, environment_id: env_id})
+
+    assert {:ok, _resource} =
+             ReqManagedAgents.Client.attach_file_to_session(client, session_id, %{
+               file_id: file_id,
+               mount_path: "/data/note.txt"
+             })
   end
 end
