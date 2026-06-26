@@ -14,7 +14,7 @@ defmodule ReqManagedAgents.Session do
   use GenServer
   require Logger
 
-  alias ReqManagedAgents.{Client, Consolidate, Event, Stream}
+  alias ReqManagedAgents.{Client, Consolidate, Event, Stream, Tools}
 
   defstruct [
     :client,
@@ -215,17 +215,8 @@ defmodule ReqManagedAgents.Session do
     %{state | tool_uses: Map.drop(state.tool_uses, ids)}
   end
 
-  defp run_tool(state, id, name, input) do
-    try do
-      case state.handler.handle_tool_call(name, input, state.context) do
-        {:ok, text} -> Event.custom_tool_result(id, to_string(text))
-        {:error, text} -> Event.custom_tool_result(id, to_string(text), is_error: true)
-      end
-    catch
-      kind, reason ->
-        Event.custom_tool_result(id, "tool #{kind}: #{inspect(reason)}", is_error: true)
-    end
-  end
+  defp run_tool(state, id, name, input),
+    do: Tools.run(state.handler, id, name, input, state.context)
 
   defp redrive_pending(state, past) do
     case Consolidate.pending_requires_action(past) do
