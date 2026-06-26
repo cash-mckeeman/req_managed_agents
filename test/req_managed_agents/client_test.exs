@@ -142,4 +142,54 @@ defmodule ReqManagedAgents.ClientTest do
 
     assert {:ok, [%{"id" => "e1"}]} = ReqManagedAgents.Client.list_all_events(client, "s1")
   end
+
+  test "upload_file/2 posts multipart to /v1/files with the files beta", %{client: client} do
+    Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+      assert conn.method == "POST"
+      assert conn.request_path == "/v1/files"
+      assert ["files-api-2025-04-14"] = Plug.Conn.get_req_header(conn, "anthropic-beta")
+      [ct] = Plug.Conn.get_req_header(conn, "content-type")
+      assert ct =~ "multipart/form-data"
+      Req.Test.json(conn, %{"id" => "file_1"})
+    end)
+
+    assert {:ok, %{"id" => "file_1"}} =
+             ReqManagedAgents.Client.upload_file(client, %{
+               purpose: "agent",
+               file: {"d.txt", "hello"}
+             })
+  end
+
+  test "download_file/2 sends combined beta and returns raw bytes", %{client: client} do
+    Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+      assert conn.request_path == "/v1/files/file_1/content"
+
+      assert ["files-api-2025-04-14,managed-agents-2026-04-01"] =
+               Plug.Conn.get_req_header(conn, "anthropic-beta")
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/octet-stream")
+      |> Plug.Conn.resp(200, "RAWBYTES")
+    end)
+
+    assert {:ok, "RAWBYTES"} = ReqManagedAgents.Client.download_file(client, "file_1")
+  end
+
+  test "attach_file_to_session/3 posts a file resource", %{client: client} do
+    Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+      assert conn.request_path == "/v1/sessions/s1/resources"
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      assert %{"type" => "file", "file_id" => "file_1", "mount_path" => "/data/d.txt"} =
+               Jason.decode!(body)
+
+      Req.Test.json(conn, %{"id" => "res_1"})
+    end)
+
+    assert {:ok, %{"id" => "res_1"}} =
+             ReqManagedAgents.Client.attach_file_to_session(client, "s1", %{
+               file_id: "file_1",
+               mount_path: "/data/d.txt"
+             })
+  end
 end

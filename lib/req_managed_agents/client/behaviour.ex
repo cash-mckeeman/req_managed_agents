@@ -28,4 +28,8 @@ defmodule ReqManagedAgents.Client.Behaviour do
   @callback send_event(Client.t(), String.t(), map()) :: result()
   @callback list_events(Client.t(), String.t(), map()) :: result()
   @callback list_all_events(Client.t(), String.t(), map()) :: {:ok, [map()]} | {:error, term()}
+
+  @callback upload_file(Client.t(), map()) :: result()
+  @callback download_file(Client.t(), String.t()) :: {:ok, binary()} | {:error, term()}
+  @callback attach_file_to_session(Client.t(), String.t(), map()) :: result()
 end

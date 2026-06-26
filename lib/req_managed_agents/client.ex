@@ -11,12 +11,14 @@ defmodule ReqManagedAgents.Client do
 
   @base_url "https://api.anthropic.com"
   @beta "managed-agents-2026-04-01"
+  @files_beta "files-api-2025-04-14"
   @anthropic_version "2023-06-01"
 
   defstruct [
     :api_key,
     base_url: @base_url,
     beta: @beta,
+    files_beta: @files_beta,
     anthropic_version: @anthropic_version,
     receive_timeout: 60_000,
     req_options: []
@@ -37,6 +39,7 @@ defmodule ReqManagedAgents.Client do
       beta: opts[:beta] || env(:beta) || @beta,
       anthropic_version:
         opts[:anthropic_version] || env(:anthropic_version) || @anthropic_version,
+      files_beta: opts[:files_beta] || env(:files_beta) || @files_beta,
       receive_timeout: opts[:receive_timeout] || env(:receive_timeout) || 60_000,
       req_options: opts[:req_options] || []
     }
@@ -53,6 +56,25 @@ defmodule ReqManagedAgents.Client do
       {"content-type", "application/json"}
     ]
   end
+
+  # Files endpoints use their own beta header (no JSON content-type — multipart sets its own).
+  defp file_headers(c, beta) do
+    [
+      {"x-api-key", c.api_key},
+      {"anthropic-version", c.anthropic_version},
+      {"anthropic-beta", beta}
+    ]
+  end
+
+  defp file_req(c, path, headers, extra) do
+    ([base_url: c.base_url, url: path, headers: headers, receive_timeout: c.receive_timeout] ++
+       extra)
+    |> Req.new()
+    |> Req.merge(c.req_options)
+  end
+
+  defp file_part(path) when is_binary(path), do: File.stream!(path)
+  defp file_part({filename, content}) when is_binary(content), do: {content, filename: filename}
 
   # ---- Agents ----------------------------------------------------------------
   @impl true
@@ -140,6 +162,34 @@ defmodule ReqManagedAgents.Client do
         err
     end
   end
+
+  # ---- Files (separate beta) -------------------------------------------------
+  @impl true
+  def upload_file(c, %{purpose: purpose, file: file}) do
+    c
+    |> file_req("/v1/files", file_headers(c, c.files_beta), [])
+    |> Req.post(form_multipart: [purpose: purpose, file: file_part(file)])
+    |> handle()
+  end
+
+  @impl true
+  def download_file(c, file_id) do
+    combined = "#{c.files_beta},#{c.beta}"
+
+    c
+    |> file_req("/v1/files/#{file_id}/content", file_headers(c, combined), decode_body: false)
+    |> Req.get()
+    |> handle()
+  end
+
+  @impl true
+  def attach_file_to_session(c, session_id, %{file_id: file_id, mount_path: mount_path}),
+    do:
+      post(c, "/v1/sessions/#{session_id}/resources", %{
+        type: "file",
+        file_id: file_id,
+        mount_path: mount_path
+      })
 
   # ---- HTTP primitives -------------------------------------------------------
 
