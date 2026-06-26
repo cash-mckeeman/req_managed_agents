@@ -73,8 +73,28 @@ defmodule ReqManagedAgents.Client do
     |> Req.merge(c.req_options)
   end
 
-  defp file_part(path) when is_binary(path), do: File.stream!(path)
-  defp file_part({filename, content}) when is_binary(content), do: {content, filename: filename}
+  defp file_part(path, content_type) when is_binary(path) do
+    {File.stream!(path),
+     filename: Path.basename(path), content_type: content_type || mime_for(path)}
+  end
+
+  defp file_part({filename, content}, content_type) when is_binary(content) do
+    {content, filename: filename, content_type: content_type || mime_for(filename)}
+  end
+
+  defp mime_for(name) do
+    case name |> Path.extname() |> String.downcase() do
+      ".txt" -> "text/plain"
+      ".csv" -> "text/csv"
+      ".json" -> "application/json"
+      ".md" -> "text/markdown"
+      ".pdf" -> "application/pdf"
+      ".png" -> "image/png"
+      ".jpg" -> "image/jpeg"
+      ".jpeg" -> "image/jpeg"
+      _ -> "application/octet-stream"
+    end
+  end
 
   # ---- Agents ----------------------------------------------------------------
   @impl true
@@ -160,11 +180,13 @@ defmodule ReqManagedAgents.Client do
 
   # ---- Files (separate beta) -------------------------------------------------
   @impl true
-  def upload_file(c, %{purpose: purpose, file: file}) do
+  def upload_file(c, %{purpose: purpose, file: file} = params) do
     span(:post, "/v1/files", fn ->
       c
       |> file_req("/v1/files", file_headers(c, c.files_beta), [])
-      |> Req.post(form_multipart: [purpose: purpose, file: file_part(file)])
+      |> Req.post(
+        form_multipart: [purpose: purpose, file: file_part(file, params[:content_type])]
+      )
     end)
   end
 

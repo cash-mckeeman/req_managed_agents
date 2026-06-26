@@ -150,13 +150,17 @@ defmodule ReqManagedAgents.ClientTest do
     assert length(events) == 2
   end
 
-  test "upload_file/2 posts multipart to /v1/files with the files beta", %{client: client} do
+  test "upload_file/2 posts multipart to /v1/files with the files beta + part content-type",
+       %{client: client} do
     Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
       assert conn.method == "POST"
       assert conn.request_path == "/v1/files"
       assert ["files-api-2025-04-14"] = Plug.Conn.get_req_header(conn, "anthropic-beta")
       [ct] = Plug.Conn.get_req_header(conn, "content-type")
       assert ct =~ "multipart/form-data"
+      {:ok, raw, conn} = Plug.Conn.read_body(conn)
+      # the file PART must declare its own content-type (the API requires mime_type)
+      assert raw =~ "text/plain"
       Req.Test.json(conn, %{"id" => "file_1"})
     end)
 
