@@ -21,12 +21,37 @@ end
 
 See `examples/local_tool_example.exs` for a complete runnable example using a plain-function handler.
 
+For a one-shot synchronous run (no GenServer), use `ReqManagedAgents.run_to_completion/1`, which blocks until a terminal event and returns `{:ok, %{terminal:, stop_reason:, events:}}` (or `{:error, :timeout}`).
+
 ## Layers
 
 - `ReqManagedAgents.Client` — control-plane HTTP (agents, sessions, events).
 - `ReqManagedAgents.SSE` / `ReqManagedAgents.Stream` — the event stream.
 - `ReqManagedAgents.Event` / `ReqManagedAgents.Consolidate` — pure builders, classification, reconnect helpers.
 - `ReqManagedAgents.Session` — optional supervised loop driven by your `Handler`.
+
+## Telemetry
+
+`req_managed_agents` emits `:telemetry` events you can attach to:
+
+| Event | Measurements | Metadata |
+|---|---|---|
+| `[:req_managed_agents, :request, :start \| :stop \| :exception]` | `duration` | `method`, `path`, `status` |
+| `[:req_managed_agents, :stream, :connected \| :event \| :done \| :error]` | — | `session_id`, `type` (event), `usage`, `reason` (error) |
+| `[:req_managed_agents, :tool, :start \| :stop \| :exception]` | `duration` | `tool`, `session_id`, `is_error` |
+| `[:req_managed_agents, :session, :terminal]` | — | `terminal`, `session_id` |
+
+Pass `telemetry_metadata: %{...}` to `start_session/1` or `run_to_completion/1` to merge custom tags (e.g. tenant) into every event. Library-set keys (`session_id`, `type`, `tool`, `terminal`) take precedence over your tags.
+
+## Files
+
+```elixir
+{:ok, %{"id" => file_id}} = ReqManagedAgents.Client.upload_file(client, %{purpose: "agent", file: "report.csv"})
+{:ok, _} = ReqManagedAgents.Client.attach_file_to_session(client, session_id, %{file_id: file_id, mount_path: "/data/report.csv"})
+{:ok, bytes} = ReqManagedAgents.Client.download_file(client, file_id)
+```
+
+The Files API uses its own beta header (`files-api-2025-04-14`); `download_file/2` returns raw bytes.
 
 ## Using with Jido
 

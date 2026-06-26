@@ -20,7 +20,7 @@ defmodule ReqManagedAgents do
   @doc """
   Run a managed-agent session synchronously to completion, returning
   `{:ok, %{terminal:, stop_reason:, events:}}` or `{:error, reason}` (incl.
-  `{:error, :timeout}`). See `ReqManagedAgents.RunToCompletion.run/1`.
+  `{:error, :timeout}`).
 
   Runs in the calling process and **blocks** until a terminal event or the
   `:timeout`, selectively receiving its own stream messages (it leaves unrelated
