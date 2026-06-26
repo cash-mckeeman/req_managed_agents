@@ -76,4 +76,34 @@ defmodule ReqManagedAgents.ClientTest do
     assert {:error, {:http_error, 400, %{"error" => "bad"}}} =
              Client.get_session(client, "sess_x")
   end
+
+  test "archive_agent/2 posts to /v1/agents/{id}/archive", %{client: client} do
+    Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+      assert conn.method == "POST"
+      assert conn.request_path == "/v1/agents/ag_1/archive"
+      Req.Test.json(conn, %{"id" => "ag_1", "archived" => true})
+    end)
+
+    assert {:ok, %{"archived" => true}} = ReqManagedAgents.Client.archive_agent(client, "ag_1")
+  end
+
+  test "archive_environment/2 and archive_session/2 hit their archive paths", %{client: client} do
+    Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+      assert conn.request_path in ["/v1/environments/env_1/archive", "/v1/sessions/s_1/archive"]
+      Req.Test.json(conn, %{"ok" => true})
+    end)
+
+    assert {:ok, _} = ReqManagedAgents.Client.archive_environment(client, "env_1")
+    assert {:ok, _} = ReqManagedAgents.Client.archive_session(client, "s_1")
+  end
+
+  test "list_environments/2 GETs /v1/environments", %{client: client} do
+    Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+      assert conn.method == "GET"
+      assert conn.request_path == "/v1/environments"
+      Req.Test.json(conn, %{"data" => []})
+    end)
+
+    assert {:ok, %{"data" => []}} = ReqManagedAgents.Client.list_environments(client)
+  end
 end

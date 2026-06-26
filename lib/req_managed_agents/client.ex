@@ -63,12 +63,18 @@ defmodule ReqManagedAgents.Client do
   def update_agent(c, id, body), do: post(c, "/v1/agents/#{id}", body)
   @impl true
   def list_agents(c, params \\ %{}), do: get(c, "/v1/agents", params)
+  @impl true
+  def archive_agent(c, id), do: post(c, "/v1/agents/#{id}/archive", %{})
 
   # ---- Environments ----------------------------------------------------------
   @impl true
   def create_environment(c, body), do: post(c, "/v1/environments", body)
   @impl true
   def get_environment(c, id), do: get(c, "/v1/environments/#{id}")
+  @impl true
+  def list_environments(c, params \\ %{}), do: get(c, "/v1/environments", params)
+  @impl true
+  def archive_environment(c, id), do: post(c, "/v1/environments/#{id}/archive", %{})
 
   # ---- Sessions --------------------------------------------------------------
   @impl true
@@ -79,6 +85,8 @@ defmodule ReqManagedAgents.Client do
   def list_sessions(c, params \\ %{}), do: get(c, "/v1/sessions", params)
   @impl true
   def delete_session(c, id), do: delete(c, "/v1/sessions/#{id}")
+  @impl true
+  def archive_session(c, id), do: post(c, "/v1/sessions/#{id}/archive", %{})
 
   # ---- Events ----------------------------------------------------------------
   @impl true

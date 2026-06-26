@@ -14,6 +14,10 @@ defmodule ReqManagedAgents.Client.Behaviour do
 
   @callback create_environment(Client.t(), map()) :: result()
   @callback get_environment(Client.t(), String.t()) :: result()
+  @callback list_environments(Client.t(), map()) :: result()
+  @callback archive_agent(Client.t(), String.t()) :: result()
+  @callback archive_environment(Client.t(), String.t()) :: result()
+  @callback archive_session(Client.t(), String.t()) :: result()
 
   @callback create_session(Client.t(), map()) :: result()
   @callback get_session(Client.t(), String.t()) :: result()
