@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/cash-mckeeman/req_managed_agents"
 
   def project do
@@ -36,6 +36,7 @@ defmodule ReqManagedAgents.MixProject do
       {:req, "~> 0.5"},
       {:finch, "~> 0.18"},
       {:jason, "~> 1.4"},
+      {:telemetry, "~> 1.0"},
       # Req.Test (used to stub HTTP in unary tests) needs Plug; Req lists it as
       # optional, so declare it explicitly rather than relying on a transitive dep.
       {:plug, "~> 1.0", only: :test},

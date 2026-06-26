@@ -14,7 +14,7 @@ defmodule ReqManagedAgents.Session do
   use GenServer
   require Logger
 
-  alias ReqManagedAgents.{Client, Consolidate, Event, Stream}
+  alias ReqManagedAgents.{Client, Consolidate, Event, Stream, Tools}
 
   defstruct [
     :client,
@@ -25,6 +25,7 @@ defmodule ReqManagedAgents.Session do
     :prompt,
     :stream_ref,
     :consumer,
+    telemetry_meta: %{},
     tool_uses: %{},
     seen_ids: MapSet.new(),
     reconnect_attempts: 0
@@ -56,7 +57,8 @@ defmodule ReqManagedAgents.Session do
       client: client,
       handler: Keyword.fetch!(opts, :handler),
       context: opts[:context],
-      notify: opts[:notify]
+      notify: opts[:notify],
+      telemetry_meta: opts[:telemetry_metadata] || %{}
     }
 
     case opts[:session_id] do
@@ -84,8 +86,8 @@ defmodule ReqManagedAgents.Session do
   def handle_continue(:connect, state), do: {:noreply, start_consumer(state)}
 
   def handle_continue(:reconnect, state) do
-    case Client.list_events(state.client, state.session_id, %{limit: 1000}) do
-      {:ok, %{"data" => past}} ->
+    case Client.list_all_events(state.client, state.session_id) do
+      {:ok, past} ->
         {fresh, seen} = Consolidate.dedupe(past, state.seen_ids)
         state = %{state | seen_ids: seen}
         state = Enum.reduce(fresh, state, &stash(&2, &1))
@@ -177,6 +179,12 @@ defmodule ReqManagedAgents.Session do
         resolve(state, ids)
 
       terminal when terminal in [:end_turn, :terminated, :error, :retries_exhausted] ->
+        :telemetry.execute(
+          [:req_managed_agents, :session, :terminal],
+          %{},
+          Map.put(tel_meta(state), :terminal, terminal)
+        )
+
         notify(state, terminal)
         maybe_handle_event(state, event)
         %{state | reconnect_attempts: 0}
@@ -215,17 +223,8 @@ defmodule ReqManagedAgents.Session do
     %{state | tool_uses: Map.drop(state.tool_uses, ids)}
   end
 
-  defp run_tool(state, id, name, input) do
-    try do
-      case state.handler.handle_tool_call(name, input, state.context) do
-        {:ok, text} -> Event.custom_tool_result(id, to_string(text))
-        {:error, text} -> Event.custom_tool_result(id, to_string(text), is_error: true)
-      end
-    catch
-      kind, reason ->
-        Event.custom_tool_result(id, "tool #{kind}: #{inspect(reason)}", is_error: true)
-    end
-  end
+  defp run_tool(state, id, name, input),
+    do: Tools.run(state.handler, id, name, input, state.context, tel_meta(state))
 
   defp redrive_pending(state, past) do
     case Consolidate.pending_requires_action(past) do
@@ -244,10 +243,17 @@ defmodule ReqManagedAgents.Session do
     client = state.client
 
     {:ok, consumer} =
-      Task.start_link(fn -> Stream.stream(client, state.session_id, parent, ref: ref) end)
+      Task.start_link(fn ->
+        Stream.stream(client, state.session_id, parent,
+          ref: ref,
+          telemetry_metadata: tel_meta(state)
+        )
+      end)
 
     %{state | consumer: consumer, stream_ref: ref}
   end
+
+  defp tel_meta(s), do: Map.put(s.telemetry_meta, :session_id, s.session_id)
 
   defp notify(%{notify: nil}, _terminal), do: :ok
   defp notify(%{notify: pid}, terminal), do: send(pid, {:managed_agents_session, terminal})

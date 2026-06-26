@@ -28,6 +28,7 @@ defmodule ReqManagedAgents.Stream do
     ref = opts[:ref] || make_ref()
     finch = opts[:finch] || ReqManagedAgents.StreamFinch
     receive_timeout = opts[:receive_timeout] || :timer.minutes(30)
+    md = opts[:telemetry_metadata] || %{}
 
     url = "#{client.base_url}/v1/sessions/#{session_id}/events/stream"
     headers = Client.headers(client) ++ [{"accept", "text/event-stream"}]
@@ -45,16 +46,31 @@ defmodule ReqManagedAgents.Stream do
 
     case Req.get(req) do
       {:ok, %Req.Response{status: status} = resp} when status in 200..299 ->
+        :telemetry.execute([:req_managed_agents, :stream, :connected], %{}, meta(md, session_id))
         send(subscriber, {:managed_agents, ref, :connected})
-        drain(resp, subscriber, ref, "", receive_timeout)
+        drain(resp, subscriber, ref, "", receive_timeout, session_id, md)
 
       {:ok, %Req.Response{status: status} = resp} ->
         # Drain/cancel the async body so the connection is released, then report.
         Req.cancel_async_response(resp)
-        send(subscriber, {:managed_agents, ref, {:error, {:status, status}}})
+        reason = {:status, status}
+
+        :telemetry.execute(
+          [:req_managed_agents, :stream, :error],
+          %{},
+          meta(md, session_id) |> Map.put(:reason, reason)
+        )
+
+        send(subscriber, {:managed_agents, ref, {:error, reason}})
         :ok
 
       {:error, reason} ->
+        :telemetry.execute(
+          [:req_managed_agents, :stream, :error],
+          %{},
+          meta(md, session_id) |> Map.put(:reason, reason)
+        )
+
         send(subscriber, {:managed_agents, ref, {:error, reason}})
         :ok
     end
@@ -70,44 +86,72 @@ defmodule ReqManagedAgents.Stream do
          subscriber,
          ref,
          buffer,
-         receive_timeout
+         receive_timeout,
+         session_id,
+         md
        ) do
     receive do
       {^async_ref, _} = msg ->
         case Req.parse_message(resp, msg) do
           {:ok, parts} ->
-            {buffer, done?} = handle_parts(parts, subscriber, ref, buffer)
+            {buffer, done?} = handle_parts(parts, subscriber, ref, buffer, session_id, md)
 
             if done? do
+              :telemetry.execute([:req_managed_agents, :stream, :done], %{}, meta(md, session_id))
               send(subscriber, {:managed_agents, ref, :done})
               :ok
             else
-              drain(resp, subscriber, ref, buffer, receive_timeout)
+              drain(resp, subscriber, ref, buffer, receive_timeout, session_id, md)
             end
 
           {:error, reason} ->
             # Release the connection on a mid-stream error, mirroring the
             # non-2xx and idle-timeout paths.
             Req.cancel_async_response(resp)
+
+            :telemetry.execute(
+              [:req_managed_agents, :stream, :error],
+              %{},
+              meta(md, session_id) |> Map.put(:reason, reason)
+            )
+
             send(subscriber, {:managed_agents, ref, {:error, reason}})
             :ok
 
           :unknown ->
-            drain(resp, subscriber, ref, buffer, receive_timeout)
+            drain(resp, subscriber, ref, buffer, receive_timeout, session_id, md)
         end
     after
       receive_timeout ->
         Req.cancel_async_response(resp)
-        send(subscriber, {:managed_agents, ref, {:error, :stream_idle_timeout}})
+        reason = :stream_idle_timeout
+
+        :telemetry.execute(
+          [:req_managed_agents, :stream, :error],
+          %{},
+          meta(md, session_id) |> Map.put(:reason, reason)
+        )
+
+        send(subscriber, {:managed_agents, ref, {:error, reason}})
         :ok
     end
   end
 
-  defp handle_parts(parts, subscriber, ref, buffer) do
+  defp handle_parts(parts, subscriber, ref, buffer, session_id, md) do
     Enum.reduce(parts, {buffer, false}, fn
       {:data, chunk}, {buf, done?} ->
         {events, rest} = SSE.decode(buf <> chunk)
-        Enum.each(events, &send(subscriber, {:managed_agents, ref, {:event, &1}}))
+
+        Enum.each(events, fn ev ->
+          :telemetry.execute(
+            [:req_managed_agents, :stream, :event],
+            %{},
+            meta(md, session_id) |> Map.put(:type, ev["type"]) |> maybe_usage(ev)
+          )
+
+          send(subscriber, {:managed_agents, ref, {:event, ev}})
+        end)
+
         {rest, done?}
 
       :done, {buf, _done?} ->
@@ -117,4 +161,8 @@ defmodule ReqManagedAgents.Stream do
         acc
     end)
   end
+
+  defp meta(md, session_id), do: Map.merge(md, %{session_id: session_id})
+  defp maybe_usage(m, %{"usage" => u}), do: Map.put(m, :usage, u)
+  defp maybe_usage(m, _), do: m
 end
