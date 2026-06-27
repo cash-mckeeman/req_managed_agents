@@ -18,6 +18,16 @@ defmodule ReqManagedAgents.ClientTest do
     assert c.anthropic_version == "2023-06-01"
   end
 
+  test "new/1 defaults profile to :anthropic" do
+    c = Client.new(api_key: "sk-x")
+    assert c.profile == :anthropic
+  end
+
+  test "new/1 accepts profile: :jido" do
+    c = Client.new(api_key: "sk-x", profile: :jido)
+    assert c.profile == :jido
+  end
+
   test "create_session/2 posts to /v1/sessions and returns the body", %{client: client} do
     Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
       assert conn.method == "POST"
