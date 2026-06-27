@@ -27,4 +27,22 @@ defmodule ReqManagedAgents.ToolsTest do
     ev = Tools.run(H, "u1", "boom", %{}, nil)
     assert ev["is_error"] == true
   end
+
+  test "run/5 accepts a bare 3-arity fn handler (not only a module)" do
+    fun = fn name, input, _ctx -> {:ok, "ran:#{name}:#{inspect(input)}"} end
+    ev = Tools.run(fun, "u1", "echo", %{"x" => 1}, nil)
+    assert ev["type"] == "user.custom_tool_result"
+    assert ev["custom_tool_use_id"] == "u1"
+    assert ev["is_error"] == false
+    text = ev["content"] |> List.first() |> Map.get("text")
+    assert text =~ "ran:echo"
+  end
+
+  test "run/5 fn handler returning {:error, _} produces is_error result" do
+    fun = fn _name, _input, _ctx -> {:error, "fn-error"} end
+    ev = Tools.run(fun, "u2", "tool", %{}, nil)
+    assert ev["is_error"] == true
+    text = ev["content"] |> List.first() |> Map.get("text")
+    assert text == "fn-error"
+  end
 end
