@@ -259,7 +259,10 @@ defmodule ReqManagedAgents.Session do
   defp notify(%{notify: pid}, terminal), do: send(pid, {:managed_agents_session, terminal})
 
   defp maybe_handle_event(state, event) do
-    if function_exported?(state.handler, :handle_event, 2) do
+    # A handler may be a module (optional `handle_event/2`) or a bare 3-arity
+    # tool-dispatch fn (no `handle_event`); guard `is_atom/1` so a fn handler
+    # doesn't raise in `function_exported?/3`.
+    if is_atom(state.handler) and function_exported?(state.handler, :handle_event, 2) do
       state.handler.handle_event(event, state.context)
     end
 
