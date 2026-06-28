@@ -14,6 +14,28 @@ defmodule ReqManagedAgents.AgentCore do
   alias ReqManagedAgents.AgentCore.{Client, Converse}
   alias ReqManagedAgents.Tools
 
+  @doc """
+  Drive an AgentCore Harness to completion: invoke → on `tool_use` run inline tools
+  via `:handler` → resume with BOTH the assistant `toolUse` and user `toolResult` →
+  loop until a terminal stop or a stopping condition.
+
+  **Required opts:** `:handler` — `(name, input, ctx) -> {:ok, text} | {:error, text}`;
+  `:harness_id`; `:runtime_session_id`.
+
+  **Optional opts:**
+  - `:prompt` — initial user message text (default `"Begin."`).
+  - `:context` — forwarded to `:handler` on every tool call.
+  - `:max_turns` — max `invoke_fun` calls (one per loop iteration); returns
+    `{:error, {:max_turns_exceeded, max_turns}}` when exceeded (default 50).
+  - `:timeout` — milliseconds (default 600_000). Checked at each loop entry.
+  - `:invoke_fun` — injectable test seam; defaults to `AgentCore.Client.invoke_harness/2`.
+  - `:model`, `:telemetry_metadata` — forwarded to the client / telemetry span.
+
+  Returns `{:ok, %{terminal: atom(), stop_reason: String.t(), events: [map()]}}` on
+  clean exit or `{:error, reason}` on timeout, max-turns exceeded, or a client error.
+  `terminal: :end_turn` = clean stop; `terminal: :terminated` = abnormal or unknown stop
+  (`:max_tokens`, `:guardrail_intervened`, or any unrecognised stop reason).
+  """
   @spec invoke_to_completion(keyword()) :: {:ok, map()} | {:error, term()}
   def invoke_to_completion(opts) do
     handler = Keyword.fetch!(opts, :handler)
@@ -21,6 +43,7 @@ defmodule ReqManagedAgents.AgentCore do
     sid = Keyword.fetch!(opts, :runtime_session_id)
     harness_id = Keyword.fetch!(opts, :harness_id)
     timeout = opts[:timeout] || 600_000
+    max_turns = opts[:max_turns] || 50
     invoke_fun = opts[:invoke_fun] || default_invoke_fun(opts)
     meta = opts[:telemetry_metadata] || %{}
 
@@ -36,7 +59,9 @@ defmodule ReqManagedAgents.AgentCore do
         invoke_fun: invoke_fun,
         model: opts[:model],
         meta: meta,
-        events: []
+        events: [],
+        turns: 0,
+        max_turns: max_turns
       },
       [user_msg],
       deadline
@@ -44,27 +69,36 @@ defmodule ReqManagedAgents.AgentCore do
   end
 
   defp loop(state, messages, deadline) do
-    if System.monotonic_time(:millisecond) > deadline do
-      {:error, :timeout}
-    else
-      inv = %{
-        harness_id: state.harness_id,
-        runtime_session_id: state.sid,
-        messages: messages,
-        model: state.model,
-        handler: state.handler,
-        context: state.context
-      }
+    cond do
+      state.turns >= state.max_turns ->
+        {:error, {:max_turns_exceeded, state.max_turns}}
 
-      case state.invoke_fun.(inv) do
-        {:ok, events} ->
-          parsed = Converse.parse(events)
-          state = %{state | events: state.events ++ events}
-          handle(state, parsed, deadline)
+      # Deadline is checked at iteration entry; a single slow invoke_fun call can
+      # overshoot by up to the client's receive_timeout (soft ceiling, not hard).
+      System.monotonic_time(:millisecond) > deadline ->
+        {:error, :timeout}
 
-        {:error, reason} ->
-          {:error, reason}
-      end
+      true ->
+        state = %{state | turns: state.turns + 1}
+
+        inv = %{
+          harness_id: state.harness_id,
+          runtime_session_id: state.sid,
+          messages: messages,
+          model: state.model,
+          handler: state.handler,
+          context: state.context
+        }
+
+        case state.invoke_fun.(inv) do
+          {:ok, events} ->
+            parsed = Converse.parse(events)
+            state = %{state | events: state.events ++ events}
+            handle(state, parsed, deadline)
+
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
   end
 
@@ -98,7 +132,7 @@ defmodule ReqManagedAgents.AgentCore do
   defp terminal_atom("stop_sequence"), do: :end_turn
   defp terminal_atom("max_tokens"), do: :terminated
   defp terminal_atom("guardrail_intervened"), do: :terminated
-  defp terminal_atom(_other), do: :end_turn
+  defp terminal_atom(_other), do: :terminated
 
   defp default_invoke_fun(opts) do
     client = opts[:client] || Client.new()

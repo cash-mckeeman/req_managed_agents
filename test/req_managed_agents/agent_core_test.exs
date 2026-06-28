@@ -81,4 +81,53 @@ defmodule ReqManagedAgents.AgentCoreTest do
                invoke_fun: invoke_fun
              )
   end
+
+  test "maps an unknown stop reason to :terminated" do
+    invoke_fun = fn _ -> {:ok, [%{"messageStop" => %{"stopReason" => "content_blocked"}}]} end
+
+    assert {:ok, %{terminal: :terminated, stop_reason: "content_blocked"}} =
+             AgentCore.invoke_to_completion(
+               handler: fn _, _, _ -> {:ok, ""} end,
+               context: %{},
+               harness_id: "ba",
+               runtime_session_id: "s1",
+               prompt: "begin",
+               invoke_fun: invoke_fun
+             )
+  end
+
+  test "returns {:error, {:max_turns_exceeded, n}} when tool_use never terminates" do
+    handler = fn "echo", %{"text" => t}, _ctx -> {:ok, "echoed: #{t}"} end
+
+    invoke_fun = fn _ ->
+      {:ok,
+       [
+         %{
+           "contentBlockStart" => %{
+             "contentBlockIndex" => 0,
+             "start" => %{"toolUse" => %{"toolUseId" => "tu_1", "name" => "echo"}}
+           }
+         },
+         %{
+           "contentBlockDelta" => %{
+             "contentBlockIndex" => 0,
+             "delta" => %{"toolUse" => %{"input" => "{\"text\":\"hi\"}"}}
+           }
+         },
+         %{"messageStop" => %{"stopReason" => "tool_use"}}
+       ]}
+    end
+
+    assert {:error, {:max_turns_exceeded, 3}} =
+             AgentCore.invoke_to_completion(
+               handler: handler,
+               context: %{},
+               harness_id: "ba",
+               runtime_session_id: "s1",
+               prompt: "begin",
+               invoke_fun: invoke_fun,
+               max_turns: 3,
+               timeout: 2_000
+             )
+  end
 end
