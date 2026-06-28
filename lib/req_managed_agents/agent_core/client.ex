@@ -38,10 +38,11 @@ defmodule ReqManagedAgents.AgentCore.Client do
   @spec create_harness(t(), map()) :: {:ok, map()} | {:error, term()}
   def create_harness(c, spec) do
     body = %{
-      "name" => spec.name,
-      "instruction" => spec.system_prompt,
-      "tools" => spec.tools,
-      "model" => spec.model
+      "harnessName" => spec.name,
+      "executionRoleArn" => spec.execution_role_arn,
+      "systemPrompt" => spec.system_prompt,
+      "model" => spec.model,
+      "tools" => spec.tools
     }
 
     span(c, :post, "/harnesses", :create_harness, fn -> post_json(c, "/harnesses", body) end)
@@ -66,24 +67,50 @@ defmodule ReqManagedAgents.AgentCore.Client do
       end)
 
   @doc """
-  Data-plane `InvokeHarness`. Posts `messages` on a `runtimeSessionId` and returns
-  the decoded event-stream maps. Resume is just another call with the resume
-  messages (the profile assembles them).
+  Data-plane `InvokeHarness`. Sends `messages` with `harnessArn` in the query
+  string and the required `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` header.
+  Returns the decoded event-stream maps. Resume is just another call with the
+  resume messages (the profile assembles them).
+
+  Note: AWS requires `runtimeSessionId` to be at least 33 characters long
+  (pattern `[a-zA-Z0-9][a-zA-Z0-9-_]*`, max 100). The client passes it through
+  as-is — the caller is responsible for supplying a conforming value.
   """
   @spec invoke_harness(t(), map()) :: {:ok, [map()]} | {:error, term()}
-  def invoke_harness(c, %{harness_id: id, runtime_session_id: sid, messages: messages} = inv) do
-    path = "/harnesses/#{id}/invocations"
+  def invoke_harness(c, %{harness_arn: arn, runtime_session_id: sid, messages: messages} = inv) do
+    path = "/harnesses/invoke"
 
     span(c, :post, path, :invoke_harness, fn ->
       body =
-        %{"runtimeSessionId" => sid, "messages" => messages}
+        %{"messages" => messages}
         |> maybe_put("model", inv[:model])
         |> maybe_put("systemPrompt", inv[:system_prompt])
 
-      url = c.base_url <> path
+      qs_params =
+        [{"harnessArn", arn}] ++
+          if(inv[:qualifier], do: [{"qualifier", inv[:qualifier]}], else: [])
+
+      url = c.base_url <> path <> "?" <> URI.encode_query(qs_params)
       json = Jason.encode!(body)
 
-      case raw_post(c, url, json, decode_body: false) do
+      base_headers =
+        [
+          {"content-type", "application/json"},
+          {"X-Amzn-Bedrock-AgentCore-Runtime-Session-Id", sid}
+        ] ++
+          if(inv[:runtime_user_id],
+            do: [{"X-Amzn-Bedrock-AgentCore-Runtime-User-Id", inv[:runtime_user_id]}],
+            else: []
+          )
+
+      headers =
+        SigV4.sign_request(:post, url, json,
+          service: c.service,
+          credentials: c.credentials,
+          headers: base_headers
+        )
+
+      case request(c, :post, url, headers, json, decode_body: false) do
         {:ok, %{status: s, body: raw}} when s in 200..299 ->
           {events, _rest} = EventStream.decode(raw)
           {:ok, events}

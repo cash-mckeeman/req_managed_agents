@@ -51,7 +51,7 @@ defmodule ReqManagedAgents.AgentCoreTest do
              AgentCore.invoke_to_completion(
                handler: handler,
                context: %{},
-               harness_id: "ba",
+               harness_arn: "ba",
                runtime_session_id: "s1",
                prompt: "begin",
                invoke_fun: invoke_fun,
@@ -75,7 +75,7 @@ defmodule ReqManagedAgents.AgentCoreTest do
              AgentCore.invoke_to_completion(
                handler: fn _, _, _ -> {:ok, ""} end,
                context: %{},
-               harness_id: "ba",
+               harness_arn: "ba",
                runtime_session_id: "s1",
                prompt: "begin",
                invoke_fun: invoke_fun
@@ -89,7 +89,7 @@ defmodule ReqManagedAgents.AgentCoreTest do
              AgentCore.invoke_to_completion(
                handler: fn _, _, _ -> {:ok, ""} end,
                context: %{},
-               harness_id: "ba",
+               harness_arn: "ba",
                runtime_session_id: "s1",
                prompt: "begin",
                invoke_fun: invoke_fun
@@ -122,7 +122,7 @@ defmodule ReqManagedAgents.AgentCoreTest do
              AgentCore.invoke_to_completion(
                handler: handler,
                context: %{},
-               harness_id: "ba",
+               harness_arn: "ba",
                runtime_session_id: "s1",
                prompt: "begin",
                invoke_fun: invoke_fun,

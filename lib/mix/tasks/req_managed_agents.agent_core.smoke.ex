@@ -19,8 +19,8 @@ defmodule Mix.Tasks.ReqManagedAgents.AgentCore.Smoke do
      `authorization` + `x-amz-date` headers.
   2. **EventStream multi-frame + remainder** — decode two complete frames and a
      5-byte truncated third; expect 2 messages and a non-empty remainder.
-  3. **Converse.inline_function shape** — a NimbleOptions schema maps to an
-     `inlineFunction.inputSchema.json` with the expected property.
+  3. **Converse.inline_function shape** — a NimbleOptions schema maps to a
+     `config.inlineFunction.inputSchema` (bare JSON Schema, no `json` wrapper) with the expected property.
   4. **SigV4 signed** — every `invoke_harness` request carried an
      `AWS4-HMAC-SHA256` Authorization header.
   5. **tool_use decoded+parsed** — the loop actually ran the tool (the resume
@@ -100,8 +100,8 @@ defmodule Mix.Tasks.ReqManagedAgents.AgentCore.Smoke do
       AgentCore.invoke_to_completion(
         handler: fn "echo", %{"text" => t}, _ctx -> {:ok, "echoed: #{t}"} end,
         context: %{},
-        harness_id: "ba",
-        runtime_session_id: "s1",
+        harness_arn: "arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/ba",
+        runtime_session_id: "smoke-session-id-long-enough-for-min-33-chars",
         prompt: "begin",
         client: client,
         timeout: 5_000
@@ -175,11 +175,11 @@ defmodule Mix.Tasks.ReqManagedAgents.AgentCore.Smoke do
       Converse.inline_function("echo", "Echo tool", topic: [type: :string, required: true])
 
     topic_type =
-      get_in(result, ["inlineFunction", "inputSchema", "json", "properties", "topic", "type"])
+      get_in(result, ["config", "inlineFunction", "inputSchema", "properties", "topic", "type"])
 
     if topic_type == "string" do
       {"Converse.inline_function shape", :pass,
-       "inlineFunction.inputSchema.json has topic property with type \"string\""}
+       "config.inlineFunction.inputSchema has topic property with type \"string\" (bare JSON Schema)"}
     else
       {"Converse.inline_function shape", :fail, "got topic type: #{inspect(topic_type)}"}
     end
