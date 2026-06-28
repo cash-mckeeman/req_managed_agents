@@ -27,7 +27,7 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
       decoded = Jason.decode!(body)
       assert decoded["harnessName"] == "ba"
       assert decoded["executionRoleArn"] =~ "arn:aws:iam"
-      assert decoded["systemPrompt"] == "be helpful"
+      assert decoded["systemPrompt"] == [%{"text" => "be helpful"}]
       assert [_ | _] = decoded["tools"]
 
       conn

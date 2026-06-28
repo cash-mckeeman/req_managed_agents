@@ -44,16 +44,39 @@ defmodule ReqManagedAgents.AgentCore.EventStreamTest do
     assert get_in(msg, ["messageStop", "stopReason"]) == "tool_use"
   end
 
-  test "skips non-empty headers and decodes payload correctly (proves header-parsing port)" do
-    # Build a frame with a real :event-type string header (type 7 per AWS wire format).
-    # The binary-pattern slices headers_len bytes for headers regardless of content,
-    # and parse_headers/1 (ported from req_llm) correctly walks name/type/value triples.
-    headers_bin = str_header(":event-type", "contentBlockDelta")
-    payload = ~s({"type":"contentBlockDelta","delta":{"text":"hello"}})
+  test ":event-type header wraps the unwrapped payload under the event-type key" do
+    # The real AgentCore Converse stream delivers UNWRAPPED payloads — the outer
+    # event-type key is NOT in the JSON body; it lives in the frame's :event-type
+    # header. decode/1 must wrap each payload as %{event_type => payload} so that
+    # Converse.parse/1 sees the expected envelope shape.
+    headers_bin = str_header(":event-type", "contentBlockStart")
+    payload = ~s({"contentBlockIndex":0,"start":{"toolUse":{"toolUseId":"t1","name":"echo"}}})
     f = frame_with_headers(headers_bin, payload)
     assert {[msg], ""} = EventStream.decode(f)
-    assert msg["type"] == "contentBlockDelta"
-    assert get_in(msg, ["delta", "text"]) == "hello"
+    # The outer key is the event type from the header; value is the unwrapped payload.
+    assert Map.keys(msg) == ["contentBlockStart"]
+    assert get_in(msg, ["contentBlockStart", "start", "toolUse", "name"]) == "echo"
+  end
+
+  test "frame with :event-type header — payload type in header, not in body" do
+    # Second example: contentBlockDelta — payload has no outer event-type wrapper.
+    headers_bin = str_header(":event-type", "contentBlockDelta")
+    payload = ~s({"contentBlockIndex":0,"delta":{"text":"hello"}})
+    f = frame_with_headers(headers_bin, payload)
+    assert {[msg], ""} = EventStream.decode(f)
+    assert Map.keys(msg) == ["contentBlockDelta"]
+    assert get_in(msg, ["contentBlockDelta", "delta", "text"]) == "hello"
+  end
+
+  test "frame without :event-type header passes payload through unwrapped (exception / legacy)" do
+    # Frames that carry no :event-type header (e.g. :exception-type frames, or
+    # zero-header frames) pass through as-is — the JSON payload is returned directly.
+    headers_bin = str_header(":exception-type", "ValidationException")
+    payload = ~s({"message":"bad input"})
+    f = frame_with_headers(headers_bin, payload)
+    assert {[msg], ""} = EventStream.decode(f)
+    # No wrapping — exception frames pass through as-is.
+    assert msg["message"] == "bad input"
   end
 
   test "drops frame with corrupted message CRC (no decoded message returned)" do
