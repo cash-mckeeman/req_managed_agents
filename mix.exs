@@ -42,7 +42,7 @@ defmodule ReqManagedAgents.MixProject do
       {:plug, "~> 1.0", only: :test},
       # Bypass runs a real chunked HTTP server for the SSE Stream/Session tests.
       {:bypass, "~> 2.1", only: :test},
-      {:ex_aws_auth, "~> 1.4"},
+      {:ex_aws_auth, "~> 1.4", optional: true},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end
