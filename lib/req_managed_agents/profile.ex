@@ -10,7 +10,9 @@ defmodule ReqManagedAgents.Profile do
 
   @spec tool_use(t(), map()) :: {String.t(), map()}
   def tool_use(:anthropic, %{"name" => name, "input" => input}), do: {name, input}
-  def tool_use(:jido, %{"content" => [%{"name" => name, "payload" => input} | _]}), do: {name, input}
+
+  def tool_use(:jido, %{"content" => [%{"name" => name, "payload" => input} | _]}),
+    do: {name, input}
 
   @spec events_stream_path(t(), String.t()) :: String.t()
   def events_stream_path(:anthropic, sid), do: "/v1/sessions/#{sid}/stream"
@@ -22,7 +24,10 @@ defmodule ReqManagedAgents.Profile do
   """
   @spec terminal?(t(), map(), boolean()) :: ReqManagedAgents.Event.terminal() | false
   def terminal?(:anthropic, event, _seen?), do: anthropic_terminal(event)
-  def terminal?(:jido, %{"type" => "session.status_idle", "stop_reason" => nil}, true), do: :end_turn
+
+  def terminal?(:jido, %{"type" => "session.status_idle", "stop_reason" => nil}, true),
+    do: :end_turn
+
   def terminal?(:jido, %{"type" => "session.status_idle", "stop_reason" => nil}, false), do: false
   def terminal?(:jido, event, _seen?), do: anthropic_terminal(event)
 

@@ -15,7 +15,12 @@ defmodule ReqManagedAgents.ProvisionerTest do
       {:ok, %{agent_id: "ag_1", environment_id: "env_1"}}
     end
 
-    spec = %{system_prompt: "sys", tools: [%{"name" => "t"}], terminal_tool: "t", model: "claude-sonnet-4-6"}
+    spec = %{
+      system_prompt: "sys",
+      tools: [%{"name" => "t"}],
+      terminal_tool: "t",
+      model: "claude-sonnet-4-6"
+    }
 
     assert {:ok, %{agent_id: "ag_1", environment_id: "env_1"}} = Provisioner.ensure(spec, create)
     assert {:ok, %{agent_id: "ag_1", environment_id: "env_1"}} = Provisioner.ensure(spec, create)
@@ -23,7 +28,10 @@ defmodule ReqManagedAgents.ProvisionerTest do
   end
 
   test "a changed spec re-provisions (different hash)" do
-    create = fn _ -> {:ok, %{agent_id: "ag_#{:erlang.unique_integer([:positive])}", environment_id: "env"}} end
+    create = fn _ ->
+      {:ok, %{agent_id: "ag_#{:erlang.unique_integer([:positive])}", environment_id: "env"}}
+    end
+
     s1 = %{system_prompt: "a", tools: [], terminal_tool: nil, model: "claude-sonnet-4-6"}
     s2 = %{s1 | system_prompt: "b"}
     assert {:ok, %{agent_id: a1}} = Provisioner.ensure(s1, create)
