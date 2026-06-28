@@ -20,10 +20,13 @@ defmodule ReqManagedAgents.AgentCore.Converse do
     custom = ToolSchema.to_custom_tool(name, description, jido_schema)
 
     %{
-      "inlineFunction" => %{
-        "name" => name,
-        "description" => description,
-        "inputSchema" => %{"json" => custom["input_schema"]}
+      "type" => "inline_function",
+      "name" => name,
+      "config" => %{
+        "inlineFunction" => %{
+          "description" => description,
+          "inputSchema" => custom["input_schema"]
+        }
       }
     }
   end

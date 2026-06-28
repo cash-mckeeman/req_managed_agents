@@ -24,7 +24,11 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
                Enum.find(conn.req_headers, fn {k, _} -> k == "authorization" end)
 
       {:ok, body, conn} = Plug.Conn.read_body(conn)
-      assert %{"name" => "ba", "instruction" => _, "tools" => [_ | _]} = Jason.decode!(body)
+      decoded = Jason.decode!(body)
+      assert decoded["harnessName"] == "ba"
+      assert decoded["executionRoleArn"] =~ "arn:aws:iam"
+      assert decoded["systemPrompt"] == "be helpful"
+      assert [_ | _] = decoded["tools"]
 
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
@@ -36,8 +40,17 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
 
     spec = %{
       name: "ba",
+      execution_role_arn: "arn:aws:iam::123456789012:role/AgentCoreRole",
       system_prompt: "be helpful",
-      tools: [%{"inlineFunction" => %{"name" => "echo"}}],
+      tools: [
+        %{
+          "type" => "inline_function",
+          "name" => "echo",
+          "config" => %{
+            "inlineFunction" => %{"description" => "echo", "inputSchema" => %{"type" => "object"}}
+          }
+        }
+      ],
       model: %{"bedrockModelConfig" => %{"modelId" => "anthropic.claude-sonnet-4"}}
     }
 
@@ -64,17 +77,28 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
     assert arn =~ "token-vault/default/apikeycredentialprovider/"
   end
 
-  test "invoke_harness posts to the runtime invocations path and decodes the event stream", %{
-    bypass: bypass,
-    client: client
-  } do
+  test "invoke_harness posts to /harnesses/invoke with harnessArn in query string and session-id header",
+       %{bypass: bypass, client: client} do
     payload = ~s({"messageStop":{"stopReason":"end_turn"}})
     headers = <<>>
     prelude = <<12 + byte_size(headers) + byte_size(payload) + 4::32, byte_size(headers)::32>>
     frame = prelude <> <<:erlang.crc32(prelude)::32>> <> headers <> payload
     frame = frame <> <<:erlang.crc32(frame)::32>>
 
-    Bypass.expect_once(bypass, "POST", "/harnesses/ba/invocations", fn conn ->
+    test_arn = "arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/ba"
+    test_sid = "test-session-id-long-enough-to-satisfy-min-length-33"
+
+    Bypass.expect_once(bypass, "POST", "/harnesses/invoke", fn conn ->
+      assert conn.query_string =~ "harnessArn="
+
+      assert {"x-amzn-bedrock-agentcore-runtime-session-id", ^test_sid} =
+               Enum.find(conn.req_headers, fn {k, _} ->
+                 k == "x-amzn-bedrock-agentcore-runtime-session-id"
+               end)
+
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      assert %{"messages" => [_ | _]} = Jason.decode!(body)
+
       conn
       |> Plug.Conn.put_resp_content_type("application/vnd.amazon.eventstream")
       |> Plug.Conn.resp(200, frame)
@@ -82,8 +106,8 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
 
     assert {:ok, [%{"messageStop" => %{"stopReason" => "end_turn"}}]} =
              Client.invoke_harness(client, %{
-               harness_id: "ba",
-               runtime_session_id: "s1",
+               harness_arn: test_arn,
+               runtime_session_id: test_sid,
                messages: [%{"role" => "user", "content" => [%{"text" => "hi"}]}]
              })
   end
@@ -125,7 +149,7 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
   } do
     counter = :counters.new(1, [])
 
-    Bypass.stub(bypass, "POST", "/harnesses/h1/invocations", fn conn ->
+    Bypass.stub(bypass, "POST", "/harnesses/invoke", fn conn ->
       :counters.add(counter, 1, 1)
 
       conn
@@ -135,8 +159,8 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
 
     assert {:error, {:http_error, 500, _}} =
              Client.invoke_harness(client, %{
-               harness_id: "h1",
-               runtime_session_id: "s1",
+               harness_arn: "arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/h1",
+               runtime_session_id: "test-session-id-long-enough-to-satisfy-min-33",
                messages: [%{"role" => "user", "content" => [%{"text" => "hi"}]}]
              })
 

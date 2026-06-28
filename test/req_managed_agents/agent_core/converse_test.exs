@@ -3,15 +3,16 @@ defmodule ReqManagedAgents.AgentCore.ConverseTest do
   alias ReqManagedAgents.AgentCore.Converse
 
   describe "inline_function tool specs" do
-    test "Jido schema → inlineFunction tool spec" do
+    test "Jido schema → HarnessTool shape (GA contract)" do
       jido_schema = [topic: [type: :string, required: true, doc: "the subject"]]
 
       assert Converse.inline_function("query_external_context", "Query KB", jido_schema) == %{
-               "inlineFunction" => %{
-                 "name" => "query_external_context",
-                 "description" => "Query KB",
-                 "inputSchema" => %{
-                   "json" => %{
+               "type" => "inline_function",
+               "name" => "query_external_context",
+               "config" => %{
+                 "inlineFunction" => %{
+                   "description" => "Query KB",
+                   "inputSchema" => %{
                      "type" => "object",
                      "properties" => %{
                        "topic" => %{"type" => "string", "description" => "the subject"}

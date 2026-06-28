@@ -20,7 +20,7 @@ defmodule ReqManagedAgents.AgentCore do
   loop until a terminal stop or a stopping condition.
 
   **Required opts:** `:handler` — `(name, input, ctx) -> {:ok, text} | {:error, text}`;
-  `:harness_id`; `:runtime_session_id`.
+  `:harness_arn`; `:runtime_session_id`.
 
   **Optional opts:**
   - `:prompt` — initial user message text (default `"Begin."`).
@@ -41,7 +41,7 @@ defmodule ReqManagedAgents.AgentCore do
     handler = Keyword.fetch!(opts, :handler)
     context = opts[:context]
     sid = Keyword.fetch!(opts, :runtime_session_id)
-    harness_id = Keyword.fetch!(opts, :harness_id)
+    harness_arn = Keyword.fetch!(opts, :harness_arn)
     timeout = opts[:timeout] || 600_000
     max_turns = opts[:max_turns] || 50
     invoke_fun = opts[:invoke_fun] || default_invoke_fun(opts)
@@ -55,7 +55,7 @@ defmodule ReqManagedAgents.AgentCore do
         handler: handler,
         context: context,
         sid: sid,
-        harness_id: harness_id,
+        harness_arn: harness_arn,
         invoke_fun: invoke_fun,
         model: opts[:model],
         meta: meta,
@@ -82,7 +82,7 @@ defmodule ReqManagedAgents.AgentCore do
         state = %{state | turns: state.turns + 1}
 
         inv = %{
-          harness_id: state.harness_id,
+          harness_arn: state.harness_arn,
           runtime_session_id: state.sid,
           messages: messages,
           model: state.model,
