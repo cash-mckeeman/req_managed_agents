@@ -88,6 +88,37 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
              })
   end
 
+  test "telemetry [:req_managed_agents, :agent_core, :request, :stop] fires with operation/service/method metadata",
+       %{bypass: bypass, client: client} do
+    test_pid = self()
+
+    :telemetry.attach(
+      "test-agentcore-telemetry-#{inspect(self())}",
+      [:req_managed_agents, :agent_core, :request, :stop],
+      fn _event, _measurements, metadata, _config ->
+        send(test_pid, {:telemetry_stop, metadata})
+      end,
+      nil
+    )
+
+    on_exit(fn ->
+      :telemetry.detach("test-agentcore-telemetry-#{inspect(test_pid)}")
+    end)
+
+    Bypass.expect_once(bypass, "GET", "/harnesses/h2", fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, ~s({"harnessId":"h2","status":"READY"}))
+    end)
+
+    assert {:ok, _} = Client.get_harness(client, "h2")
+
+    assert_receive {:telemetry_stop, meta}
+    assert meta.operation == :get_harness
+    assert meta.service == "bedrock-agentcore"
+    assert meta.method == :get
+  end
+
   test "POST invoke_harness is NOT retried on transient server errors (counter == 1)", %{
     bypass: bypass,
     client: client

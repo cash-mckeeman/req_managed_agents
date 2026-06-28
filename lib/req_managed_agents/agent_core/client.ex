@@ -44,18 +44,26 @@ defmodule ReqManagedAgents.AgentCore.Client do
       "model" => spec.model
     }
 
-    post_json(c, "/harnesses", body)
+    span(c, :post, "/harnesses", :create_harness, fn -> post_json(c, "/harnesses", body) end)
   end
 
   @spec get_harness(t(), String.t()) :: {:ok, map()} | {:error, term()}
-  def get_harness(c, id), do: get_json(c, "/harnesses/#{id}")
+  def get_harness(c, id),
+    do: span(c, :get, "/harnesses/#{id}", :get_harness, fn -> get_json(c, "/harnesses/#{id}") end)
 
   @spec delete_harness(t(), String.t()) :: {:ok, map()} | {:error, term()}
-  def delete_harness(c, id), do: delete_json(c, "/harnesses/#{id}")
+  def delete_harness(c, id),
+    do:
+      span(c, :delete, "/harnesses/#{id}", :delete_harness, fn ->
+        delete_json(c, "/harnesses/#{id}")
+      end)
 
   @spec create_api_key_credential_provider(t(), map()) :: {:ok, map()} | {:error, term()}
   def create_api_key_credential_provider(c, %{name: name, api_key: key}),
-    do: post_json(c, "/credential-providers/api-key", %{"name" => name, "apiKey" => key})
+    do:
+      span(c, :post, "/credential-providers/api-key", :create_api_key_credential_provider, fn ->
+        post_json(c, "/credential-providers/api-key", %{"name" => name, "apiKey" => key})
+      end)
 
   @doc """
   Data-plane `InvokeHarness`. Posts `messages` on a `runtimeSessionId` and returns
@@ -64,25 +72,29 @@ defmodule ReqManagedAgents.AgentCore.Client do
   """
   @spec invoke_harness(t(), map()) :: {:ok, [map()]} | {:error, term()}
   def invoke_harness(c, %{harness_id: id, runtime_session_id: sid, messages: messages} = inv) do
-    body =
-      %{"runtimeSessionId" => sid, "messages" => messages}
-      |> maybe_put("model", inv[:model])
-      |> maybe_put("systemPrompt", inv[:system_prompt])
+    path = "/harnesses/#{id}/invocations"
 
-    url = c.base_url <> "/harnesses/#{id}/invocations"
-    json = Jason.encode!(body)
+    span(c, :post, path, :invoke_harness, fn ->
+      body =
+        %{"runtimeSessionId" => sid, "messages" => messages}
+        |> maybe_put("model", inv[:model])
+        |> maybe_put("systemPrompt", inv[:system_prompt])
 
-    case raw_post(c, url, json, decode_body: false) do
-      {:ok, %{status: s, body: raw}} when s in 200..299 ->
-        {events, _rest} = EventStream.decode(raw)
-        {:ok, events}
+      url = c.base_url <> path
+      json = Jason.encode!(body)
 
-      {:ok, %{status: s, body: body}} ->
-        {:error, {:http_error, s, body}}
+      case raw_post(c, url, json, decode_body: false) do
+        {:ok, %{status: s, body: raw}} when s in 200..299 ->
+          {events, _rest} = EventStream.decode(raw)
+          {:ok, events}
 
-      {:error, reason} ->
-        {:error, reason}
-    end
+        {:ok, %{status: s, body: body}} ->
+          {:error, {:http_error, s, body}}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end)
   end
 
   defp maybe_put(map, _k, nil), do: map
@@ -128,6 +140,19 @@ defmodule ReqManagedAgents.AgentCore.Client do
     |> Req.merge(c.req_options)
     |> Req.request(method: method, body: body)
   end
+
+  defp span(c, method, path, op, fun) do
+    meta = %{service: c.service, method: method, path: path, operation: op}
+
+    :telemetry.span([:req_managed_agents, :agent_core, :request], meta, fn ->
+      result = fun.()
+      {result, Map.put(meta, :status, status_for(result))}
+    end)
+  end
+
+  defp status_for({:ok, _}), do: 200
+  defp status_for({:error, {:http_error, s, _}}), do: s
+  defp status_for(_), do: nil
 
   defp handle({:ok, %{status: s, body: body}}) when s in 200..299, do: {:ok, body}
   defp handle({:ok, %{status: s, body: body}}), do: {:error, {:http_error, s, body}}
