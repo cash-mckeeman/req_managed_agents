@@ -21,7 +21,8 @@ defmodule ReqManagedAgents.Client do
     files_beta: @files_beta,
     anthropic_version: @anthropic_version,
     receive_timeout: 60_000,
-    req_options: []
+    req_options: [],
+    profile: :anthropic
   ]
 
   @type t :: %__MODULE__{}
@@ -41,7 +42,8 @@ defmodule ReqManagedAgents.Client do
         opts[:anthropic_version] || env(:anthropic_version) || @anthropic_version,
       files_beta: opts[:files_beta] || env(:files_beta) || @files_beta,
       receive_timeout: opts[:receive_timeout] || env(:receive_timeout) || 60_000,
-      req_options: opts[:req_options] || []
+      req_options: opts[:req_options] || [],
+      profile: opts[:profile] || env(:profile) || :anthropic
     }
   end
 
