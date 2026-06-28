@@ -28,6 +28,13 @@ defmodule ReqManagedAgents.AgentCore.Converse do
     }
   end
 
+  @doc """
+  Fold a single Converse response's event sequence into `%{stop_reason, tool_uses, text}`.
+
+  **Single response only.** `contentBlockIndex` resets to 0 per response;
+  concatenating event lists from multiple invocations would collide on shared
+  indices and silently drop tools.
+  """
   @spec parse([map()]) :: %{stop_reason: String.t() | nil, tool_uses: [map()], text: String.t()}
   def parse(events) do
     init = %{stop_reason: nil, tool_uses: %{}, text: "", order: []}
@@ -78,12 +85,21 @@ defmodule ReqManagedAgents.AgentCore.Converse do
   defp decode_input(acc) do
     case Jason.decode(acc) do
       {:ok, map} -> map
+      # Bad JSON (shouldn't happen in a well-formed stream) is treated as empty input.
       {:error, _} -> %{}
     end
   end
 
   @type tool_result :: %{tool_use_id: String.t(), text: String.t(), is_error: boolean()}
 
+  @doc """
+  Assemble the two messages required by the strict Harness resume contract.
+
+  `results` must contain one entry per `tool_uses` entry (same length, each
+  entry supplying the `tool_use_id` returned by that call). A length mismatch
+  produces a structurally invalid Converse request — Converse requires exactly
+  one `toolResult` per `toolUse`.
+  """
   @spec resume_messages([map()], [tool_result()]) :: [map()]
   def resume_messages(tool_uses, results) do
     assistant = %{
