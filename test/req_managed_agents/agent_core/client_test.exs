@@ -87,4 +87,28 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
                messages: [%{"role" => "user", "content" => [%{"text" => "hi"}]}]
              })
   end
+
+  test "POST invoke_harness is NOT retried on transient server errors (counter == 1)", %{
+    bypass: bypass,
+    client: client
+  } do
+    counter = :counters.new(1, [])
+
+    Bypass.stub(bypass, "POST", "/harnesses/h1/invocations", fn conn ->
+      :counters.add(counter, 1, 1)
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(500, ~s({"message":"Internal Server Error"}))
+    end)
+
+    assert {:error, {:http_error, 500, _}} =
+             Client.invoke_harness(client, %{
+               harness_id: "h1",
+               runtime_session_id: "s1",
+               messages: [%{"role" => "user", "content" => [%{"text" => "hi"}]}]
+             })
+
+    assert :counters.get(counter, 1) == 1
+  end
 end

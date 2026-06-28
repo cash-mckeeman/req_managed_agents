@@ -12,6 +12,7 @@ defmodule ReqManagedAgents.AgentCore.Client do
   alias ReqManagedAgents.AgentCore.{SigV4, EventStream}
 
   @default_base "https://bedrock-agentcore.us-east-1.amazonaws.com"
+  @max_retries 2
 
   defstruct [
     :credentials,
@@ -70,9 +71,8 @@ defmodule ReqManagedAgents.AgentCore.Client do
 
     url = c.base_url <> "/harnesses/#{id}/invocations"
     json = Jason.encode!(body)
-    headers = SigV4.sign_request(:post, url, json, service: c.service, credentials: c.credentials)
 
-    case request(c, :post, url, headers, json, decode_body: false) do
+    case raw_post(c, url, json, decode_body: false) do
       {:ok, %{status: s, body: raw}} when s in 200..299 ->
         {events, _rest} = EventStream.decode(raw)
         {:ok, events}
@@ -91,29 +91,37 @@ defmodule ReqManagedAgents.AgentCore.Client do
   defp post_json(c, path, body) do
     url = c.base_url <> path
     json = Jason.encode!(body)
-    headers = SigV4.sign_request(:post, url, json, service: c.service, credentials: c.credentials)
-    c |> request(:post, url, headers, json, []) |> handle()
+    c |> raw_post(url, json) |> handle()
   end
 
   defp get_json(c, path) do
     url = c.base_url <> path
     headers = SigV4.sign_request(:get, url, "", service: c.service, credentials: c.credentials)
-    c |> request(:get, url, headers, "", []) |> handle()
+    c |> request(:get, url, headers, "", retry: :transient, max_retries: @max_retries) |> handle()
   end
 
   defp delete_json(c, path) do
     url = c.base_url <> path
     headers = SigV4.sign_request(:delete, url, "", service: c.service, credentials: c.credentials)
-    c |> request(:delete, url, headers, "", []) |> handle()
+
+    c
+    |> request(:delete, url, headers, "", retry: :transient, max_retries: @max_retries)
+    |> handle()
+  end
+
+  # Sign and dispatch a POST; returns the raw Req result (no handle/1 applied).
+  # Callers must handle the result themselves — post_json/3 applies handle/1,
+  # invoke_harness/2 pattern-matches on status and decodes the event stream.
+  defp raw_post(c, url, json, extra \\ []) do
+    headers = SigV4.sign_request(:post, url, json, service: c.service, credentials: c.credentials)
+    request(c, :post, url, headers, json, extra)
   end
 
   defp request(c, method, url, headers, body, extra) do
     [
       url: url,
       headers: headers,
-      receive_timeout: c.receive_timeout,
-      retry: :transient,
-      max_retries: 2
+      receive_timeout: c.receive_timeout
     ]
     |> Keyword.merge(extra)
     |> Req.new()
