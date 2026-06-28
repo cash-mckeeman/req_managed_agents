@@ -4,7 +4,13 @@ defmodule ReqManagedAgents.ProfileTest do
 
   describe ":anthropic (identity)" do
     test "tool_use name/input read from top-level fields" do
-      ev = %{"type" => "agent.custom_tool_use", "id" => "e1", "name" => "echo", "input" => %{"x" => 1}}
+      ev = %{
+        "type" => "agent.custom_tool_use",
+        "id" => "e1",
+        "name" => "echo",
+        "input" => %{"x" => 1}
+      }
+
       assert {"echo", %{"x" => 1}} = Profile.tool_use(:anthropic, ev)
     end
 
@@ -15,7 +21,12 @@ defmodule ReqManagedAgents.ProfileTest do
 
   describe ":jido (the 4 spike remaps)" do
     test "tool_use name/input nested under content[0]/payload" do
-      ev = %{"type" => "agent.custom_tool_use", "id" => "e1", "content" => [%{"name" => "echo", "payload" => %{"x" => 1}}]}
+      ev = %{
+        "type" => "agent.custom_tool_use",
+        "id" => "e1",
+        "content" => [%{"name" => "echo", "payload" => %{"x" => 1}}]
+      }
+
       assert {"echo", %{"x" => 1}} = Profile.tool_use(:jido, ev)
     end
 

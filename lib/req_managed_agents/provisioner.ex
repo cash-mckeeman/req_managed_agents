@@ -6,10 +6,16 @@ defmodule ReqManagedAgents.Provisioner do
   """
   @table :req_managed_agents_provisions
 
-  @type spec :: %{system_prompt: String.t(), tools: [map()], terminal_tool: String.t() | nil, model: String.t()}
+  @type spec :: %{
+          system_prompt: String.t(),
+          tools: [map()],
+          terminal_tool: String.t() | nil,
+          model: String.t()
+        }
   @type ref :: %{agent_id: String.t(), environment_id: String.t()}
 
-  @spec ensure(spec(), (spec() -> {:ok, ref()} | {:error, term()})) :: {:ok, ref()} | {:error, term()}
+  @spec ensure(spec(), (spec() -> {:ok, ref()} | {:error, term()})) ::
+          {:ok, ref()} | {:error, term()}
   def ensure(spec, create_fun) when is_function(create_fun, 1) do
     table = ensure_table()
     key = hash(spec)
@@ -31,7 +37,8 @@ defmodule ReqManagedAgents.Provisioner do
   end
 
   @doc false
-  def reset, do: if(:ets.whereis(@table) != :undefined, do: :ets.delete_all_objects(@table), else: :ok)
+  def reset,
+    do: if(:ets.whereis(@table) != :undefined, do: :ets.delete_all_objects(@table), else: :ok)
 
   defp hash(spec), do: :crypto.hash(:sha256, :erlang.term_to_binary(spec)) |> Base.encode16()
 
