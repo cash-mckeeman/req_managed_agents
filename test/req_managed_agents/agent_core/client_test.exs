@@ -112,6 +112,26 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
              })
   end
 
+  test "list_harnesses returns the decoded harness list (control plane GET /harnesses)", %{
+    bypass: bypass,
+    client: client
+  } do
+    Bypass.expect_once(bypass, "GET", "/harnesses", fn conn ->
+      assert {"authorization", "AWS4-HMAC-SHA256" <> _} =
+               Enum.find(conn.req_headers, fn {k, _} -> k == "authorization" end)
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(
+        200,
+        ~s({"harnesses":[{"harnessName":"ba_abc","harnessId":"h9","arn":"arn:aws:bedrock-agentcore:us-east-1:1:harness/ba_abc","status":"READY"}]})
+      )
+    end)
+
+    assert {:ok, %{"harnesses" => [%{"harnessName" => "ba_abc", "harnessId" => "h9"}]}} =
+             Client.list_harnesses(client)
+  end
+
   test "telemetry [:req_managed_agents, :agent_core, :request, :stop] fires with operation/service/method metadata",
        %{bypass: bypass, client: client} do
     test_pid = self()
