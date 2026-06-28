@@ -57,15 +57,25 @@ defmodule ReqManagedAgents.AgentCore.EventStream do
             message_without_crc = prelude <> <<prelude_crc::32>> <> headers_bin <> body
 
             if :erlang.crc32(message_without_crc) == msg_crc do
-              # parse_headers is a faithful port of req_llm's header walker (type-7 strings only).
-              # Called here so headers_bin is consumed and the port is reachable.
-              # Result is available for event-type routing in future — AgentCore JSON is
-              # self-describing so we do not need it to demux today.
-              _headers = parse_headers(headers_bin)
+              # The AWS event-stream delivers UNWRAPPED Converse payloads; the event type
+              # lives in the `:event-type` frame header. Tag the payload with it so the
+              # result matches the documented Converse envelope (e.g. %{"contentBlockStart"
+              # => %{...}}), which is what Converse.parse/1 consumes. Exception frames carry
+              # no `:event-type` (they use `:exception-type`) and pass through as-is.
+              headers = parse_headers(headers_bin)
 
               case Jason.decode(body) do
-                {:ok, map} -> [map | acc]
-                {:error, _} -> acc
+                {:ok, map} ->
+                  wrapped =
+                    case headers[":event-type"] do
+                      nil -> map
+                      event_type -> %{event_type => map}
+                    end
+
+                  [wrapped | acc]
+
+                {:error, _} ->
+                  acc
               end
             else
               acc

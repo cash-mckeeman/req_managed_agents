@@ -11,12 +11,18 @@ defmodule ReqManagedAgents.AgentCore.Client do
   """
   alias ReqManagedAgents.AgentCore.{SigV4, EventStream}
 
+  # AgentCore has two endpoints that BOTH sign with service name "bedrock-agentcore":
+  #   - control plane (CreateHarness/GetHarness/DeleteHarness, credential providers)
+  #     → host bedrock-agentcore-control.<region>.amazonaws.com
+  #   - data plane (InvokeHarness) → host bedrock-agentcore.<region>.amazonaws.com
   @default_base "https://bedrock-agentcore.us-east-1.amazonaws.com"
+  @default_control_base "https://bedrock-agentcore-control.us-east-1.amazonaws.com"
   @max_retries 2
 
   defstruct [
     :credentials,
     base_url: @default_base,
+    control_base_url: @default_control_base,
     service: "bedrock-agentcore",
     receive_timeout: 600_000,
     req_options: []
@@ -29,6 +35,7 @@ defmodule ReqManagedAgents.AgentCore.Client do
     %__MODULE__{
       credentials: opts[:credentials] || SigV4.from_env(),
       base_url: opts[:base_url] || @default_base,
+      control_base_url: opts[:control_base_url] || opts[:base_url] || @default_control_base,
       service: opts[:service] || "bedrock-agentcore",
       receive_timeout: opts[:receive_timeout] || 600_000,
       req_options: opts[:req_options] || []
@@ -40,7 +47,7 @@ defmodule ReqManagedAgents.AgentCore.Client do
     body = %{
       "harnessName" => spec.name,
       "executionRoleArn" => spec.execution_role_arn,
-      "systemPrompt" => spec.system_prompt,
+      "systemPrompt" => system_prompt_blocks(spec.system_prompt),
       "model" => spec.model,
       "tools" => spec.tools
     }
@@ -84,7 +91,7 @@ defmodule ReqManagedAgents.AgentCore.Client do
       body =
         %{"messages" => messages}
         |> maybe_put("model", inv[:model])
-        |> maybe_put("systemPrompt", inv[:system_prompt])
+        |> maybe_put("systemPrompt", system_prompt_blocks(inv[:system_prompt]))
 
       qs_params =
         [{"harnessArn", arn}] ++
@@ -127,20 +134,28 @@ defmodule ReqManagedAgents.AgentCore.Client do
   defp maybe_put(map, _k, nil), do: map
   defp maybe_put(map, k, v), do: Map.put(map, k, v)
 
+  # HarnessSystemPrompt is a LIST of {text: string} content blocks (Converse-style),
+  # not a bare string. Wrap a string; pass a list/nil through.
+  defp system_prompt_blocks(nil), do: nil
+  defp system_prompt_blocks(prompt) when is_binary(prompt), do: [%{"text" => prompt}]
+  defp system_prompt_blocks(blocks) when is_list(blocks), do: blocks
+
+  # post_json/get_json/delete_json serve the CONTROL plane (harness lifecycle +
+  # credential providers) → control_base_url. Only invoke_harness uses base_url (data).
   defp post_json(c, path, body) do
-    url = c.base_url <> path
+    url = c.control_base_url <> path
     json = Jason.encode!(body)
     c |> raw_post(url, json) |> handle()
   end
 
   defp get_json(c, path) do
-    url = c.base_url <> path
+    url = c.control_base_url <> path
     headers = SigV4.sign_request(:get, url, "", service: c.service, credentials: c.credentials)
     c |> request(:get, url, headers, "", retry: :transient, max_retries: @max_retries) |> handle()
   end
 
   defp delete_json(c, path) do
-    url = c.base_url <> path
+    url = c.control_base_url <> path
     headers = SigV4.sign_request(:delete, url, "", service: c.service, credentials: c.credentials)
 
     c

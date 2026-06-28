@@ -152,11 +152,17 @@ defmodule Mix.Tasks.ReqManagedAgents.AgentCore.Smoke do
   end
 
   defp event_stream_standalone_stage do
-    f1 = frame(~s({"messageStop":{"stopReason":"end_turn"}}))
-    f2 = frame(~s({"contentBlockDelta":{"contentBlockIndex":0,"delta":{"text":"hi"}}}))
+    # Realistic form: :event-type header carries the type; payload is the UNWRAPPED inner map.
+    f1 = frame_with_event_type("messageStop", ~s({"stopReason":"end_turn"}))
+
+    f2 =
+      frame_with_event_type(
+        "contentBlockDelta",
+        ~s({"contentBlockIndex":0,"delta":{"text":"hi"}})
+      )
 
     # Truncate a third frame to 5 bytes — should become the remainder
-    f3_full = frame(~s({"extra":"data"}))
+    f3_full = frame_with_event_type("extra", ~s({"data":true}))
     f3_partial = binary_part(f3_full, 0, 5)
 
     {messages, remainder} = EventStream.decode(f1 <> f2 <> f3_partial)
@@ -311,33 +317,47 @@ defmodule Mix.Tasks.ReqManagedAgents.AgentCore.Smoke do
   # Frame builders
   # ---------------------------------------------------------------------------
 
-  # Turn 1: a tool_use turn — contentBlockStart + contentBlockDelta + messageStop
+  # Turn 1: a tool_use turn — contentBlockStart + contentBlockDelta + messageStop.
+  # Realistic form: :event-type header carries the type; payload is the UNWRAPPED inner map
+  # (no outer event-type key in the JSON body), matching what AgentCore live streams deliver.
   defp turn1_frames do
-    frame(
-      ~s({"contentBlockStart":{"contentBlockIndex":0,"start":{"toolUse":{"toolUseId":"tu_1","name":"echo"}}}})
+    frame_with_event_type(
+      "contentBlockStart",
+      ~s({"contentBlockIndex":0,"start":{"toolUse":{"toolUseId":"tu_1","name":"echo"}}})
     ) <>
-      frame(
-        ~s({"contentBlockDelta":{"contentBlockIndex":0,"delta":{"toolUse":{"input":"{\\"text\\":\\"hi\\"}"}}}})
+      frame_with_event_type(
+        "contentBlockDelta",
+        ~s({"contentBlockIndex":0,"delta":{"toolUse":{"input":"{\\"text\\":\\"hi\\"}"}}})
       ) <>
-      frame(~s({"messageStop":{"stopReason":"tool_use"}}))
+      frame_with_event_type("messageStop", ~s({"stopReason":"tool_use"}))
   end
 
   # Turn 2: a terminal end_turn — contentBlockDelta(text) + messageStop
   defp turn2_frames do
-    frame(~s({"contentBlockDelta":{"contentBlockIndex":0,"delta":{"text":"all done."}}})) <>
-      frame(~s({"messageStop":{"stopReason":"end_turn"}}))
+    frame_with_event_type(
+      "contentBlockDelta",
+      ~s({"contentBlockIndex":0,"delta":{"text":"all done."}})
+    ) <>
+      frame_with_event_type("messageStop", ~s({"stopReason":"end_turn"}))
   end
 
-  # Mirrors the `frame/1` helper in EventStreamTest.
-  # Layout: prelude(8B) + prelude_crc(4B) + headers(0B) + payload + message_crc(4B)
-  defp frame(payload_json) when is_binary(payload_json) do
-    headers = <<>>
-    total_len = 12 + byte_size(headers) + byte_size(payload_json) + 4
-    prelude = <<total_len::big-32, byte_size(headers)::big-32>>
+  # Builds a frame with a single :event-type string header (type 7) carrying the
+  # given event type, and the unwrapped JSON payload in the body. This mirrors the
+  # real AgentCore Converse stream wire format (vs. the old "outer key in body" shape).
+  defp frame_with_event_type(event_type, payload_json) when is_binary(payload_json) do
+    headers_bin = str_header(":event-type", event_type)
+    total_len = 12 + byte_size(headers_bin) + byte_size(payload_json) + 4
+    prelude = <<total_len::big-32, byte_size(headers_bin)::big-32>>
     prelude_crc = :erlang.crc32(prelude)
-    body = prelude <> <<prelude_crc::32>> <> headers <> payload_json
+    body = prelude <> <<prelude_crc::32>> <> headers_bin <> payload_json
     message_crc = :erlang.crc32(body)
     body <> <<message_crc::32>>
+  end
+
+  # Encodes a string key-value header in the AWS Event Stream wire format:
+  # name-len(1B) + name + value-type(1B=7 for string) + value-len(2B big-endian) + value.
+  defp str_header(name, value) do
+    <<byte_size(name)::8, name::binary, 7::8, byte_size(value)::big-16, value::binary>>
   end
 
   # ---------------------------------------------------------------------------
