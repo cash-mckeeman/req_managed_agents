@@ -18,8 +18,8 @@ defmodule ReqManagedAgents.AgentCore.EventStream do
   - 4 bytes: message CRC32
 
   Truncated frames (total > available bytes, or < 12 B prelude) are returned intact as the
-  remainder for the next chunk. CRC mismatch causes the frame to be dropped (same recovery
-  posture as req_llm). Payloads that fail `Jason.decode` are silently dropped.
+  remainder for the next chunk. Prelude or message CRC mismatch causes the frame to be dropped
+  (same recovery posture as req_llm). Payloads that fail `Jason.decode` are silently dropped.
   """
 
   # Prelude = total_len(4) + headers_len(4) + prelude_crc(4)
@@ -44,7 +44,7 @@ defmodule ReqManagedAgents.AgentCore.EventStream do
       needed = headers_len + body_len + @crc_size
 
       if body_len >= 0 and byte_size(rest) >= needed do
-        <<headers_bin::binary-size(^headers_len), body::binary-size(^body_len), _msg_crc::32,
+        <<headers_bin::binary-size(^headers_len), body::binary-size(^body_len), msg_crc::32,
           tail::binary>> = rest
 
         # Verify prelude CRC. Mirror req_llm: drop frame on mismatch rather than halting.
@@ -52,15 +52,23 @@ defmodule ReqManagedAgents.AgentCore.EventStream do
 
         acc =
           if :erlang.crc32(prelude) == prelude_crc do
-            # parse_headers is a faithful port of req_llm's header walker (type-7 strings only).
-            # Called here so headers_bin is consumed and the port is reachable.
-            # Result is available for event-type routing in future — AgentCore JSON is
-            # self-describing so we do not need it to demux today.
-            parse_headers(headers_bin)
+            # Verify message CRC over prelude(8) + prelude_crc(4) + headers + payload —
+            # i.e. every byte of the frame except the trailing 4-byte message CRC itself.
+            message_without_crc = prelude <> <<prelude_crc::32>> <> headers_bin <> body
 
-            case Jason.decode(body) do
-              {:ok, map} -> [map | acc]
-              {:error, _} -> acc
+            if :erlang.crc32(message_without_crc) == msg_crc do
+              # parse_headers is a faithful port of req_llm's header walker (type-7 strings only).
+              # Called here so headers_bin is consumed and the port is reachable.
+              # Result is available for event-type routing in future — AgentCore JSON is
+              # self-describing so we do not need it to demux today.
+              _headers = parse_headers(headers_bin)
+
+              case Jason.decode(body) do
+                {:ok, map} -> [map | acc]
+                {:error, _} -> acc
+              end
+            else
+              acc
             end
           else
             acc

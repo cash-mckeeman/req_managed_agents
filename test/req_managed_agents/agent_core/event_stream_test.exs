@@ -55,4 +55,14 @@ defmodule ReqManagedAgents.AgentCore.EventStreamTest do
     assert msg["type"] == "contentBlockDelta"
     assert get_in(msg, ["delta", "text"]) == "hello"
   end
+
+  test "drops frame with corrupted message CRC (no decoded message returned)" do
+    # Build a well-formed frame, then corrupt only the trailing 4-byte message CRC.
+    # The decoder must consume the frame's bytes (advancing past it) but drop it from
+    # the result — matching the prelude-CRC-mismatch drop posture from req_llm.
+    f = frame(~s({"ok":true}))
+    frame_body = binary_part(f, 0, byte_size(f) - 4)
+    corrupted = frame_body <> <<0xDEADBEEF::32>>
+    assert {[], ""} = EventStream.decode(corrupted)
+  end
 end
