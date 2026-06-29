@@ -53,7 +53,7 @@ defmodule ReqManagedAgents.AgentCore.Client do
         "model" => spec.model,
         "tools" => spec.tools
       }
-      |> maybe_put("maxLifetime", Map.get(spec, :max_lifetime))
+      |> maybe_put("timeoutSeconds", Map.get(spec, :timeout_seconds))
 
     span(c, :post, "/harnesses", :create_harness, fn -> post_json(c, "/harnesses", body) end)
   end

@@ -58,10 +58,10 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
              Client.create_harness(client, spec)
   end
 
-  test "create_harness includes maxLifetime when provided", %{bypass: bypass, client: client} do
+  test "create_harness includes timeoutSeconds when provided", %{bypass: bypass, client: client} do
     Bypass.expect_once(bypass, "POST", "/harnesses", fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
-      assert Jason.decode!(body)["maxLifetime"] == 1800
+      assert Jason.decode!(body)["timeoutSeconds"] == 1800
 
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
@@ -74,19 +74,19 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
       system_prompt: "p",
       tools: [],
       model: %{"bedrockModelConfig" => %{"modelId" => "m"}},
-      max_lifetime: 1800
+      timeout_seconds: 1800
     }
 
     assert {:ok, _} = Client.create_harness(client, spec)
   end
 
-  test "create_harness omits maxLifetime when the spec does not set it", %{
+  test "create_harness omits timeoutSeconds when the spec does not set it", %{
     bypass: bypass,
     client: client
   } do
     Bypass.expect_once(bypass, "POST", "/harnesses", fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
-      refute Map.has_key?(Jason.decode!(body), "maxLifetime")
+      refute Map.has_key?(Jason.decode!(body), "timeoutSeconds")
 
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
