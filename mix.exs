@@ -43,6 +43,7 @@ defmodule ReqManagedAgents.MixProject do
       # Bypass runs a real chunked HTTP server for the SSE Stream/Session tests.
       {:bypass, "~> 2.1", only: :test},
       {:ex_aws_auth, "~> 1.4"},
+      {:aws_event_stream, github: "cash-mckeeman/aws_event_stream", tag: "v0.1.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end
