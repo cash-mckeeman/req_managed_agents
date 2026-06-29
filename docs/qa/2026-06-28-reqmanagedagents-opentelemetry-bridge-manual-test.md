@@ -501,8 +501,13 @@ mix run -e 'IO.inspect ReqManagedAgents.OpenTelemetry.detach("qa-never-attached-
 
 **Expected:**
 ```
-:ok
+{:error, :not_found}
 ```
+
+> `detach/1` delegates to `:telemetry.detach/1`, which returns `{:error, :not_found}` for an
+> unregistered handler ID — the documented idiomatic contract. The call is **safe** (it does not
+> raise); only the return value is an error tuple, not `:ok`. (QA F-1: the `detach/1` `@spec` was
+> widened to `:: :ok | {:error, :not_found}` to match.)
 
 ---
 
