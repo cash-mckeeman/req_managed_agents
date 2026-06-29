@@ -111,4 +111,40 @@ defmodule ReqManagedAgents.AgentCore.ConverseTest do
       assert get_in(user, ["content", Access.at(0), "toolResult", "status"]) == "error"
     end
   end
+
+  # MIM-52 mechanism. `parse/1` builds its tool_uses list by mapping over `order` (one entry
+  # appended per contentBlockStart, no dedup), so nothing guarantees unique toolUseIds. A
+  # clean parallel-tool turn (A) is fine; duplicates only arise when the event list carries a
+  # reused contentBlockIndex (B — a replayed/concatenated stream) or a reused toolUseId (C).
+  # B and C characterize the CURRENT (buggy) output; the fix will flip them while A stays green.
+  describe "tool-use id uniqueness (MIM-52)" do
+    test "A: clean parallel tools (distinct indices + ids) parse to distinct tool_uses" do
+      events = [start_block(0, "tu_1", "f"), start_block(1, "tu_2", "g"), tool_stop()]
+      assert ids(Converse.parse(events).tool_uses) == ["tu_1", "tu_2"]
+    end
+
+    test "B: a reused contentBlockIndex duplicates one tool and drops the other (BUG)" do
+      # Same contentBlockIndex 0 twice — what a replayed/concatenated stream looks like.
+      events = [start_block(0, "tu_A", "f"), start_block(0, "tu_B", "g"), tool_stop()]
+      # map overwrites index 0 (tu_A lost); order double-counts 0 (tu_B duplicated).
+      assert ids(Converse.parse(events).tool_uses) == ["tu_B", "tu_B"]
+    end
+
+    test "C: the same toolUseId at two distinct indices yields a duplicate (BUG)" do
+      events = [start_block(0, "tu_X", "f"), start_block(1, "tu_X", "g"), tool_stop()]
+      assert ids(Converse.parse(events).tool_uses) == ["tu_X", "tu_X"]
+    end
+  end
+
+  defp ids(tool_uses), do: Enum.map(tool_uses, & &1["toolUseId"])
+  defp tool_stop, do: %{"messageStop" => %{"stopReason" => "tool_use"}}
+
+  defp start_block(idx, id, name) do
+    %{
+      "contentBlockStart" => %{
+        "contentBlockIndex" => idx,
+        "start" => %{"toolUse" => %{"toolUseId" => id, "name" => name}}
+      }
+    }
+  end
 end

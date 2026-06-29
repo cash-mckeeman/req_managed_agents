@@ -14,10 +14,16 @@ defmodule ReqManagedAgents.OpenTelemetryTest do
              OTel.attributes_for([:req_managed_agents, :stream, :event], %{session_id: "s1"})
 
     assert {"tool_result", %{"gen_ai.operation.name" => "execute_tool"}} =
-             OTel.attributes_for([:req_managed_agents, :tool, :stop], %{session_id: "s1", tool: "calc"})
+             OTel.attributes_for([:req_managed_agents, :tool, :stop], %{
+               session_id: "s1",
+               tool: "calc"
+             })
 
     assert {"turn_complete", %{"gen_ai.response.finish_reasons" => ["end_turn"]}} =
-             OTel.attributes_for([:req_managed_agents, :session, :terminal], %{session_id: "s1", terminal: :end_turn})
+             OTel.attributes_for([:req_managed_agents, :session, :terminal], %{
+               session_id: "s1",
+               terminal: :end_turn
+             })
   end
 
   test "available?/0 reflects whether the OTel SDK is loaded (false in this lib's test env)" do
@@ -38,9 +44,15 @@ defmodule ReqManagedAgents.OpenTelemetryTest do
 
   test "attributes_for routes an agent.custom_tool_use stream event to tool_use (atom + string key)" do
     assert {"tool_use", _} =
-             OTel.attributes_for([:req_managed_agents, :stream, :event], %{session_id: "s1", type: "agent.custom_tool_use"})
+             OTel.attributes_for([:req_managed_agents, :stream, :event], %{
+               session_id: "s1",
+               type: "agent.custom_tool_use"
+             })
 
     assert {"tool_use", _} =
-             OTel.attributes_for([:req_managed_agents, :stream, :event], %{"session_id" => "s1", "type" => "agent.custom_tool_use"})
+             OTel.attributes_for([:req_managed_agents, :stream, :event], %{
+               "session_id" => "s1",
+               "type" => "agent.custom_tool_use"
+             })
   end
 end
