@@ -69,15 +69,26 @@ defmodule ReqManagedAgents.AgentCore.ConverseTest do
   end
 
   describe "strict resume contract" do
-    test "assembles ONLY the user toolResult message (the stateful harness already holds the assistant toolUse)" do
+    test "assembles assistant toolUse + user toolResult messages for the next invoke" do
       tu = %{"toolUseId" => "tu_1", "name" => "echo", "input" => %{"text" => "hi"}}
       result = %{tool_use_id: "tu_1", text: "echoed: hi", is_error: false}
 
-      # InvokeHarness is session-stateful (runtimeSessionId): it recorded the assistant
-      # toolUse from its own streaming response. Re-sending it duplicates toolUse Ids
-      # server-side (ValidationException at messages.N — MIM-52). Send only the new
-      # toolResult; the server matches it to the toolUse it already holds.
+      # The harness does NOT persist the model's streamed assistant response — we must
+      # echo the assistant toolUse back alongside the user toolResult (live-verified;
+      # sending only the toolResult fails "toolResult exceeds toolUse of previous turn").
       assert Converse.resume_messages([tu], [result]) == [
+               %{
+                 "role" => "assistant",
+                 "content" => [
+                   %{
+                     "toolUse" => %{
+                       "toolUseId" => "tu_1",
+                       "name" => "echo",
+                       "input" => %{"text" => "hi"}
+                     }
+                   }
+                 ]
+               },
                %{
                  "role" => "user",
                  "content" => [
@@ -96,7 +107,7 @@ defmodule ReqManagedAgents.AgentCore.ConverseTest do
     test "an errored tool result carries status error" do
       tu = %{"toolUseId" => "tu_2", "name" => "boom", "input" => %{}}
       result = %{tool_use_id: "tu_2", text: "kaboom", is_error: true}
-      [user] = Converse.resume_messages([tu], [result])
+      [_assistant, user] = Converse.resume_messages([tu], [result])
       assert get_in(user, ["content", Access.at(0), "toolResult", "status"]) == "error"
     end
   end

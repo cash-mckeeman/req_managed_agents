@@ -61,13 +61,12 @@ defmodule ReqManagedAgents.AgentCoreTest do
     assert run.terminal == :end_turn
     assert run.stop_reason == "end_turn"
 
-    # the resume invoke carries ONLY the user toolResult — the stateful harness already
-    # holds the assistant toolUse server-side; re-sending it would duplicate toolUse Ids (MIM-52)
+    # the resume invoke carries BOTH the assistant toolUse and the user toolResult —
+    # the harness does not persist the model's streamed response, so we echo it back
     assert_received {:invoke, _first}
     assert_received {:invoke, resume}
     roles = Enum.map(resume[:messages], & &1["role"])
-    assert roles == ["user"]
-    assert [%{"content" => [%{"toolResult" => _}]}] = resume[:messages]
+    assert "assistant" in roles and "user" in roles
   end
 
   test "terminates on a normal stop with no tools" do

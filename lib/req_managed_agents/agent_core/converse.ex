@@ -96,21 +96,27 @@ defmodule ReqManagedAgents.AgentCore.Converse do
   @type tool_result :: %{tool_use_id: String.t(), text: String.t(), is_error: boolean()}
 
   @doc """
-  Assemble the resume message(s) for the next `InvokeHarness` turn.
+  Assemble the two messages for the next `InvokeHarness` resume turn: the assistant
+  `toolUse` blocks AND the user `toolResult`s.
 
-  Returns ONLY the `user` message carrying the `toolResult`s — NOT the assistant
-  `toolUse` blocks. `InvokeHarness` is session-stateful (keyed by `runtimeSessionId`):
-  it already recorded the assistant `toolUse` from its own streaming response, so
-  re-sending it accumulates duplicate `toolUse` Ids in the server's message list and
-  Bedrock rejects the request with a `ValidationException` ("duplicate Ids") once a
-  collision occurs on a longer conversation. The server matches each `toolResult` to
-  the `toolUse` it already holds. (MIM-52; `tool_uses` is retained in the signature
-  for symmetry/validation but is not echoed back.)
+  The harness does NOT persist the model's streamed assistant response into the
+  session — sending only the `toolResult` makes Bedrock reject the turn with
+  "the number of toolResult blocks ... exceeds the number of toolUse blocks of
+  previous turn" (live-verified). So we echo the assistant `toolUse` back.
 
-  `results` must supply one `toolResult` per `toolUse` the turn produced.
+  `results` must contain one entry per `tool_uses` entry (same length, each
+  supplying the `tool_use_id` returned by that call). NOTE: if a single turn's
+  `tool_uses` contains duplicate `toolUseId`s, Bedrock rejects the request
+  ("duplicate Ids at messages.N.content") — see MIM-52 (still open: the duplicate
+  originates upstream of here, in parse / parallel-tool handling).
   """
   @spec resume_messages([map()], [tool_result()]) :: [map()]
-  def resume_messages(_tool_uses, results) do
+  def resume_messages(tool_uses, results) do
+    assistant = %{
+      "role" => "assistant",
+      "content" => Enum.map(tool_uses, fn tu -> %{"toolUse" => tu} end)
+    }
+
     user = %{
       "role" => "user",
       "content" =>
@@ -125,6 +131,6 @@ defmodule ReqManagedAgents.AgentCore.Converse do
         end)
     }
 
-    [user]
+    [assistant, user]
   end
 end
