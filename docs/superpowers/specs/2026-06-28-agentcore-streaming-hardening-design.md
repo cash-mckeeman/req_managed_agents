@@ -59,19 +59,41 @@ architectural; it is that each per-turn stream is not yet robust.
 ### Component 1: Spike / instrument (Phase 0 — gates the rest)
 
 A throwaway probe (no production code) that captures **raw `InvokeHarness`
-event-stream frame arrival timing** on one long `analytical_deep_dive` case. The
-single question it answers:
+event-stream frame arrival timing** on the failing cases. It answers **two**
+distinct questions — and the second is now the priority, because live eval data
+(below) points away from idle-drop:
 
+**Q1 — Idle-drop vs budget (the long-stream question).**
 > Does the stream emit bytes steadily, or go silent for minutes during
 > server-side reasoning / tool execution?
 
-- **Silent gaps** → idle-drop is the real enemy; keep-alive (Component 2) is the
-  load-bearing fix.
-- **Steady frames** → the fixed 10-min ceiling was the only enemy; the timeout
-  knob (Component 2) plus the already-shipped retry largely close it.
+- **Silent gaps** → idle-drop is the enemy; keep-alive (Component 2) is load-bearing.
+- **Steady frames** → the fixed 10-min ceiling was the only enemy; the timeout knob
+  plus the shipped retry close it.
 
-The currently-running 20-min-cap eval supplies half this data point already: if
-the previously-timed-out `case_02` / `case_07` now pass, budget was the whole story.
+**Q2 — Diagnose the early-termination class (first-class outcome).**
+The eval shows `case_03` failing **fast (~28 s), persistently, through the
+per-turn retry**, with `{:terminal, :terminated, nil}`. That is **not** a
+long-idle-drop and the retry does not fix it — so it is a different bug, and
+naming it is a primary Phase 0 deliverable, not a footnote. The spike must
+classify it as one of:
+
+- **server-side early close** — the Harness terminates the session/stream early
+  (guardrail, content policy, model error surfaced as a stream end);
+- **bad tool input / loop state** — a specific `toolResult` or message shape that
+  makes the harness end the turn without a `messageStop`;
+- **client decode gap** — our `EventStream` decoder mis-handles a real terminal
+  frame variant (e.g. an error event we don't classify), making a clean stop look
+  like a truncation.
+
+Concretely: capture the **full raw frame sequence** (headers + bodies, including
+any error/exception frame) of a `case_03` invoke. The fix follows the
+classification — and may be *content/decoder*, not *streaming*, at all.
+
+**What the running eval already tells us:** with the 20-min cap + PR #7 retry,
+`case_02` no longer times out — it **completes in ~287 s** and fails on *content*
+(missing citation). So the "timeout budget" was secondary; the stream-drop +
+early-termination behaviors are the real targets, and Q2 is where the unknown lives.
 
 ### Component 2: Keep-alive + configurable timeouts (Phase 1 — core)
 
@@ -116,8 +138,13 @@ The spec names these so "timeout" and "drop" stop being conflated:
 | Class | Signal | Handling |
 |---|---|---|
 | **Budget exceeded** | case legitimately needs more wall-clock | NOT retried; clean `{:error, :timeout}`; raise the *budget* via config, never via retries |
-| **Truncated / transport drop** | `stop_reason: nil` (no `messageStop`) or `{:error, transport}` | bounded turn re-run (Component 3) |
+| **Transient drop** | `stop_reason: nil` / transport error that **succeeds on re-run** | bounded turn re-run (Component 3); the retry resolves it |
+| **Persistent early termination** | `stop_reason: nil` that **recurs through the retry** (e.g. `case_03`: fast, ~28 s, every attempt) | re-run does NOT fix it — surface a distinct, diagnosable error; root cause is content / guardrail / decoder (Component 1 Q2), not transport |
 | **Real terminal** | `end_turn`, `stop_sequence`, or unknown like `content_blocked` | mapped to terminal; never retried |
+
+The third row is the key correction the eval forced: a truncation that survives
+retry is **not** a transport blip and must not be silently swallowed as one — it
+needs its own error surface so it is diagnosed, not papered over.
 
 ## Data flow (hot path, hardened)
 
@@ -163,6 +190,13 @@ is left running.
   intermediary we don't control — if keep-alive cannot hold it, the deferred
   Runtime/`/ping` path (MIM-50 follow-up) returns to the table. The spike is the
   decision point.
+- **`case_03` may not be a streaming bug at all.** If Phase 0 Q2 classifies it as
+  a **content / guardrail** early-close or a **decoder** gap, the fix is *not*
+  streaming hardening — it leaves this spec's scope and becomes its own work item
+  (a decoder fix here, or an agent/content issue in the app). This spec's
+  contribution to it is the **diagnosis + a distinct error surface** (taxonomy row
+  3), not a guaranteed fix. Do not let it block Phases 1–3.
+
 - **Re-run idempotency** for tools with side effects — business_analyst tools are
   read-mostly (retrieve / query / emit), so re-run is safe here; a future agent
   with mutating tools would need idempotency keys. Noted, not solved here.
