@@ -7,6 +7,15 @@ defmodule ReqManagedAgents.OpenTelemetry do
     capture surface a host (mimir-gateway) calls to normalize RMA events to `gen_ai.*`.
   - **Optional OTLP export** (`attach/1`) — emits spans only when the OTel SDK is loaded;
     no-ops otherwise. No `opentelemetry` dependency is taken.
+
+  ## Scope
+
+  This bridge covers the **Claude Managed Agents** path (the Session / RunToCompletion
+  SSE telemetry: `[:req_managed_agents, :stream|:tool|:session, …]`). The AWS Bedrock
+  **AgentCore** path emits different event names (`[:req_managed_agents, :agent_core, …]`,
+  including its own `:agent_core, :terminal`) and is intentionally NOT mapped here — a
+  caller routing through `ReqManagedAgents.AgentCore` would capture tool events but no
+  `"turn_complete"`.
   """
   require Logger
   @compile {:no_warn_undefined, [:otel_tracer, :opentelemetry]}
@@ -44,7 +53,7 @@ defmodule ReqManagedAgents.OpenTelemetry do
   @spec available?() :: boolean()
   def available?, do: Code.ensure_loaded?(:otel_tracer)
 
-  @spec attach(term()) :: :ok | {:error, :opentelemetry_unavailable}
+  @spec attach(term()) :: :ok | {:error, term()}
   def attach(handler_id \\ @handler_id) do
     if available?() do
       :telemetry.attach_many(handler_id, @events, &__MODULE__.handle_event/4, nil)
