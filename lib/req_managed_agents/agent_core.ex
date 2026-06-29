@@ -14,6 +14,12 @@ defmodule ReqManagedAgents.AgentCore do
   alias ReqManagedAgents.AgentCore.{Client, Converse}
   alias ReqManagedAgents.Tools
 
+  # Extra attempts per turn on a transport error or a truncated stream (see
+  # invoke_turn/3). The long data-plane InvokeHarness stream occasionally drops
+  # mid-flight; a turn carries no irreversible local side effect until its tools
+  # run, so re-invoking the same messages on the same session is safe.
+  @invoke_retries 2
+
   @doc """
   Drive an AgentCore Harness to completion: invoke → on `tool_use` run inline tools
   via `:handler` → resume with BOTH the assistant `toolUse` and user `toolResult` →
@@ -45,6 +51,7 @@ defmodule ReqManagedAgents.AgentCore do
     timeout = opts[:timeout] || 600_000
     max_turns = opts[:max_turns] || 50
     invoke_fun = opts[:invoke_fun] || default_invoke_fun(opts)
+    invoke_retries = opts[:invoke_retries] || @invoke_retries
     meta = opts[:telemetry_metadata] || %{}
 
     deadline = System.monotonic_time(:millisecond) + timeout
@@ -57,6 +64,7 @@ defmodule ReqManagedAgents.AgentCore do
         sid: sid,
         harness_arn: harness_arn,
         invoke_fun: invoke_fun,
+        invoke_retries: invoke_retries,
         model: opts[:model],
         meta: meta,
         events: [],
@@ -90,15 +98,40 @@ defmodule ReqManagedAgents.AgentCore do
           context: state.context
         }
 
-        case state.invoke_fun.(inv) do
-          {:ok, events} ->
-            parsed = Converse.parse(events)
+        case invoke_turn(state, inv, state.invoke_retries) do
+          {:ok, events, parsed} ->
             state = %{state | events: state.events ++ events}
             handle(state, parsed, deadline)
 
           {:error, reason} ->
             {:error, reason}
         end
+    end
+  end
+
+  # One turn with bounded retry. Retries on a transport error OR a truncated stream
+  # — `stop_reason == nil` means the response ended without a `messageStop`, i.e. the
+  # connection dropped mid-stream (distinct from a real-but-unknown stop reason like
+  # "content_blocked", which IS a terminal). Partial events from a dropped attempt are
+  # discarded; only the final attempt's events are returned. When retries are exhausted
+  # the last result is returned as-is (a transport error surfaces; a still-truncated
+  # stream maps to terminal :terminated downstream).
+  defp invoke_turn(state, inv, retries_left) do
+    case state.invoke_fun.(inv) do
+      {:ok, events} ->
+        parsed = Converse.parse(events)
+
+        cond do
+          parsed.stop_reason != nil -> {:ok, events, parsed}
+          retries_left > 0 -> invoke_turn(state, inv, retries_left - 1)
+          true -> {:ok, events, parsed}
+        end
+
+      {:error, _reason} when retries_left > 0 ->
+        invoke_turn(state, inv, retries_left - 1)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
