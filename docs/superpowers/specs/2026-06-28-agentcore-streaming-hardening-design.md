@@ -54,6 +54,35 @@ architectural; it is that each per-turn stream is not yet robust.
 - **No app-loop changes** — the per-turn chunking in `invoke_to_completion` and the
   app adapter loop stay as they are. The app gains config knobs only.
 
+## Wire-boundary cleanup (review addendum)
+
+The hand-rolled wire code (`event_stream.ex` 132 LOC, `converse.ex` 129, `sig_v4.ex`
+63 = 324 LOC) was flagged in review as "Jason gymnastics." Grounding against
+**canonical `agentjido/req_llm`** (origin — *not* our `cash-mckeeman` fork on
+`feat/ollama-provider`) settled the direction:
+
+- **Elixir has no drop-in SDK for this.** Unlike boto3 / aws-sdk-go, the generic
+  Elixir AWS SDKs (`:aws`, `ex_aws`) don't decode the Bedrock `vnd.amazon.eventstream`.
+  The mature impl is req_llm's `AmazonBedrock.AWSEventStream` — what we ported from.
+- **Our port drifted from canonical, for the worse.** Canonical does full CRC
+  verification (prelude + message) and **returns `{:error, reason}`** on a bad/
+  undecodable frame; **ours silently drops** undecodable frames (`{:error, _} -> acc`).
+  The "gymnastics" is largely *our divergence*. Fix = re-align to canonical's
+  error-propagating structure.
+- **An exception-frame gap exists in canonical too.** Neither tags `:message-type`
+  `exception`/`error` frames — both return a non-`:event-type` body as a raw map, so
+  an early-termination exception becomes a shapeless map → `:terminated`/nil. Adding
+  the surfacing is an improvement over upstream → **upstream PR candidate (MIM-51)**.
+
+**Decision (this spec):** *make our decoder correct now, extract later.*
+- **SigV4 → `ex_aws_auth`** (already an optional dep); delete the hand-rolled
+  `sig_v4.ex`. Clean, separable, do regardless.
+- **`event_stream.ex` → re-align to canonical** (CRC verification, `{:error, reason}`
+  returns instead of silent drops) **+ add `:message-type` exception/error surfacing**
+  (the case_03/04 fix). Offer the surfacing upstream (MIM-51).
+- **Extraction** of a shared `aws_event_stream` lib is deferred to **MIM-43** (the
+  `TODO(extract)` already in our code); not in MIM-50's scope.
+
 ## Architecture — four components
 
 ### Component 1: Spike / instrument (Phase 0 — gates the rest)
