@@ -181,6 +181,48 @@ defmodule ReqManagedAgents.AgentCoreTest do
     assert :counters.get(counter, 1) == 2
   end
 
+  test "a __stream_error__ frame surfaces as {:error, {:harness_stream_error, ...}}, not a soft terminal" do
+    invoke_fun = fn _ ->
+      {:ok,
+       [
+         %{
+           "__stream_error__" => %{
+             "type" => "runtimeClientError",
+             "message" => %{"message" => "duplicate Ids"}
+           }
+         }
+       ]}
+    end
+
+    assert {:error, {:harness_stream_error, "runtimeClientError", "duplicate Ids"}} =
+             AgentCore.invoke_to_completion(
+               handler: fn _, _, _ -> {:ok, ""} end,
+               context: %{},
+               harness_arn: "ba",
+               runtime_session_id: "s1",
+               prompt: "begin",
+               invoke_fun: invoke_fun
+             )
+  end
+
+  test "a truncation that survives the retry surfaces as {:error, :early_termination}, not :terminated/nil" do
+    # Always truncated: a text delta, never a messageStop (nil stop_reason).
+    invoke_fun = fn _ ->
+      {:ok, [%{"contentBlockDelta" => %{"contentBlockIndex" => 0, "delta" => %{"text" => "x"}}}]}
+    end
+
+    assert {:error, :early_termination} =
+             AgentCore.invoke_to_completion(
+               handler: fn _, _, _ -> {:ok, ""} end,
+               context: %{},
+               harness_arn: "ba",
+               runtime_session_id: "s1",
+               prompt: "begin",
+               invoke_fun: invoke_fun,
+               invoke_retries: 1
+             )
+  end
+
   test "returns {:error, {:max_turns_exceeded, n}} when tool_use never terminates" do
     handler = fn "echo", %{"text" => t}, _ctx -> {:ok, "echoed: #{t}"} end
 
