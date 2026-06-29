@@ -66,16 +66,16 @@ defmodule ReqManagedAgents.AgentCore.EventStream do
 
               case Jason.decode(body) do
                 {:ok, map} ->
-                  wrapped =
-                    case headers[":event-type"] do
-                      nil -> map
-                      event_type -> %{event_type => map}
-                    end
-
-                  [wrapped | acc]
+                  [tag_frame(headers, map) | acc]
 
                 {:error, _} ->
-                  acc
+                  # A non-JSON body is normally noise to drop — UNLESS it's an
+                  # exception/error frame, which must still surface (raw string) so a
+                  # server-side early close isn't silently swallowed.
+                  case stream_error_type(headers) do
+                    nil -> acc
+                    type -> [%{"__stream_error__" => %{"type" => type, "message" => body}} | acc]
+                  end
               end
             else
               acc
@@ -92,6 +92,33 @@ defmodule ReqManagedAgents.AgentCore.EventStream do
     else
       # Declared total_len is below the minimum valid frame size — treat as incomplete.
       {Enum.reverse(acc), buffer}
+    end
+  end
+
+  # Tag a decoded frame payload by its frame headers:
+  #   :message-type exception/error → %{"__stream_error__" => %{type, message}}
+  #     (a server-side close — e.g. a ConverseStream ValidationException — that must
+  #      surface as a distinct error, not a silent terminal; req_llm/upstream miss this — MIM-51)
+  #   :event-type present           → %{event_type => payload}  (Converse envelope)
+  #   otherwise                     → the payload as-is
+  defp tag_frame(headers, map) do
+    case stream_error_type(headers) do
+      nil ->
+        case headers[":event-type"] do
+          nil -> map
+          event_type -> %{event_type => map}
+        end
+
+      type ->
+        %{"__stream_error__" => %{"type" => type, "message" => map}}
+    end
+  end
+
+  # The error class for an exception/error frame, or nil for a normal event frame.
+  defp stream_error_type(headers) do
+    case headers[":message-type"] do
+      mt when mt in ["exception", "error"] -> headers[":exception-type"] || headers[":error-code"]
+      _ -> nil
     end
   end
 

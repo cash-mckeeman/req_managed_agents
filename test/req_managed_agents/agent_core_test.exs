@@ -61,7 +61,8 @@ defmodule ReqManagedAgents.AgentCoreTest do
     assert run.terminal == :end_turn
     assert run.stop_reason == "end_turn"
 
-    # the resume invoke carried BOTH the assistant toolUse and the user toolResult (strict contract)
+    # the resume invoke carries BOTH the assistant toolUse and the user toolResult —
+    # the harness does not persist the model's streamed response, so we echo it back
     assert_received {:invoke, _first}
     assert_received {:invoke, resume}
     roles = Enum.map(resume[:messages], & &1["role"])
@@ -177,6 +178,48 @@ defmodule ReqManagedAgents.AgentCoreTest do
 
     # 1 initial attempt + 1 retry
     assert :counters.get(counter, 1) == 2
+  end
+
+  test "a __stream_error__ frame surfaces as {:error, {:harness_stream_error, ...}}, not a soft terminal" do
+    invoke_fun = fn _ ->
+      {:ok,
+       [
+         %{
+           "__stream_error__" => %{
+             "type" => "runtimeClientError",
+             "message" => %{"message" => "duplicate Ids"}
+           }
+         }
+       ]}
+    end
+
+    assert {:error, {:harness_stream_error, "runtimeClientError", "duplicate Ids"}} =
+             AgentCore.invoke_to_completion(
+               handler: fn _, _, _ -> {:ok, ""} end,
+               context: %{},
+               harness_arn: "ba",
+               runtime_session_id: "s1",
+               prompt: "begin",
+               invoke_fun: invoke_fun
+             )
+  end
+
+  test "a truncation that survives the retry surfaces as {:error, :early_termination}, not :terminated/nil" do
+    # Always truncated: a text delta, never a messageStop (nil stop_reason).
+    invoke_fun = fn _ ->
+      {:ok, [%{"contentBlockDelta" => %{"contentBlockIndex" => 0, "delta" => %{"text" => "x"}}}]}
+    end
+
+    assert {:error, :early_termination} =
+             AgentCore.invoke_to_completion(
+               handler: fn _, _, _ -> {:ok, ""} end,
+               context: %{},
+               harness_arn: "ba",
+               runtime_session_id: "s1",
+               prompt: "begin",
+               invoke_fun: invoke_fun,
+               invoke_retries: 1
+             )
   end
 
   test "returns {:error, {:max_turns_exceeded, n}} when tool_use never terminates" do

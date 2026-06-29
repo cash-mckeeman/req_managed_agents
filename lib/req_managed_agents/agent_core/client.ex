@@ -18,13 +18,14 @@ defmodule ReqManagedAgents.AgentCore.Client do
   @default_base "https://bedrock-agentcore.us-east-1.amazonaws.com"
   @default_control_base "https://bedrock-agentcore-control.us-east-1.amazonaws.com"
   @max_retries 2
+  @default_receive_timeout 600_000
 
   defstruct [
     :credentials,
     base_url: @default_base,
     control_base_url: @default_control_base,
     service: "bedrock-agentcore",
-    receive_timeout: 600_000,
+    receive_timeout: @default_receive_timeout,
     req_options: []
   ]
 
@@ -37,20 +38,22 @@ defmodule ReqManagedAgents.AgentCore.Client do
       base_url: opts[:base_url] || @default_base,
       control_base_url: opts[:control_base_url] || opts[:base_url] || @default_control_base,
       service: opts[:service] || "bedrock-agentcore",
-      receive_timeout: opts[:receive_timeout] || 600_000,
+      receive_timeout: opts[:receive_timeout] || @default_receive_timeout,
       req_options: opts[:req_options] || []
     }
   end
 
   @spec create_harness(t(), map()) :: {:ok, map()} | {:error, term()}
   def create_harness(c, spec) do
-    body = %{
-      "harnessName" => spec.name,
-      "executionRoleArn" => spec.execution_role_arn,
-      "systemPrompt" => system_prompt_blocks(spec.system_prompt),
-      "model" => spec.model,
-      "tools" => spec.tools
-    }
+    body =
+      %{
+        "harnessName" => spec.name,
+        "executionRoleArn" => spec.execution_role_arn,
+        "systemPrompt" => system_prompt_blocks(spec.system_prompt),
+        "model" => spec.model,
+        "tools" => spec.tools
+      }
+      |> maybe_put("timeoutSeconds", Map.get(spec, :timeout_seconds))
 
     span(c, :post, "/harnesses", :create_harness, fn -> post_json(c, "/harnesses", body) end)
   end
@@ -185,7 +188,8 @@ defmodule ReqManagedAgents.AgentCore.Client do
     [
       url: url,
       headers: headers,
-      receive_timeout: c.receive_timeout
+      receive_timeout: c.receive_timeout,
+      connect_options: [transport_opts: [keepalive: true]]
     ]
     |> Keyword.merge(extra)
     |> Req.new()

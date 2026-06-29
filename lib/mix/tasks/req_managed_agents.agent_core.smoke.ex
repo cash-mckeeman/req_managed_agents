@@ -26,7 +26,8 @@ defmodule Mix.Tasks.ReqManagedAgents.AgentCore.Smoke do
   5. **tool_use decoded+parsed** — the loop actually ran the tool (the resume
      turn fired).
   6. **strict resume contract** — the resume body contained BOTH `assistant`
-     (toolUse) and `user` (toolResult) roles.
+     (toolUse) and `user` (toolResult) roles (the harness does not persist the
+     model's streamed response, so we echo it back).
   7. **tool text round-trip** — the toolResult text in the resume body equals
      `"echoed: hi"`.
   8. **terminal end_turn** — `invoke_to_completion` returned

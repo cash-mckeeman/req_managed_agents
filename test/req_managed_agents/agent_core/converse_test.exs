@@ -73,6 +73,9 @@ defmodule ReqManagedAgents.AgentCore.ConverseTest do
       tu = %{"toolUseId" => "tu_1", "name" => "echo", "input" => %{"text" => "hi"}}
       result = %{tool_use_id: "tu_1", text: "echoed: hi", is_error: false}
 
+      # The harness does NOT persist the model's streamed assistant response — we must
+      # echo the assistant toolUse back alongside the user toolResult (live-verified;
+      # sending only the toolResult fails "toolResult exceeds toolUse of previous turn").
       assert Converse.resume_messages([tu], [result]) == [
                %{
                  "role" => "assistant",

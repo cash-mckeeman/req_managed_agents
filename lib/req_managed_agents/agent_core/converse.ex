@@ -96,12 +96,19 @@ defmodule ReqManagedAgents.AgentCore.Converse do
   @type tool_result :: %{tool_use_id: String.t(), text: String.t(), is_error: boolean()}
 
   @doc """
-  Assemble the two messages required by the strict Harness resume contract.
+  Assemble the two messages for the next `InvokeHarness` resume turn: the assistant
+  `toolUse` blocks AND the user `toolResult`s.
+
+  The harness does NOT persist the model's streamed assistant response into the
+  session — sending only the `toolResult` makes Bedrock reject the turn with
+  "the number of toolResult blocks ... exceeds the number of toolUse blocks of
+  previous turn" (live-verified). So we echo the assistant `toolUse` back.
 
   `results` must contain one entry per `tool_uses` entry (same length, each
-  entry supplying the `tool_use_id` returned by that call). A length mismatch
-  produces a structurally invalid Converse request — Converse requires exactly
-  one `toolResult` per `toolUse`.
+  supplying the `tool_use_id` returned by that call). NOTE: if a single turn's
+  `tool_uses` contains duplicate `toolUseId`s, Bedrock rejects the request
+  ("duplicate Ids at messages.N.content") — see MIM-52 (still open: the duplicate
+  originates upstream of here, in parse / parallel-tool handling).
   """
   @spec resume_messages([map()], [tool_result()]) :: [map()]
   def resume_messages(tool_uses, results) do

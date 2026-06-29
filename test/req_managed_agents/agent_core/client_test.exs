@@ -58,6 +58,45 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
              Client.create_harness(client, spec)
   end
 
+  test "create_harness includes timeoutSeconds when provided", %{bypass: bypass, client: client} do
+    Bypass.expect_once(bypass, "POST", "/harnesses", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      assert Jason.decode!(body)["timeoutSeconds"] == 1800
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, ~s({"harness":{"arn":"a","harnessId":"h","status":"CREATING"}}))
+    end)
+
+    spec = %{
+      name: "ba",
+      execution_role_arn: "arn:aws:iam::1:role/x",
+      system_prompt: "p",
+      tools: [],
+      model: %{"bedrockModelConfig" => %{"modelId" => "m"}},
+      timeout_seconds: 1800
+    }
+
+    assert {:ok, _} = Client.create_harness(client, spec)
+  end
+
+  test "create_harness omits timeoutSeconds when the spec does not set it", %{
+    bypass: bypass,
+    client: client
+  } do
+    Bypass.expect_once(bypass, "POST", "/harnesses", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      refute Map.has_key?(Jason.decode!(body), "timeoutSeconds")
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, ~s({"harness":{"arn":"a","harnessId":"h","status":"CREATING"}}))
+    end)
+
+    spec = %{name: "ba", execution_role_arn: "r", system_prompt: "p", tools: [], model: %{}}
+    assert {:ok, _} = Client.create_harness(client, spec)
+  end
+
   test "create_api_key_credential_provider returns the token-vault apiKeyArn", %{
     bypass: bypass,
     client: client
@@ -161,6 +200,30 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
     assert meta.operation == :get_harness
     assert meta.service == "bedrock-agentcore"
     assert meta.method == :get
+  end
+
+  test "invoke requests enable TCP keep-alive via connect_options" do
+    test_pid = self()
+
+    client =
+      Client.new(
+        credentials: @creds,
+        req_options: [
+          adapter: fn req ->
+            send(test_pid, {:connect_options, req.options[:connect_options]})
+            {req, Req.Response.new(status: 200, body: "")}
+          end
+        ]
+      )
+
+    Client.invoke_harness(client, %{
+      harness_arn: "arn:aws:bedrock-agentcore:us-east-1:1:harness/ba",
+      runtime_session_id: String.duplicate("s", 33),
+      messages: [%{"role" => "user", "content" => [%{"text" => "hi"}]}]
+    })
+
+    assert_receive {:connect_options, opts}
+    assert get_in(opts, [:transport_opts, :keepalive]) == true
   end
 
   test "POST invoke_harness is NOT retried on transient server errors (counter == 1)", %{

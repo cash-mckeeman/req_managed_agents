@@ -58,6 +58,27 @@ defmodule ReqManagedAgents.AgentCore.EventStreamTest do
     assert get_in(msg, ["contentBlockStart", "start", "toolUse", "name"]) == "echo"
   end
 
+  test ":message-type exception frame is surfaced as a tagged __stream_error__ map" do
+    # A real AgentCore early-termination frame (confirmed live, MIM-52 spike):
+    # :message-type "exception", :exception-type "runtimeClientError", NO :event-type,
+    # body {"message":"...ValidationException...duplicate Ids..."}. Without surfacing,
+    # this falls through as a shapeless map → no stop_reason → silent :terminated/nil.
+    headers_bin =
+      str_header(":message-type", "exception") <>
+        str_header(":exception-type", "runtimeClientError")
+
+    f = frame_with_headers(headers_bin, ~s({"message":"duplicate Ids"}))
+
+    assert {[event], ""} = EventStream.decode(f)
+
+    assert event == %{
+             "__stream_error__" => %{
+               "type" => "runtimeClientError",
+               "message" => %{"message" => "duplicate Ids"}
+             }
+           }
+  end
+
   test "frame with :event-type header — payload type in header, not in body" do
     # Second example: contentBlockDelta — payload has no outer event-type wrapper.
     headers_bin = str_header(":event-type", "contentBlockDelta")

@@ -103,28 +103,42 @@ defmodule ReqManagedAgents.AgentCore do
             state = %{state | events: state.events ++ events}
             handle(state, parsed, deadline)
 
+          # A truncation that survived the retry — NOT a transient drop. Surface a
+          # distinct, diagnosable error instead of a soft terminal (:terminated/nil).
+          {:early_termination, _events, _parsed} ->
+            {:error, :early_termination}
+
           {:error, reason} ->
             {:error, reason}
         end
     end
   end
 
-  # One turn with bounded retry. Retries on a transport error OR a truncated stream
-  # — `stop_reason == nil` means the response ended without a `messageStop`, i.e. the
-  # connection dropped mid-stream (distinct from a real-but-unknown stop reason like
-  # "content_blocked", which IS a terminal). Partial events from a dropped attempt are
-  # discarded; only the final attempt's events are returned. When retries are exhausted
-  # the last result is returned as-is (a transport error surfaces; a still-truncated
-  # stream maps to terminal :terminated downstream).
+  # One turn with bounded retry. Three distinct outcomes by class:
+  #   * a surfaced AWS exception/error frame (EventStream tags it __stream_error__) →
+  #     {:error, {:harness_stream_error, type, message}} — a server-side close (e.g. a
+  #     ConverseStream ValidationException), never retried, never a soft terminal;
+  #   * a transport error OR a truncated stream (stop_reason == nil — the response ended
+  #     without a messageStop) → retried (bounded); a transient drop resolves here;
+  #   * retries exhausted on a still-truncated stream → {:early_termination, ...} so the
+  #     loop surfaces {:error, :early_termination} (distinct from a real terminal).
+  # Partial events from a dropped attempt are discarded; only the final attempt's events
+  # are returned. A real-but-unknown stop reason ("content_blocked") IS a terminal.
   defp invoke_turn(state, inv, retries_left) do
     case state.invoke_fun.(inv) do
       {:ok, events} ->
-        parsed = Converse.parse(events)
+        case stream_error(events) do
+          {type, message} ->
+            {:error, {:harness_stream_error, type, message}}
 
-        cond do
-          parsed.stop_reason != nil -> {:ok, events, parsed}
-          retries_left > 0 -> invoke_turn(state, inv, retries_left - 1)
-          true -> {:ok, events, parsed}
+          nil ->
+            parsed = Converse.parse(events)
+
+            cond do
+              parsed.stop_reason != nil -> {:ok, events, parsed}
+              retries_left > 0 -> invoke_turn(state, inv, retries_left - 1)
+              true -> {:early_termination, events, parsed}
+            end
         end
 
       {:error, _reason} when retries_left > 0 ->
@@ -134,6 +148,18 @@ defmodule ReqManagedAgents.AgentCore do
         {:error, reason}
     end
   end
+
+  # A surfaced AWS exception/error frame, if any (EventStream tags it __stream_error__).
+  # Returns {type, message} — message flattened to the human string when present.
+  defp stream_error(events) do
+    Enum.find_value(events, fn
+      %{"__stream_error__" => %{"type" => t, "message" => m}} -> {t, stream_error_message(m)}
+      _ -> nil
+    end)
+  end
+
+  defp stream_error_message(%{"message" => msg}) when is_binary(msg), do: msg
+  defp stream_error_message(other), do: other
 
   defp handle(state, %{stop_reason: "tool_use", tool_uses: tool_uses}, deadline) do
     results =
