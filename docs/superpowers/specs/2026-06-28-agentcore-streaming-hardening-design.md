@@ -156,9 +156,13 @@ re-running is safe; resume-from-byte-offset is not available and is out of scope
 
 - **Teardown discipline** — the app adapter already deletes the harness in its
   `after` block; the spec asserts this as a contract and adds a test.
-- **Belt-and-suspenders max-lifetime** — a configured session/harness max-lifetime
-  cap so an abandoned or hung session self-expires rather than billing idle memory
-  for hours. Directly addresses finding #3.
+- **Configurable `timeoutSeconds`** — the real top-level `CreateHarness` field
+  ("maximum duration in seconds for the agent loop execution per invocation"; the
+  observed 3600s default). Capping it bounds server-side loop runtime so a hung
+  invocation can't bill indefinitely. (A flat `maxLifetime` does NOT exist on
+  `CreateHarness`; the 8h session `maxLifetime` is nested under
+  `environment.agentCoreRuntimeEnvironment.lifecycleConfiguration` — `timeoutSeconds`
+  is the simpler, more direct guardrail.) Directly addresses finding #3.
 
 ## Failure taxonomy — three classes, three handlings
 
