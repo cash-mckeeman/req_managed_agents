@@ -12,7 +12,7 @@ Baseline: `mix test` → 110 passed, 4 excluded (green).
 - [x] Task 3: Providers.ManagedAgents
 - [x] Task 4: Refactor invoke_to_completion through Providers.AgentCore
 - [x] Task 5: Refactor RunToCompletion through Providers.ManagedAgents + terminal collapse
-- [ ] Task 6: Cross-provider conformance/symmetry/exclusion tests
+- [x] Task 6: Cross-provider conformance/symmetry/exclusion tests
 - [ ] Task 7: Terminal-collapse call-site audit + retire Event.classify
 
 ## Log
@@ -22,7 +22,11 @@ Baseline: `mix test` → 110 passed, 4 excluded (green).
 - Task 4: complete (commit e2a4ad27, agent_core 30/30, warnings-as-errors clean, suite 128 passed)
 - Task 5: complete (commit xqlkpzyy, run_to_completion 2/2, _deadline fix, suite 128 passed)
 
-## Finding (affects Task 7)
-Event.classify/1 has THREE consumers, not one: RunToCompletion (now refactored away),
-profile.ex:35, session.ex:176. It CANNOT be retired. Terminal collapse is non-uniform:
-RunToCompletion/AgentCore use 3 atoms; Session/Profile keep the richer set. Needs user decision.
+- Task 6: complete (commit 2012323b, 4 conformance tests, suite 132 passed)
+
+## Finding + decision (Task 7 revised)
+Event.classify/1 has 3 consumers: RunToCompletion (migrated), Session, Profile.
+USER DECISION: migrate Session too (Option B). Profile keeps classify (orthogonal jido/anthropic
+wire-compat; terminal? is currently unused scaffolding). classify NOT retired (Profile uses it).
+session_test asserts only :end_turn → collapse preserves it → session_test stays green.
+Task 7 = migrate Session GenServer onto Providers.ManagedAgents (synthetic-list normalize).

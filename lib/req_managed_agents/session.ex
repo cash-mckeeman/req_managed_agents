@@ -14,7 +14,8 @@ defmodule ReqManagedAgents.Session do
   use GenServer
   require Logger
 
-  alias ReqManagedAgents.{Client, Consolidate, Event, Stream, Tools}
+  alias ReqManagedAgents.{Client, Consolidate, Event, Provider, Stream, Tools}
+  alias ReqManagedAgents.Providers.ManagedAgents, as: Backend
 
   defstruct [
     :client,
@@ -172,13 +173,15 @@ defmodule ReqManagedAgents.Session do
 
   defp do_ingest(state, %{"type" => "agent.custom_tool_use"} = ev), do: stash(state, ev)
 
-  defp do_ingest(state, event) do
-    case Event.classify(event) do
-      :requires_action ->
-        ids = get_in(event, ["stop_reason", "event_ids"]) || []
-        resolve(state, ids)
+  defp do_ingest(state, %{"type" => type} = event)
+       when type in ["session.status_idle", "session.status_terminated", "session.error"] do
+    outcome = Backend.normalize(Map.values(state.tool_uses) ++ [event])
 
-      terminal when terminal in [:end_turn, :terminated, :error, :retries_exhausted] ->
+    case outcome.terminal do
+      :requires_action ->
+        resolve(state, outcome.custom_tool_uses)
+
+      terminal ->
         :telemetry.execute(
           [:req_managed_agents, :session, :terminal],
           %{},
@@ -188,11 +191,12 @@ defmodule ReqManagedAgents.Session do
         notify(state, terminal)
         maybe_handle_event(state, event)
         %{state | reconnect_attempts: 0}
-
-      _other ->
-        maybe_handle_event(state, event)
-        state
     end
+  end
+
+  defp do_ingest(state, event) do
+    maybe_handle_event(state, event)
+    state
   end
 
   defp stash(state, %{"id" => id} = ev),
@@ -204,22 +208,23 @@ defmodule ReqManagedAgents.Session do
 
   # ---- resolve a requires_action pause --------------------------------------
 
-  defp resolve(state, ids) do
+  defp resolve(state, custom_tool_uses) do
     results =
-      ids
-      |> Enum.map(&{&1, state.tool_uses[&1]})
-      |> Enum.filter(fn {_id, ev} -> match?(%{"type" => "agent.custom_tool_use"}, ev) end)
+      custom_tool_uses
       |> Task.async_stream(
-        fn {id, %{"name" => name, "input" => input}} ->
-          run_tool(state, id, name, input)
+        fn %{id: id, name: name, input: input} ->
+          wire = run_tool(state, id, name, input)
+          Provider.result_of(id, wire)
         end,
         max_concurrency: @max_tool_concurrency,
         timeout: :infinity
       )
-      |> Enum.map(fn {:ok, ev} -> ev end)
+      |> Enum.map(fn {:ok, r} -> r end)
 
-    if results != [], do: Client.send_events(state.client, state.session_id, results)
+    events = Backend.resume(custom_tool_uses, results)
+    if events != [], do: Client.send_events(state.client, state.session_id, events)
 
+    ids = Enum.map(custom_tool_uses, & &1.id)
     %{state | tool_uses: Map.drop(state.tool_uses, ids)}
   end
 
@@ -228,8 +233,17 @@ defmodule ReqManagedAgents.Session do
 
   defp redrive_pending(state, past) do
     case Consolidate.pending_requires_action(past) do
-      %{"event_ids" => ids} -> resolve(state, ids)
-      _ -> state
+      %{"event_ids" => ids} ->
+        idle = %{
+          "type" => "session.status_idle",
+          "stop_reason" => %{"type" => "requires_action", "event_ids" => ids}
+        }
+
+        outcome = Backend.normalize(Map.values(state.tool_uses) ++ [idle])
+        resolve(state, outcome.custom_tool_uses)
+
+      _ ->
+        state
     end
   end
 
