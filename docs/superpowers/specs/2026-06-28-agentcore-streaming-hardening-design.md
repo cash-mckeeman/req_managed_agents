@@ -241,3 +241,39 @@ is left running.
 - AgentCore long-running agents — https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-long-run.html
 - AgentCore pricing — https://aws.amazon.com/bedrock/agentcore/pricing/
 - MIM-50 (this design), MIM-48 (band-aids), MIM-39 (P2b)
+
+## Task 1 spike findings (2026-06-28, live)
+
+Captured raw `InvokeHarness` frames on case_03 (live). The early termination is
+**unambiguously an AWS exception frame**, and its payload exposes a root cause
+deeper than streaming:
+
+```
+:message-type = "exception"   :event-type = nil   :exception-type = "runtimeClientError"
+body = {"message":"An error occurred (ValidationException) when calling the
+        ConverseStream operation: The toolUse blocks at messages.10.content
+        contain duplicate Ids: tooluse_lNLwWwHyInZU"}
+```
+
+**Sequence:** 6 clean `messageStop{stopReason: tool_use}` turns, then turn 7's invoke
+returns the exception — repeated **3×** (the PR #7 per-turn retry re-sending the same
+invalid request). The decoder currently returns this `:message-type=exception` body as
+a shapeless map (no `:event-type`) → no `stop_reason` → silent `:terminated`/nil.
+
+**Two conclusions:**
+1. **Task 2 is confirmed and necessary** — surfacing `:message-type` exception/error
+   frames turns this silent failure into a legible `ValidationException: duplicate Ids`.
+2. **The real root cause is a Converse multi-turn bug, not streaming.**
+   `Converse.resume_messages/2` re-sends the assistant `toolUse` blocks **every turn**.
+   The harness keeps server-side session state (`runtimeSessionId`) and already recorded
+   those blocks from its own streaming response, so they **accumulate as duplicates**
+   until a collision (here at `messages.10`, turn 7). Short cases (case_01/08) finish
+   before colliding; long ones (case_03/04) don't. The retry then re-sends the bad
+   request, compounding it.
+
+**Redirect:** Tasks 2–3 (surface + distinct error) stand as-is — they make this
+diagnosable. A **new root-cause task** is required: stop duplicating `toolUse` IDs in
+the resume (most likely: send only the `toolResult` user message, since the harness
+already holds the assistant `toolUse` server-side) — and reconsider whether the retry
+should re-send a possibly-applied resume at all. This changes the proven multi-turn
+contract, so it needs live validation. Tracked as **MIM-52**.
