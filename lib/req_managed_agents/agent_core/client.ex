@@ -45,13 +45,15 @@ defmodule ReqManagedAgents.AgentCore.Client do
 
   @spec create_harness(t(), map()) :: {:ok, map()} | {:error, term()}
   def create_harness(c, spec) do
-    body = %{
-      "harnessName" => spec.name,
-      "executionRoleArn" => spec.execution_role_arn,
-      "systemPrompt" => system_prompt_blocks(spec.system_prompt),
-      "model" => spec.model,
-      "tools" => spec.tools
-    }
+    body =
+      %{
+        "harnessName" => spec.name,
+        "executionRoleArn" => spec.execution_role_arn,
+        "systemPrompt" => system_prompt_blocks(spec.system_prompt),
+        "model" => spec.model,
+        "tools" => spec.tools
+      }
+      |> maybe_put("maxLifetime", Map.get(spec, :max_lifetime))
 
     span(c, :post, "/harnesses", :create_harness, fn -> post_json(c, "/harnesses", body) end)
   end
