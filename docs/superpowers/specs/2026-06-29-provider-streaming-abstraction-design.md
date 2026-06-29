@@ -44,6 +44,8 @@ The existing code already encodes this distinction in its wire vocabulary — th
 1. **Managed Agents** — `ReqManagedAgents.Client` over `https://api.anthropic.com` (`anthropic-beta: managed-agents-2026-04-01`), streamed via `ReqManagedAgents.SSE`, driven by `ReqManagedAgents.RunToCompletion`.
 2. **Bedrock AgentCore** — `ReqManagedAgents.AgentCore.Client` over `bedrock-agentcore.<region>.amazonaws.com`, streamed via `ReqManagedAgents.AgentCore.EventStream`, normalized by `ReqManagedAgents.AgentCore.Converse`, driven by `ReqManagedAgents.AgentCore.invoke_to_completion/1`.
 
+**Implementation outcome:** the Managed Agents side turned out to have a *third* turn driver beyond `RunToCompletion` — the stateful `ReqManagedAgents.Session` GenServer — which was also migrated onto `Providers.ManagedAgents` (it has no full event list, so it calls `normalize/1` on a synthetic per-turn list, `Map.values(stash) ++ [status_event]`). So **all three drivers** (`RunToCompletion`, `Session`, `AgentCore.invoke_to_completion/1`) now emit the canonical 3-atom terminal — the collapse is uniform. `Event.classify/1` is **retained**, not retired: it still backs `ReqManagedAgents.Profile`'s wire-compat `terminal?/3` predicate (currently unused scaffolding). Migrating `Profile` off `classify` and then retiring `classify` is explicit follow-up.
+
 **Out of scope (explicitly):**
 
 - **Building `ant_event_stream`** — rejected above.

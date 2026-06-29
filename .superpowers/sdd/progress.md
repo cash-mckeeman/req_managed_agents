@@ -13,7 +13,7 @@ Baseline: `mix test` → 110 passed, 4 excluded (green).
 - [x] Task 4: Refactor invoke_to_completion through Providers.AgentCore
 - [x] Task 5: Refactor RunToCompletion through Providers.ManagedAgents + terminal collapse
 - [x] Task 6: Cross-provider conformance/symmetry/exclusion tests
-- [ ] Task 7: Terminal-collapse call-site audit + retire Event.classify
+- [x] Task 7 (revised): Migrate Session GenServer to Providers.ManagedAgents (classify retained for Profile)
 
 ## Log
 - Task 1: complete (commit 56bd8c0d, 3 tests, self-review clean, suite 113 passed)
@@ -30,3 +30,6 @@ USER DECISION: migrate Session too (Option B). Profile keeps classify (orthogona
 wire-compat; terminal? is currently unused scaffolding). classify NOT retired (Profile uses it).
 session_test asserts only :end_turn → collapse preserves it → session_test stays green.
 Task 7 = migrate Session GenServer onto Providers.ManagedAgents (synthetic-list normalize).
+- Task 7: complete (commit 9dfd7299, session 4/4, warnings-as-errors clean, suite 132 passed)
+
+All 7 tasks complete. Collapse uniform across RunToCompletion/Session/AgentCore. Profile follow-up.
