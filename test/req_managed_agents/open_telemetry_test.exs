@@ -30,4 +30,12 @@ defmodule ReqManagedAgents.OpenTelemetryTest do
   after
     OTel.detach("t-otel-test")
   end
+
+  test "attributes_for routes an agent.custom_tool_use stream event to tool_use (atom + string key)" do
+    assert {"tool_use", _} =
+             OTel.attributes_for([:req_managed_agents, :stream, :event], %{session_id: "s1", type: "agent.custom_tool_use"})
+
+    assert {"tool_use", _} =
+             OTel.attributes_for([:req_managed_agents, :stream, :event], %{"session_id" => "s1", "type" => "agent.custom_tool_use"})
+  end
 end

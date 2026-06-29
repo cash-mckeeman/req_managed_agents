@@ -9,6 +9,7 @@ defmodule ReqManagedAgents.OpenTelemetry do
     no-ops otherwise. No `opentelemetry` dependency is taken.
   """
   require Logger
+  @compile {:no_warn_undefined, [:otel_tracer, :opentelemetry]}
   alias ReqManagedAgents.OpenTelemetry.Attributes
 
   @handler_id "req-managed-agents-otel"
@@ -50,6 +51,8 @@ defmodule ReqManagedAgents.OpenTelemetry do
     else
       {:error, :opentelemetry_unavailable}
     end
+  rescue
+    _ -> {:error, :opentelemetry_unavailable}
   end
 
   @spec detach(term()) :: :ok
