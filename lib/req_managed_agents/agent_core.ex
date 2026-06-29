@@ -135,7 +135,7 @@ defmodule ReqManagedAgents.AgentCore do
 
           nil ->
             parsed = Converse.parse(events)
-            log_tool_use_diagnostic(state, events, parsed)
+            emit_tool_use_telemetry(state, parsed)
 
             cond do
               parsed.stop_reason != nil -> {:ok, events, parsed}
@@ -196,43 +196,29 @@ defmodule ReqManagedAgents.AgentCore do
   defp terminal_atom("guardrail_intervened"), do: :terminated
   defp terminal_atom(_other), do: :terminated
 
-  # MIM-52 instrumentation. Captures, per turn, the (contentBlockIndex, toolUseId) pairs
-  # from the raw `contentBlockStart` events alongside the toolUseIds `parse/1` produced, so
-  # a live eval run can tell WHY a duplicate toolUseId appears: a reused contentBlockIndex
-  # (`index_reused?` — the event list is a replay/concatenation) vs. the same id at two
-  # distinct indices (`id_reused?`). Telemetry fires every turn; a warning only on the
-  # failing (duplicate) turn. Remove once MIM-52 is fixed and the mechanism is confirmed.
-  defp log_tool_use_diagnostic(state, events, parsed) do
+  # Per-turn tool-use telemetry, plus a regression sentinel for MIM-52: `Converse.parse/1`
+  # keys tool blocks by toolUseId, so its output is unique by construction. If a duplicate
+  # ever reaches here again, surface it loudly — a duplicate toolUseId in the resume makes
+  # Bedrock reject the NEXT turn with an opaque ConverseStream ValidationException.
+  defp emit_tool_use_telemetry(state, parsed) do
     ids = Enum.map(parsed.tool_uses, & &1["toolUseId"])
-
-    starts =
-      for %{"contentBlockStart" => %{"contentBlockIndex" => i, "start" => %{"toolUse" => tu}}} <-
-            events,
-          do: {i, tu["toolUseId"]}
-
-    diagnostic = %{
-      turn: state.turns,
-      tool_use_ids: ids,
-      content_block_starts: starts,
-      duplicate_ids: ids -- Enum.uniq(ids),
-      index_reused?: not_unique?(Enum.map(starts, &elem(&1, 0))),
-      id_reused?: not_unique?(ids)
-    }
+    duplicate_ids = ids -- Enum.uniq(ids)
 
     :telemetry.execute(
       [:req_managed_agents, :agent_core, :tool_uses],
       %{tool_use_count: length(ids)},
-      Map.merge(state.meta, diagnostic)
+      Map.merge(state.meta, %{turn: state.turns, tool_use_ids: ids})
     )
 
-    if diagnostic.duplicate_ids != [] do
-      Logger.warning("MIM-52 duplicate toolUseId in a single turn: #{inspect(diagnostic)}")
+    if duplicate_ids != [] do
+      Logger.warning(
+        "duplicate toolUseId from parse/1 at turn #{state.turns}: " <>
+          "#{inspect(duplicate_ids)} (ids=#{inspect(ids)}) — MIM-52 regression"
+      )
     end
 
     :ok
   end
-
-  defp not_unique?(list), do: length(list) != length(Enum.uniq(list))
 
   defp default_invoke_fun(opts) do
     client = opts[:client] || Client.new()
