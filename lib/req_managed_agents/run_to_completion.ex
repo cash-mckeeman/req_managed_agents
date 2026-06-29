@@ -3,7 +3,8 @@ defmodule ReqManagedAgents.RunToCompletion do
   # Synchronous one-shot driver: create a bare session, open the stream inline,
   # kickoff on :connected, resolve requires_action tool calls via the Handler,
   # accumulate events, and return on the first terminal (or :timeout).
-  alias ReqManagedAgents.{Client, Event, Stream, Tools}
+  alias ReqManagedAgents.{Client, Event, Provider, Stream, Tools}
+  alias ReqManagedAgents.Providers.ManagedAgents, as: Backend
 
   @spec run(keyword()) :: {:ok, map()} | {:error, term()}
   def run(opts) do
@@ -29,7 +30,6 @@ defmodule ReqManagedAgents.RunToCompletion do
           context: context,
           ref: ref,
           prompt: opts[:prompt] || "Begin.",
-          tool_uses: %{},
           seen: MapSet.new(),
           events: [],
           tel: opts[:telemetry_metadata] || %{}
@@ -94,40 +94,46 @@ defmodule ReqManagedAgents.RunToCompletion do
   defp handle_event(state, event, deadline),
     do: do_event(%{state | events: state.events ++ [event]}, event, deadline)
 
-  defp do_event(state, %{"type" => "agent.custom_tool_use", "id" => id} = ev, deadline),
-    do: loop(%{state | tool_uses: Map.put(state.tool_uses, id, ev)}, deadline)
+  defp do_event(state, %{"type" => "session.status_idle"} = event, deadline) do
+    outcome = Backend.normalize(state.events)
 
-  defp do_event(state, event, deadline) do
-    case Event.classify(event) do
+    case outcome.terminal do
       :requires_action ->
-        ids = get_in(event, ["stop_reason", "event_ids"]) || []
-        loop(resolve(state, ids), deadline)
+        loop(resolve(state, outcome.custom_tool_uses), deadline)
 
-      terminal when terminal in [:end_turn, :terminated, :error, :retries_exhausted] ->
-        :telemetry.execute(
-          [:req_managed_agents, :session, :terminal],
-          %{},
-          Map.put(tel_meta(state), :terminal, terminal)
-        )
-
-        {:ok, %{terminal: terminal, stop_reason: event["stop_reason"], events: state.events}}
-
-      _other ->
-        loop(state, deadline)
+      terminal ->
+        terminal_result(state, terminal, event["stop_reason"])
     end
   end
 
-  defp resolve(state, ids) do
+  defp do_event(state, %{"type" => "session.status_terminated"} = event, _deadline),
+    do: terminal_result(state, :terminated, event["stop_reason"])
+
+  defp do_event(state, %{"type" => "session.error"} = event, _deadline),
+    do: terminal_result(state, :terminated, event["stop_reason"])
+
+  defp do_event(state, _event, deadline), do: loop(state, deadline)
+
+  defp terminal_result(state, terminal, stop_reason) do
+    :telemetry.execute(
+      [:req_managed_agents, :session, :terminal],
+      %{},
+      Map.put(tel_meta(state), :terminal, terminal)
+    )
+
+    {:ok, %{terminal: terminal, stop_reason: stop_reason, events: state.events}}
+  end
+
+  defp resolve(state, custom_tool_uses) do
     results =
-      ids
-      |> Enum.map(&{&1, state.tool_uses[&1]})
-      |> Enum.filter(fn {_id, ev} -> match?(%{"type" => "agent.custom_tool_use"}, ev) end)
-      |> Enum.map(fn {id, %{"name" => name, "input" => input}} ->
-        Tools.run(state.handler, id, name, input, state.context, tel_meta(state))
+      Enum.map(custom_tool_uses, fn %{id: id, name: name, input: input} ->
+        wire = Tools.run(state.handler, id, name, input, state.context, tel_meta(state))
+        Provider.result_of(id, wire)
       end)
 
-    if results != [], do: Client.send_events(state.client, state.session_id, results)
-    %{state | tool_uses: Map.drop(state.tool_uses, ids)}
+    events = Backend.resume(custom_tool_uses, results)
+    if events != [], do: Client.send_events(state.client, state.session_id, events)
+    state
   end
 
   defp tel_meta(s), do: Map.put(s.tel, :session_id, s.session_id)
