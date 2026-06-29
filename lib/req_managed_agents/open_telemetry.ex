@@ -64,7 +64,7 @@ defmodule ReqManagedAgents.OpenTelemetry do
     _ -> {:error, :opentelemetry_unavailable}
   end
 
-  @spec detach(term()) :: :ok
+  @spec detach(term()) :: :ok | {:error, :not_found}
   def detach(handler_id \\ @handler_id), do: :telemetry.detach(handler_id)
 
   @doc false

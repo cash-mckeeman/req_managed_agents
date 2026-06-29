@@ -31,6 +31,11 @@ defmodule ReqManagedAgents.OpenTelemetryTest do
     OTel.detach("t-otel-test")
   end
 
+  test "detach/1 on a never-attached handler returns {:error, :not_found} (does not raise)" do
+    assert OTel.detach("qa-never-attached-#{System.unique_integer([:positive])}") ==
+             {:error, :not_found}
+  end
+
   test "attributes_for routes an agent.custom_tool_use stream event to tool_use (atom + string key)" do
     assert {"tool_use", _} =
              OTel.attributes_for([:req_managed_agents, :stream, :event], %{session_id: "s1", type: "agent.custom_tool_use"})
