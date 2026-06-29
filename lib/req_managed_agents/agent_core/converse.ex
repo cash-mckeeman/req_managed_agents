@@ -96,20 +96,21 @@ defmodule ReqManagedAgents.AgentCore.Converse do
   @type tool_result :: %{tool_use_id: String.t(), text: String.t(), is_error: boolean()}
 
   @doc """
-  Assemble the two messages required by the strict Harness resume contract.
+  Assemble the resume message(s) for the next `InvokeHarness` turn.
 
-  `results` must contain one entry per `tool_uses` entry (same length, each
-  entry supplying the `tool_use_id` returned by that call). A length mismatch
-  produces a structurally invalid Converse request — Converse requires exactly
-  one `toolResult` per `toolUse`.
+  Returns ONLY the `user` message carrying the `toolResult`s — NOT the assistant
+  `toolUse` blocks. `InvokeHarness` is session-stateful (keyed by `runtimeSessionId`):
+  it already recorded the assistant `toolUse` from its own streaming response, so
+  re-sending it accumulates duplicate `toolUse` Ids in the server's message list and
+  Bedrock rejects the request with a `ValidationException` ("duplicate Ids") once a
+  collision occurs on a longer conversation. The server matches each `toolResult` to
+  the `toolUse` it already holds. (MIM-52; `tool_uses` is retained in the signature
+  for symmetry/validation but is not echoed back.)
+
+  `results` must supply one `toolResult` per `toolUse` the turn produced.
   """
   @spec resume_messages([map()], [tool_result()]) :: [map()]
-  def resume_messages(tool_uses, results) do
-    assistant = %{
-      "role" => "assistant",
-      "content" => Enum.map(tool_uses, fn tu -> %{"toolUse" => tu} end)
-    }
-
+  def resume_messages(_tool_uses, results) do
     user = %{
       "role" => "user",
       "content" =>
@@ -124,6 +125,6 @@ defmodule ReqManagedAgents.AgentCore.Converse do
         end)
     }
 
-    [assistant, user]
+    [user]
   end
 end

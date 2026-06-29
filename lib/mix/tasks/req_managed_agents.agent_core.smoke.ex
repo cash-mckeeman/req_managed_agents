@@ -25,8 +25,9 @@ defmodule Mix.Tasks.ReqManagedAgents.AgentCore.Smoke do
      `AWS4-HMAC-SHA256` Authorization header.
   5. **tool_use decoded+parsed** — the loop actually ran the tool (the resume
      turn fired).
-  6. **strict resume contract** — the resume body contained BOTH `assistant`
-     (toolUse) and `user` (toolResult) roles.
+  6. **stateful resume contract** — the resume body contained ONLY the `user`
+     (toolResult) role; the session-stateful harness already holds the assistant
+     `toolUse`, so re-sending it would duplicate `toolUse` Ids (MIM-52).
   7. **tool text round-trip** — the toolResult text in the resume body equals
      `"echoed: hi"`.
   8. **terminal end_turn** — `invoke_to_completion` returned
@@ -222,12 +223,14 @@ defmodule Mix.Tasks.ReqManagedAgents.AgentCore.Smoke do
     {"tool_use decoded+parsed", :fail, "resume turn never fired"}
   end
 
-  defp resume_contract_stage(%{resume_roles: ["assistant", "user"]}) do
-    {"strict resume contract", :pass, "resume body roles: [\"assistant\", \"user\"]"}
+  defp resume_contract_stage(%{resume_roles: ["user"]}) do
+    {"stateful resume contract", :pass,
+     "resume body roles: [\"user\"] (toolResult only; harness holds the assistant toolUse — MIM-52)"}
   end
 
   defp resume_contract_stage(%{resume_roles: roles}) do
-    {"strict resume contract", :fail, "resume roles: #{inspect(roles)}"}
+    {"stateful resume contract", :fail,
+     "expected [\"user\"] (toolResult only, MIM-52); got #{inspect(roles)}"}
   end
 
   defp tool_text_stage(%{tool_result_text: "echoed: hi"}) do
