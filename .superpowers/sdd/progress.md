@@ -7,7 +7,7 @@ Docs commit: fc6bde27 (spec + plan)
 Baseline: `mix test` → 110 passed, 4 excluded (green).
 
 ## Tasks
-- [ ] Task 1: Provider behaviour + canonical types + result_of/2
+- [x] Task 1: Provider behaviour + canonical types + result_of/2
 - [ ] Task 2: Providers.AgentCore
 - [ ] Task 3: Providers.ManagedAgents
 - [ ] Task 4: Refactor invoke_to_completion through Providers.AgentCore
@@ -16,4 +16,4 @@ Baseline: `mix test` → 110 passed, 4 excluded (green).
 - [ ] Task 7: Terminal-collapse call-site audit + retire Event.classify
 
 ## Log
-(append one line per task as reviews come back clean)
+- Task 1: complete (commit 56bd8c0d, 3 tests, self-review clean, suite 113 passed)
