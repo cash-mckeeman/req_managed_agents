@@ -59,6 +59,16 @@ defmodule ReqManagedAgents.AgentCore.Client do
   def get_harness(c, id),
     do: span(c, :get, "/harnesses/#{id}", :get_harness, fn -> get_json(c, "/harnesses/#{id}") end)
 
+  @doc """
+  `ListHarnesses` (control plane). Returns the decoded body
+  `%{"harnesses" => [%{"harnessName", "harnessId", "arn", "status", ...}], "nextToken" => ...}`.
+  Used to recover an existing harness by name (idempotent provisioning) when a
+  `CreateHarness` collides with a previously-created harness of the same name.
+  """
+  @spec list_harnesses(t()) :: {:ok, map()} | {:error, term()}
+  def list_harnesses(c),
+    do: span(c, :get, "/harnesses", :list_harnesses, fn -> get_json(c, "/harnesses") end)
+
   @spec delete_harness(t(), String.t()) :: {:ok, map()} | {:error, term()}
   def delete_harness(c, id),
     do:
