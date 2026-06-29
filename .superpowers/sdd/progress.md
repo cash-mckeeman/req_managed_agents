@@ -11,7 +11,7 @@ Baseline: `mix test` → 110 passed, 4 excluded (green).
 - [x] Task 2: Providers.AgentCore
 - [x] Task 3: Providers.ManagedAgents
 - [x] Task 4: Refactor invoke_to_completion through Providers.AgentCore
-- [ ] Task 5: Refactor RunToCompletion through Providers.ManagedAgents + terminal collapse
+- [x] Task 5: Refactor RunToCompletion through Providers.ManagedAgents + terminal collapse
 - [ ] Task 6: Cross-provider conformance/symmetry/exclusion tests
 - [ ] Task 7: Terminal-collapse call-site audit + retire Event.classify
 
@@ -20,3 +20,9 @@ Baseline: `mix test` → 110 passed, 4 excluded (green).
 - Task 2: complete (commit 0899650e, 7 tests incl MIM-52 + exclusion, review clean, suite 120 passed)
 - Task 3: complete (commit e96f12a9, 8 tests incl most-recent-idle + exclusion, review clean, suite 128 passed)
 - Task 4: complete (commit e2a4ad27, agent_core 30/30, warnings-as-errors clean, suite 128 passed)
+- Task 5: complete (commit xqlkpzyy, run_to_completion 2/2, _deadline fix, suite 128 passed)
+
+## Finding (affects Task 7)
+Event.classify/1 has THREE consumers, not one: RunToCompletion (now refactored away),
+profile.ex:35, session.ex:176. It CANNOT be retired. Terminal collapse is non-uniform:
+RunToCompletion/AgentCore use 3 atoms; Session/Profile keep the richer set. Needs user decision.
