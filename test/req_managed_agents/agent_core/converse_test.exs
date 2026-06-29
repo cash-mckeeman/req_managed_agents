@@ -111,4 +111,67 @@ defmodule ReqManagedAgents.AgentCore.ConverseTest do
       assert get_in(user, ["content", Access.at(0), "toolResult", "status"]) == "error"
     end
   end
+
+  # MIM-52 fix. `parse/1` accumulates tool blocks keyed by `toolUseId` (the source of
+  # truth — Claude mints a fresh id per real call) and routes input deltas via a
+  # per-`contentBlockIndex` "active block" pointer. This survives a stream that reuses
+  # contentBlockIndex (B — a replayed/concatenated stream: both distinct ids are
+  # recovered, in first-seen order) and dedupes a genuinely-reused id (C). A clean
+  # parallel-tool turn (A) is unchanged. Live-confirmed mechanism: the Arm-3 vector
+  # emitted [{0, A}, {0, B}, {1, C}] — index 0 reused across two DISTINCT ids.
+  describe "tool-use id uniqueness (MIM-52)" do
+    test "A: clean parallel tools (distinct indices + ids) parse to distinct tool_uses" do
+      events = [start_block(0, "tu_1", "f"), start_block(1, "tu_2", "g"), tool_stop()]
+      assert ids(Converse.parse(events).tool_uses) == ["tu_1", "tu_2"]
+    end
+
+    test "B: a reused contentBlockIndex recovers BOTH distinct tools, in first-seen order" do
+      # Same contentBlockIndex 0 twice with distinct ids — what a replayed/concatenated
+      # stream looks like. Keying by id (not index) keeps both; neither is dropped.
+      events = [start_block(0, "tu_A", "f"), start_block(0, "tu_B", "g"), tool_stop()]
+      assert ids(Converse.parse(events).tool_uses) == ["tu_A", "tu_B"]
+    end
+
+    test "C: the same toolUseId at two indices dedupes to a single tool" do
+      events = [start_block(0, "tu_X", "f"), start_block(1, "tu_X", "g"), tool_stop()]
+      assert ids(Converse.parse(events).tool_uses) == ["tu_X"]
+    end
+
+    test "input deltas route to the active block at their index, even when index is reused" do
+      # tu_A opens at index 0, gets its input; then index 0 is reused for tu_B, whose
+      # input must NOT bleed into tu_A. Distinct ids, distinct inputs preserved.
+      events = [
+        start_block(0, "tu_A", "f"),
+        delta(0, "{\"a\":1}"),
+        start_block(0, "tu_B", "g"),
+        delta(0, "{\"b\":2}"),
+        tool_stop()
+      ]
+
+      assert [tu_a, tu_b] = Converse.parse(events).tool_uses
+      assert tu_a == %{"toolUseId" => "tu_A", "name" => "f", "input" => %{"a" => 1}}
+      assert tu_b == %{"toolUseId" => "tu_B", "name" => "g", "input" => %{"b" => 2}}
+    end
+  end
+
+  defp ids(tool_uses), do: Enum.map(tool_uses, & &1["toolUseId"])
+  defp tool_stop, do: %{"messageStop" => %{"stopReason" => "tool_use"}}
+
+  defp start_block(idx, id, name) do
+    %{
+      "contentBlockStart" => %{
+        "contentBlockIndex" => idx,
+        "start" => %{"toolUse" => %{"toolUseId" => id, "name" => name}}
+      }
+    }
+  end
+
+  defp delta(idx, frag) do
+    %{
+      "contentBlockDelta" => %{
+        "contentBlockIndex" => idx,
+        "delta" => %{"toolUse" => %{"input" => frag}}
+      }
+    }
+  end
 end

@@ -82,7 +82,12 @@ defmodule ReqManagedAgents.OpenTelemetry do
   # Adapter/Translator/Metrics machinery is intentionally not mirrored here.
   defp emit_span(type, attrs) do
     if available?() do
-      :otel_tracer.with_span(:opentelemetry.get_tracer(:req_managed_agents), type, %{attributes: attrs}, fn _ -> :ok end)
+      :otel_tracer.with_span(
+        :opentelemetry.get_tracer(:req_managed_agents),
+        type,
+        %{attributes: attrs},
+        fn _ -> :ok end
+      )
     end
 
     :ok

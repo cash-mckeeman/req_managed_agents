@@ -32,35 +32,52 @@ defmodule ReqManagedAgents.AgentCore.Converse do
   end
 
   @doc """
-  Fold a single Converse response's event sequence into `%{stop_reason, tool_uses, text}`.
+  Fold a Converse response's event sequence into `%{stop_reason, tool_uses, text}`.
 
-  **Single response only.** `contentBlockIndex` resets to 0 per response;
-  concatenating event lists from multiple invocations would collide on shared
-  indices and silently drop tools.
+  Tool blocks are accumulated keyed by **`toolUseId`** — the source of truth, since
+  Claude mints a fresh id per real tool call — and emitted in first-seen order.
+  Input `toolUse` deltas route to whichever block is *active* at their
+  `contentBlockIndex` (tracked per index).
+
+  Keying by id rather than `contentBlockIndex` makes parsing robust to a stream that
+  **reuses an index** across two distinct ids (MIM-52: the live Arm-3 vector emitted
+  `[{0, A}, {0, B}, {1, C}]` — index 0 reused). An index-keyed fold dropped one tool
+  and duplicated the other, producing a duplicate-`toolUseId` resume that Bedrock
+  rejected; keying by id recovers both. A genuinely-reused id collapses to one block.
   """
   @spec parse([map()]) :: %{stop_reason: String.t() | nil, tool_uses: [map()], text: String.t()}
   def parse(events) do
-    init = %{stop_reason: nil, tool_uses: %{}, text: "", order: []}
+    init = %{stop_reason: nil, blocks: %{}, active: %{}, order: [], text: ""}
 
     state = Enum.reduce(events, init, &reduce_event/2)
 
     tool_uses =
       state.order
       |> Enum.reverse()
-      |> Enum.map(fn idx ->
-        %{"toolUseId" => id, "name" => name, "input_acc" => acc} = state.tool_uses[idx]
+      |> Enum.map(fn id ->
+        %{"name" => name, "input_acc" => acc} = state.blocks[id]
         %{"toolUseId" => id, "name" => name, "input" => decode_input(acc)}
       end)
 
     %{stop_reason: state.stop_reason, tool_uses: tool_uses, text: state.text}
   end
 
+  # A toolUse contentBlockStart opens (or re-opens) a block keyed by its toolUseId and
+  # marks that id active at this contentBlockIndex, so subsequent input deltas at the
+  # same index route to it. A reused id keeps its first-seen position in `order`.
   defp reduce_event(
          %{"contentBlockStart" => %{"contentBlockIndex" => i, "start" => %{"toolUse" => tu}}},
          s
        ) do
-    entry = %{"toolUseId" => tu["toolUseId"], "name" => tu["name"], "input_acc" => ""}
-    %{s | tool_uses: Map.put(s.tool_uses, i, entry), order: [i | s.order]}
+    id = tu["toolUseId"]
+    entry = %{"name" => tu["name"], "input_acc" => ""}
+
+    %{
+      s
+      | blocks: Map.put(s.blocks, id, entry),
+        active: Map.put(s.active, i, id),
+        order: if(id in s.order, do: s.order, else: [id | s.order])
+    }
   end
 
   defp reduce_event(
@@ -72,7 +89,10 @@ defmodule ReqManagedAgents.AgentCore.Converse do
          },
          s
        ) do
-    update_in(s.tool_uses[i]["input_acc"], &((&1 || "") <> frag))
+    case s.active[i] do
+      nil -> s
+      id -> update_in(s.blocks[id]["input_acc"], &(&1 <> frag))
+    end
   end
 
   defp reduce_event(%{"contentBlockDelta" => %{"delta" => %{"text" => t}}}, s),
@@ -105,10 +125,10 @@ defmodule ReqManagedAgents.AgentCore.Converse do
   previous turn" (live-verified). So we echo the assistant `toolUse` back.
 
   `results` must contain one entry per `tool_uses` entry (same length, each
-  supplying the `tool_use_id` returned by that call). NOTE: if a single turn's
-  `tool_uses` contains duplicate `toolUseId`s, Bedrock rejects the request
-  ("duplicate Ids at messages.N.content") — see MIM-52 (still open: the duplicate
-  originates upstream of here, in parse / parallel-tool handling).
+  supplying the `tool_use_id` returned by that call). Bedrock rejects a turn whose
+  assistant message carries duplicate `toolUseId`s ("duplicate Ids at
+  messages.N.content"); `parse/1` guarantees unique ids by keying tool blocks on
+  `toolUseId`, so a well-formed `tool_uses` never trips this (MIM-52).
   """
   @spec resume_messages([map()], [tool_result()]) :: [map()]
   def resume_messages(tool_uses, results) do

@@ -14,6 +14,8 @@ defmodule ReqManagedAgents.AgentCore do
   alias ReqManagedAgents.AgentCore.{Client, Converse}
   alias ReqManagedAgents.Tools
 
+  require Logger
+
   # Extra attempts per turn on a transport error or a truncated stream (see
   # invoke_turn/3). The long data-plane InvokeHarness stream occasionally drops
   # mid-flight; a turn carries no irreversible local side effect until its tools
@@ -133,6 +135,7 @@ defmodule ReqManagedAgents.AgentCore do
 
           nil ->
             parsed = Converse.parse(events)
+            emit_tool_use_telemetry(state, parsed)
 
             cond do
               parsed.stop_reason != nil -> {:ok, events, parsed}
@@ -192,6 +195,30 @@ defmodule ReqManagedAgents.AgentCore do
   defp terminal_atom("max_tokens"), do: :terminated
   defp terminal_atom("guardrail_intervened"), do: :terminated
   defp terminal_atom(_other), do: :terminated
+
+  # Per-turn tool-use telemetry, plus a regression sentinel for MIM-52: `Converse.parse/1`
+  # keys tool blocks by toolUseId, so its output is unique by construction. If a duplicate
+  # ever reaches here again, surface it loudly — a duplicate toolUseId in the resume makes
+  # Bedrock reject the NEXT turn with an opaque ConverseStream ValidationException.
+  defp emit_tool_use_telemetry(state, parsed) do
+    ids = Enum.map(parsed.tool_uses, & &1["toolUseId"])
+    duplicate_ids = ids -- Enum.uniq(ids)
+
+    :telemetry.execute(
+      [:req_managed_agents, :agent_core, :tool_uses],
+      %{tool_use_count: length(ids)},
+      Map.merge(state.meta, %{turn: state.turns, tool_use_ids: ids})
+    )
+
+    if duplicate_ids != [] do
+      Logger.warning(
+        "duplicate toolUseId from parse/1 at turn #{state.turns}: " <>
+          "#{inspect(duplicate_ids)} (ids=#{inspect(ids)}) — MIM-52 regression"
+      )
+    end
+
+    :ok
+  end
 
   defp default_invoke_fun(opts) do
     client = opts[:client] || Client.new()

@@ -10,7 +10,9 @@ defmodule ReqManagedAgents.OpenTelemetry.AttributesTest do
   end
 
   test "chat carries usage tokens when present (string-keyed Anthropic usage)" do
-    out = Attributes.chat(%{session_id: "s1", usage: %{"input_tokens" => 10, "output_tokens" => 5}})
+    out =
+      Attributes.chat(%{session_id: "s1", usage: %{"input_tokens" => 10, "output_tokens" => 5}})
+
     assert out["gen_ai.operation.name"] == "chat"
     assert out["gen_ai.provider.name"] == "anthropic"
     assert out["gen_ai.usage.input_tokens"] == 10
