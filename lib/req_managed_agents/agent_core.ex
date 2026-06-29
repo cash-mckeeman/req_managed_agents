@@ -11,8 +11,9 @@ defmodule ReqManagedAgents.AgentCore do
   `:invoke_fun` defaults to `AgentCore.Client.invoke_harness/2`-backed and is an
   injectable test seam.
   """
-  alias ReqManagedAgents.AgentCore.{Client, Converse}
-  alias ReqManagedAgents.Tools
+  alias ReqManagedAgents.AgentCore.Client
+  alias ReqManagedAgents.{Provider, Tools}
+  alias ReqManagedAgents.Providers.AgentCore, as: Backend
 
   require Logger
 
@@ -134,7 +135,7 @@ defmodule ReqManagedAgents.AgentCore do
             {:error, {:harness_stream_error, type, message}}
 
           nil ->
-            parsed = Converse.parse(events)
+            parsed = Backend.normalize(events)
             emit_tool_use_telemetry(state, parsed)
 
             cond do
@@ -164,23 +165,18 @@ defmodule ReqManagedAgents.AgentCore do
   defp stream_error_message(%{"message" => msg}) when is_binary(msg), do: msg
   defp stream_error_message(other), do: other
 
-  defp handle(state, %{stop_reason: "tool_use", tool_uses: tool_uses}, deadline) do
+  defp handle(state, %{terminal: :requires_action, custom_tool_uses: tool_uses}, deadline) do
     results =
-      Enum.map(tool_uses, fn %{"toolUseId" => id, "name" => name, "input" => input} ->
+      Enum.map(tool_uses, fn %{id: id, name: name, input: input} ->
         event = Tools.run(state.handler, id, name, input, state.context, state.meta)
-        # Tools.run returns Event.custom_tool_result/3 where "content" is
-        # [%{"type" => "text", "text" => text}] — extract the text from the head.
-        text = get_in(event, ["content", Access.at(0), "text"]) || ""
-        %{tool_use_id: id, text: text, is_error: event["is_error"] == true}
+        Provider.result_of(id, event)
       end)
 
-    resume = Converse.resume_messages(tool_uses, results)
+    resume = Backend.resume(tool_uses, results)
     loop(state, resume, deadline)
   end
 
-  defp handle(state, %{stop_reason: reason}, _deadline) do
-    terminal = terminal_atom(reason)
-
+  defp handle(state, %{terminal: terminal, stop_reason: reason}, _deadline) do
     :telemetry.execute(
       [:req_managed_agents, :agent_core, :terminal],
       %{},
@@ -190,18 +186,12 @@ defmodule ReqManagedAgents.AgentCore do
     {:ok, %{terminal: terminal, stop_reason: reason, events: state.events}}
   end
 
-  defp terminal_atom("end_turn"), do: :end_turn
-  defp terminal_atom("stop_sequence"), do: :end_turn
-  defp terminal_atom("max_tokens"), do: :terminated
-  defp terminal_atom("guardrail_intervened"), do: :terminated
-  defp terminal_atom(_other), do: :terminated
-
   # Per-turn tool-use telemetry, plus a regression sentinel for MIM-52: `Converse.parse/1`
   # keys tool blocks by toolUseId, so its output is unique by construction. If a duplicate
   # ever reaches here again, surface it loudly — a duplicate toolUseId in the resume makes
   # Bedrock reject the NEXT turn with an opaque ConverseStream ValidationException.
   defp emit_tool_use_telemetry(state, parsed) do
-    ids = Enum.map(parsed.tool_uses, & &1["toolUseId"])
+    ids = Enum.map(parsed.custom_tool_uses, & &1.id)
     duplicate_ids = ids -- Enum.uniq(ids)
 
     :telemetry.execute(
