@@ -163,6 +163,30 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
     assert meta.method == :get
   end
 
+  test "invoke requests enable TCP keep-alive via connect_options" do
+    test_pid = self()
+
+    client =
+      Client.new(
+        credentials: @creds,
+        req_options: [
+          adapter: fn req ->
+            send(test_pid, {:connect_options, req.options[:connect_options]})
+            {req, Req.Response.new(status: 200, body: "")}
+          end
+        ]
+      )
+
+    Client.invoke_harness(client, %{
+      harness_arn: "arn:aws:bedrock-agentcore:us-east-1:1:harness/ba",
+      runtime_session_id: String.duplicate("s", 33),
+      messages: [%{"role" => "user", "content" => [%{"text" => "hi"}]}]
+    })
+
+    assert_receive {:connect_options, opts}
+    assert get_in(opts, [:transport_opts, :keepalive]) == true
+  end
+
   test "POST invoke_harness is NOT retried on transient server errors (counter == 1)", %{
     bypass: bypass,
     client: client
