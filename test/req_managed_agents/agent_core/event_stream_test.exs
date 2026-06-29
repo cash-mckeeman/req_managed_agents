@@ -109,4 +109,31 @@ defmodule ReqManagedAgents.AgentCore.EventStreamTest do
     corrupted = frame_body <> <<0xDEADBEEF::32>>
     assert {[], ""} = EventStream.decode(corrupted)
   end
+
+  test ":message-type error frame surfaces as __stream_error__ with the header's error-message" do
+    # An `error` frame (distinct from `exception`) carries its detail in the
+    # :error-code / :error-message headers, not the body. The lib classifies it as
+    # {:error, code, message}; the adapter maps that to the __stream_error__ envelope
+    # so agent_core's stream_error/1 surfaces it (message is a plain string here).
+    headers_bin =
+      str_header(":message-type", "error") <>
+        str_header(":error-code", "throttling") <>
+        str_header(":error-message", "slow down")
+
+    f = frame_with_headers(headers_bin, ~s({}))
+
+    assert {[event], ""} = EventStream.decode(f)
+
+    assert event == %{
+             "__stream_error__" => %{"type" => "throttling", "message" => "slow down"}
+           }
+  end
+
+  test "a CRC-valid event frame with a non-JSON body is dropped" do
+    # No :message-type / :event-type headers → classified as an :event whose payload
+    # fails to decode → {:malformed_payload, _, _} → dropped. Preserves the prior
+    # 'an undecodable body is noise' posture (an exception body, by contrast, is kept).
+    f = frame("this is not valid json")
+    assert {[], ""} = EventStream.decode(f)
+  end
 end
