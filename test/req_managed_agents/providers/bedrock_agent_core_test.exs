@@ -1,6 +1,6 @@
-defmodule ReqManagedAgents.Providers.AgentCoreTest do
+defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Providers.AgentCore
+  alias ReqManagedAgents.Providers.BedrockAgentCore, as: AgentCore
 
   defp start_block(idx, id, name) do
     %{"contentBlockStart" => %{"contentBlockIndex" => idx, "start" => %{"toolUse" => %{"toolUseId" => id, "name" => name}}}}

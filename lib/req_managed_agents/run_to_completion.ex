@@ -4,7 +4,7 @@ defmodule ReqManagedAgents.RunToCompletion do
   # kickoff on :connected, resolve requires_action tool calls via the Handler,
   # accumulate events, and return on the first terminal (or :timeout).
   alias ReqManagedAgents.{Client, Event, Provider, Stream, Tools}
-  alias ReqManagedAgents.Providers.ManagedAgents, as: Backend
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents, as: Backend
 
   @spec run(keyword()) :: {:ok, map()} | {:error, term()}
   def run(opts) do

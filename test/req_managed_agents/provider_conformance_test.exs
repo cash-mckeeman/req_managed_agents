@@ -3,7 +3,8 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
   use ExUnit.Case, async: true
 
   alias ReqManagedAgents.Provider
-  alias ReqManagedAgents.Providers.{AgentCore, ManagedAgents}
+  alias ReqManagedAgents.Providers.BedrockAgentCore, as: AgentCore
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents, as: ManagedAgents
 
   @providers [AgentCore, ManagedAgents]
 

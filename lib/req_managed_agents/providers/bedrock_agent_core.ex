@@ -1,4 +1,4 @@
-defmodule ReqManagedAgents.Providers.AgentCore do
+defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   @moduledoc """
   `ReqManagedAgents.Provider` implementation for the Bedrock AgentCore (`vnd.amazon.eventstream`)
   backend. A thin adapter over the existing `AgentCore.EventStream` and `AgentCore.Converse`.

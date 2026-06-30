@@ -1,4 +1,4 @@
-defmodule ReqManagedAgents.Providers.ManagedAgents do
+defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @moduledoc """
   `ReqManagedAgents.Provider` implementation for the Anthropic Managed Agents (SSE) backend.
 

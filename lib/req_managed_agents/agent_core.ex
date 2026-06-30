@@ -13,7 +13,7 @@ defmodule ReqManagedAgents.AgentCore do
   """
   alias ReqManagedAgents.AgentCore.Client
   alias ReqManagedAgents.{Provider, Tools}
-  alias ReqManagedAgents.Providers.AgentCore, as: Backend
+  alias ReqManagedAgents.Providers.BedrockAgentCore, as: Backend
 
   require Logger
 

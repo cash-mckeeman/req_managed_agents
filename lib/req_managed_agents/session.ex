@@ -15,7 +15,7 @@ defmodule ReqManagedAgents.Session do
   require Logger
 
   alias ReqManagedAgents.{Client, Consolidate, Event, Provider, Stream, Tools}
-  alias ReqManagedAgents.Providers.ManagedAgents, as: Backend
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents, as: Backend
 
   defstruct [
     :client,

@@ -1,6 +1,6 @@
-defmodule ReqManagedAgents.Providers.ManagedAgentsTest do
+defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Providers.ManagedAgents
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents, as: ManagedAgents
 
   defp use_event(id, name, input),
     do: %{"type" => "agent.custom_tool_use", "id" => id, "name" => name, "input" => input}
