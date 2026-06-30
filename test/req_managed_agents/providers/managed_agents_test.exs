@@ -57,6 +57,26 @@ defmodule ReqManagedAgents.Providers.ManagedAgentsTest do
     assert %{terminal: :terminated} = ManagedAgents.normalize([%{"type" => "session.error"}])
   end
 
+  test "normalize/1 never crashes on a status_idle with null/absent stop_reason (jido idle)" do
+    # latest_status/1 recognizes a status_idle by type alone; a null or typeless
+    # stop_reason must NOT raise (the old Event.classify degraded it to :other). The
+    # jido creation-time idle is Profile's context-dependent concern, not this provider's;
+    # here we conservatively terminate rather than crash or hang.
+    assert %{terminal: :terminated, custom_tool_uses: []} =
+             ManagedAgents.normalize([%{"type" => "session.status_idle", "stop_reason" => nil}])
+
+    assert %{terminal: :terminated, custom_tool_uses: []} =
+             ManagedAgents.normalize([%{"type" => "session.status_idle"}])
+  end
+
+  test "normalize/1 keeps :requires_action even when event_ids reference unstashed ids" do
+    # The spec's "non-empty iff :requires_action" is the normal case; a requires_action
+    # whose event_ids reference ids we never stashed yields an empty custom_tool_uses.
+    # The drivers resolve([]) → no-op continue (matching pre-refactor behavior).
+    events = [%{"type" => "session.status_idle", "stop_reason" => %{"type" => "requires_action", "event_ids" => ["ghost"]}}]
+    assert %{terminal: :requires_action, custom_tool_uses: []} = ManagedAgents.normalize(events)
+  end
+
   test "resume/2 builds user.custom_tool_result events from canonical results" do
     results = [%{tool_use_id: "e1", text: "ok", is_error: false}, %{tool_use_id: "e2", text: "boom", is_error: true}]
     events = ManagedAgents.resume([], results)

@@ -38,7 +38,17 @@ defmodule ReqManagedAgents.Providers.ManagedAgents do
       %{"type" => "session.error"} ->
         outcome(:terminated, "error", [])
 
-      nil ->
+      # A status_idle whose stop_reason carries no recognizable type — e.g. a null
+      # stop_reason, which is jido's creation-time / end_turn idle. Its terminal verdict
+      # is context-dependent ("agent seen?") and is `ReqManagedAgents.Profile`'s job, not
+      # this provider's; the anthropic shape this provider targets always carries a typed
+      # stop_reason. Defensive: never crash — conservatively treat an unrecognized idle as
+      # terminal (the spec's `unknown_idle -> :terminated` row), preventing a hang.
+      %{"type" => "session.status_idle"} ->
+        outcome(:terminated, nil, [])
+
+      # No status event present, or any other unrecognized shape.
+      _ ->
         outcome(:terminated, nil, [])
     end
   end

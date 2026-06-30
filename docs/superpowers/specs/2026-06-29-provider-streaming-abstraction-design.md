@@ -46,6 +46,12 @@ The existing code already encodes this distinction in its wire vocabulary — th
 
 **Implementation outcome:** the Managed Agents side turned out to have a *third* turn driver beyond `RunToCompletion` — the stateful `ReqManagedAgents.Session` GenServer — which was also migrated onto `Providers.ManagedAgents` (it has no full event list, so it calls `normalize/1` on a synthetic per-turn list, `Map.values(stash) ++ [status_event]`). So **all three drivers** (`RunToCompletion`, `Session`, `AgentCore.invoke_to_completion/1`) now emit the canonical 3-atom terminal — the collapse is uniform. `Event.classify/1` is **retained**, not retired: it still backs `ReqManagedAgents.Profile`'s wire-compat `terminal?/3` predicate (currently unused scaffolding). Migrating `Profile` off `classify` and then retiring `classify` is explicit follow-up.
 
+**Review-confirmed behaviors & known limitations** (from the whole-branch review):
+
+- **Empty `custom_tool_uses` on `:requires_action`.** If a `requires_action` idle's `event_ids` reference ids not present as `agent.custom_tool_use` events, `normalize/1` returns `:requires_action` with `custom_tool_uses: []`. Both drivers `resolve([])` → no-op continue, identical to pre-refactor behavior. The "non-empty iff" phrasing is therefore relaxed to "populated only on `:requires_action`."
+- **Untyped / null-`stop_reason` `status_idle`.** `ManagedAgents.normalize/1` treats an idle with no recognizable `stop_reason.type` (e.g. jido's creation-time/null idle) defensively as `:terminated` rather than crashing or hanging. The anthropic shape this provider targets always carries a typed `stop_reason`; jido's *context-dependent* verdict ("agent seen?") lives in `ReqManagedAgents.Profile` and is the follow-up that would wire jido into these drivers.
+- **Accepted observability deltas of the collapse.** `SemConv.finish_reason/1` retains `:error`/`:retries_exhausted` clauses that are now unreachable from the three drivers (still valid for direct callers/tests; harmless). `Session`'s `:notify` tuple `{:managed_agents_session, terminal}` carries only the collapsed atom (no `stop_reason`), so a notify consumer can no longer distinguish `:error`/`:retries_exhausted`; changing the tuple shape would break the public contract, so it is left as-is.
+
 **Out of scope (explicitly):**
 
 - **Building `ant_event_stream`** — rejected above.
@@ -111,7 +117,9 @@ Internal representation (atom-keyed — these are RMA-internal types, distinct f
         terminal: terminal(),
         stop_reason: String.t() | nil,           # raw provider string, preserved for fidelity
         custom_tool_uses: [custom_tool_use()],   # return-of-control tools to run locally;
-                                                 # non-empty iff terminal == :requires_action.
+                                                 # populated only on terminal == :requires_action
+                                                 # (else []; may also be [] if the server's
+                                                 # event_ids reference no stashed custom tool).
                                                  # Server-side tool activity is excluded by design.
         text: String.t()                         # assistant text; best-effort (see "text field" below)
       }
@@ -224,7 +232,7 @@ Both drivers keep returning `{:ok, %{terminal: terminal(), stop_reason: term(), 
 TDD per the implementation plan. Key strategy:
 
 1. **Golden event fixtures per backend.** Reuse/extend the existing `event_stream_test.exs` (Bedrock) and `sse_test.exs` (Managed) corpora; capture a real Managed Agents `requires_action` turn (including the assistant-text event) as a golden fixture to pin the `text` shape rather than guess it.
-2. **Behaviour conformance test** (shared): for each provider module, assert it implements all `Provider` callbacks and that `normalize/1` of its golden fixture yields a well-formed `turn_outcome` — `terminal` in the canonical set, `custom_tool_uses` matching canonical `%{id, name, input}`, `custom_tool_uses` non-empty iff `:requires_action`.
+2. **Behaviour conformance test** (shared): for each provider module, assert it implements all `Provider` callbacks and that `normalize/1` of its golden fixture yields a well-formed `turn_outcome` — `terminal` in the canonical set, `custom_tool_uses` matching canonical `%{id, name, input}`, `custom_tool_uses` populated only on `:requires_action` (empty for terminal outcomes; see "Review-confirmed behaviors").
 3. **Server-side exclusion test** (the thesis guard): a fixture containing both a client-side (return-of-control) tool call *and* a server-side/built-in tool use+result normalizes to `custom_tool_uses` holding **only** the client-side call; the server-side activity remains in `events` and never reaches the actionable path. One per backend.
 4. **Cross-provider symmetry test:** a `requires_action`/`tool_use` fixture from each backend normalizes to the *same canonical shape* (modulo ids/names), proving the vocabulary is genuinely shared.
 5. **MIM-52 regression preserved:** the index-reuse vector (`[{0,A},{0,B},{1,C}]`) still recovers both tools through `Providers.AgentCore.normalize/1`.
