@@ -27,32 +27,4 @@ defmodule ReqManagedAgents.EventTest do
     assert Event.tool_confirmation("t1", :allow)["result"] == "allow"
     assert Event.tool_confirmation("t1", :deny)["result"] == "deny"
   end
-
-  test "classify/1 maps idle stop reasons" do
-    assert Event.classify(%{
-             "type" => "session.status_idle",
-             "stop_reason" => %{"type" => "end_turn"}
-           }) == :end_turn
-
-    assert Event.classify(%{
-             "type" => "session.status_idle",
-             "stop_reason" => %{"type" => "requires_action", "event_ids" => ["e1"]}
-           }) == :requires_action
-
-    assert Event.classify(%{
-             "type" => "session.status_idle",
-             "stop_reason" => %{"type" => "retries_exhausted"}
-           }) == :retries_exhausted
-  end
-
-  test "classify/1 maps terminal/error/unknown" do
-    assert Event.classify(%{"type" => "session.status_terminated"}) == :terminated
-    assert Event.classify(%{"type" => "session.error", "error" => %{}}) == :error
-    assert Event.classify(%{"type" => "agent.message"}) == :other
-
-    assert Event.classify(%{
-             "type" => "session.status_idle",
-             "stop_reason" => %{"type" => "weird"}
-           }) == :unknown_idle
-  end
 end

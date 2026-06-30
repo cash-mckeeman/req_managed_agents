@@ -1,21 +1,15 @@
 defmodule ReqManagedAgents.Event do
   @moduledoc """
-  Outbound event builders and inbound event classification for Managed Agents.
+  Outbound event builders for Managed Agents.
 
   Events are plain JSON maps with string keys (the wire shape). Builders produce
-  events to POST to `/v1/sessions/{id}/events`; `classify/1` reduces an inbound
-  event to a terminal/flow atom for loop control.
+  events to POST to `/v1/sessions/{id}/events`. Inbound event classification now
+  lives with its consumers: `ReqManagedAgents.Provider.terminal/1` for the canonical
+  3-atom taxonomy the providers use, and `ReqManagedAgents.Profile.terminal?/3` for
+  jido wire-compat.
   """
 
   @type event :: %{required(String.t()) => term()}
-  @type terminal ::
-          :end_turn
-          | :requires_action
-          | :retries_exhausted
-          | :terminated
-          | :error
-          | :unknown_idle
-          | :other
 
   @doc "Build a `user.message` text event."
   @spec user_message(String.t()) :: event()
@@ -43,19 +37,4 @@ defmodule ReqManagedAgents.Event do
       "result" => Atom.to_string(decision)
     }
   end
-
-  @doc "Classify an inbound event into a flow-control atom."
-  @spec classify(event()) :: terminal()
-  def classify(%{"type" => "session.status_idle", "stop_reason" => %{"type" => reason}}) do
-    case reason do
-      "end_turn" -> :end_turn
-      "requires_action" -> :requires_action
-      "retries_exhausted" -> :retries_exhausted
-      _ -> :unknown_idle
-    end
-  end
-
-  def classify(%{"type" => "session.status_terminated"}), do: :terminated
-  def classify(%{"type" => "session.error"}), do: :error
-  def classify(_), do: :other
 end

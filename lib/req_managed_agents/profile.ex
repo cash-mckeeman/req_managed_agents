@@ -8,6 +8,9 @@ defmodule ReqManagedAgents.Profile do
   """
   @type t :: :anthropic | :jido
 
+  @typedoc "A terminal verdict for a Managed Agents idle/terminal event."
+  @type terminal :: :end_turn | :terminated | :error | :retries_exhausted
+
   @spec tool_use(t(), map()) :: {String.t(), map()}
   def tool_use(:anthropic, %{"name" => name, "input" => input}), do: {name, input}
 
@@ -22,7 +25,7 @@ defmodule ReqManagedAgents.Profile do
   Terminal verdict for an idle/terminal event. Returns a terminal atom or `false`.
   For :jido, a creation-time status_idle (before any agent event) is NOT terminal.
   """
-  @spec terminal?(t(), map(), boolean()) :: ReqManagedAgents.Event.terminal() | false
+  @spec terminal?(t(), map(), boolean()) :: terminal() | false
   def terminal?(:anthropic, event, _seen?), do: anthropic_terminal(event)
 
   def terminal?(:jido, %{"type" => "session.status_idle", "stop_reason" => nil}, true),
@@ -31,10 +34,19 @@ defmodule ReqManagedAgents.Profile do
   def terminal?(:jido, %{"type" => "session.status_idle", "stop_reason" => nil}, false), do: false
   def terminal?(:jido, event, _seen?), do: anthropic_terminal(event)
 
-  defp anthropic_terminal(event) do
-    case ReqManagedAgents.Event.classify(event) do
-      t when t in [:end_turn, :terminated, :error, :retries_exhausted] -> t
+  # Terminal verdict for an idle/terminal event, or false when it is not terminal (a
+  # `requires_action` or unknown idle, or any non-status event). The wire-compat
+  # counterpart to `Provider.terminal/1`, but it keeps the richer atoms the Managed
+  # Agents wire distinguishes (`:error`, `:retries_exhausted`) rather than collapsing.
+  defp anthropic_terminal(%{"type" => "session.status_idle", "stop_reason" => %{"type" => reason}}) do
+    case reason do
+      "end_turn" -> :end_turn
+      "retries_exhausted" -> :retries_exhausted
       _ -> false
     end
   end
+
+  defp anthropic_terminal(%{"type" => "session.status_terminated"}), do: :terminated
+  defp anthropic_terminal(%{"type" => "session.error"}), do: :error
+  defp anthropic_terminal(_), do: false
 end
