@@ -30,7 +30,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       # Harness built-in tools execute in-microVM and do not surface in the Converse
       # stream as a distinct event we can model yet — so none are reported here.
       server_tool_uses: [],
-      text: text
+      text: text,
+      # Raw Converse events preserved verbatim (see Provider's "Raw preservation").
+      events: events
     }
   end
 

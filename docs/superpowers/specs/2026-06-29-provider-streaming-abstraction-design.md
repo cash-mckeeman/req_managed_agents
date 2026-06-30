@@ -113,8 +113,9 @@ Internal representation (atom-keyed — these are RMA-internal types, distinct f
 
 @type terminal :: :end_turn | :requires_action | :terminated
 
-# A SERVER-SIDE (provider-executed) tool call — observe-only, never actionable.
-@type server_tool_use :: %{name: String.t(), input: map()}
+# A SERVER-SIDE (provider-executed) tool call — observe-only, never actionable. `id` is the
+# event id (kept for dedup / future correlation to a server tool_result).
+@type server_tool_use :: %{id: String.t() | nil, name: String.t(), input: map()}
 
 @type turn_outcome :: %{
         terminal: terminal(),
@@ -125,9 +126,22 @@ Internal representation (atom-keyed — these are RMA-internal types, distinct f
                                                  # event_ids reference no stashed custom tool).
         server_tool_uses: [server_tool_use()],   # provider-executed tools, OBSERVE-ONLY;
                                                  # never actionable, never in custom_tool_uses.
-        text: String.t()                         # assistant text from agent.message
+        text: String.t(),                        # assistant text (agent.message text blocks, "\n"-joined)
+        events: [event()]                        # RAW provider events, preserved verbatim (see below)
       }
 ```
+
+**Raw preservation (a load-bearing principle).** Normalization is *additive, never lossy*:
+`turn_outcome` carries the raw, JSON-decoded provider `events` it was derived from
+alongside the normalized fields. RMA normalizes the *standard behaviour* (terminal, the
+return-of-control tools a consumer must run, observe-only server tools, assistant text) but
+**does not swallow the wire shapes**. A downstream consumer debugging against the provider's
+own event documentation (Anthropic Managed Agents SSE event types; Bedrock Converse blocks)
+can always read the exact shapes that arrived from `events` — the normalized views
+(`custom_tool_uses` / `server_tool_uses` / `text`) are a convenience over, not a replacement
+for, the raw. Both providers preserve `events`; under the `Session` driver the list reflects
+only that driver's stash-derived input (it uses `normalize/1` for control flow only — the
+full raw stream reaches consumers via the Handler's `handle_event/2`).
 
 `custom_tool_result` is **already shared** by both backends today: `Event.custom_tool_result/3` and `Converse.resume_messages/2` both consume `%{tool_use_id, text, is_error}`, and `Tools.run/6` produces it. We promote the existing de-facto type to the behaviour; no change to `Tools`. Server-side / built-in tool use and tool **results** are intentionally absent from this canonical vocabulary — they are the provider's responsibility, surface only as raw `events`, and are never named `custom_*` (see "Core distinction" above).
 

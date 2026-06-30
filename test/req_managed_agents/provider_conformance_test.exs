@@ -46,10 +46,12 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
       assert is_binary(id) and is_binary(name) and is_map(input)
       assert is_list(outcome.server_tool_uses)
       assert is_binary(outcome.text)
+      # Raw preservation: every provider returns the input events verbatim.
+      assert outcome.events == requires_action_fixture(provider)
     end
   end
 
-  test "custom_tool_uses is non-empty iff terminal is :requires_action" do
+  test "custom_tool_uses populated only on :requires_action (empty for terminal outcomes)" do
     for provider <- @providers do
       ra = provider.normalize(requires_action_fixture(provider))
       assert ra.custom_tool_uses != []

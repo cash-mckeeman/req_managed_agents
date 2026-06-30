@@ -20,7 +20,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
              stop_reason: "tool_use",
              custom_tool_uses: [%{id: "tu_1", name: "echo", input: %{"text" => "hi"}}],
              server_tool_uses: [],
-             text: ""
+             text: "",
+             # Raw Converse events preserved verbatim alongside the normalized view.
+             events: events
            }
   end
 

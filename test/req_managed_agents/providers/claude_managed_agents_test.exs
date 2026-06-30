@@ -19,7 +19,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
                %{id: "e1", name: "f", input: %{"a" => 1}}
              ],
              server_tool_uses: [],
-             text: ""
+             text: "",
+             # Raw events preserved verbatim alongside the normalized view.
+             events: events
            }
   end
 
@@ -90,26 +92,31 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   # Assistant-text extraction. agent.message shape verified against Anthropic's Managed
   # Agents docs and the biai-platform consumer:
   # %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => ...}]}.
-  test "normalize/1 concatenates text blocks from agent.message events" do
+  test "normalize/1 joins text blocks across agent.message events with newlines (matches consumer)" do
     events = [
-      %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => "Hello, "}]},
-      %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => "world."}]},
+      %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => "First line."}]},
+      %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => "Second line."}]},
       idle("end_turn")
     ]
 
-    assert %{terminal: :end_turn, text: "Hello, world."} = ManagedAgents.normalize(events)
+    assert %{terminal: :end_turn, text: "First line.\nSecond line."} = ManagedAgents.normalize(events)
   end
 
-  test "normalize/1 skips non-text content blocks (thinking/tool_use) when building text" do
+  test "normalize/1 joins multiple text blocks within one agent.message and skips non-text blocks" do
     events = [
       %{
         "type" => "agent.message",
-        "content" => [%{"type" => "thinking", "thinking" => "hmm"}, %{"type" => "text", "text" => "answer"}]
+        "content" => [
+          %{"type" => "text", "text" => "para 1"},
+          %{"type" => "thinking", "thinking" => "internal"},
+          %{"type" => "text", "text" => "para 2"}
+        ]
       },
       idle("end_turn")
     ]
 
-    assert %{text: "answer"} = ManagedAgents.normalize(events)
+    # thinking block skipped (no stray newline); the two text blocks joined with "\n".
+    assert %{text: "para 1\npara 2"} = ManagedAgents.normalize(events)
   end
 
   test "normalize/1 surfaces assistant text alongside a requires_action turn" do
@@ -129,14 +136,31 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
 
   # Server-side tools (agent.tool_use) — observe-only. Shape verified against the
   # biai-platform consumer: %{"type" => "agent.tool_use", "name" => ..., "input" => ...}.
-  test "normalize/1 surfaces agent.tool_use as observe-only server_tool_uses" do
+  test "normalize/1 surfaces agent.tool_use as observe-only server_tool_uses (keeping the event id)" do
     events = [
-      %{"type" => "agent.tool_use", "name" => "web_search", "input" => %{"q" => "weather"}},
+      %{"type" => "agent.tool_use", "id" => "st1", "name" => "web_search", "input" => %{"q" => "weather"}},
       idle("end_turn")
     ]
 
-    assert %{terminal: :end_turn, server_tool_uses: [%{name: "web_search", input: %{"q" => "weather"}}]} =
-             ManagedAgents.normalize(events)
+    assert %{
+             terminal: :end_turn,
+             server_tool_uses: [%{id: "st1", name: "web_search", input: %{"q" => "weather"}}]
+           } = ManagedAgents.normalize(events)
+  end
+
+  test "normalize/1 surfaces multiple agent.tool_use events; missing input defaults to %{}" do
+    events = [
+      %{"type" => "agent.tool_use", "id" => "s1", "name" => "search", "input" => %{"q" => "a"}},
+      %{"type" => "agent.tool_use", "id" => "s2", "name" => "now"},
+      idle("end_turn")
+    ]
+
+    assert %{
+             server_tool_uses: [
+               %{id: "s1", name: "search", input: %{"q" => "a"}},
+               %{id: "s2", name: "now", input: %{}}
+             ]
+           } = ManagedAgents.normalize(events)
   end
 
   test "thesis guard: a server-side agent.tool_use never enters custom_tool_uses" do
@@ -152,6 +176,24 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     outcome = ManagedAgents.normalize(events)
     assert [%{id: "e1", name: "lookup"}] = outcome.custom_tool_uses
     assert [%{name: "web_search"}] = outcome.server_tool_uses
+  end
+
+  test "normalize/1 preserves the raw events verbatim alongside the normalized view" do
+    raw = [
+      %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => "hi"}]},
+      %{"type" => "agent.tool_use", "id" => "s1", "name" => "search", "input" => %{}},
+      use_event("e1", "lookup", %{}),
+      idle("requires_action", ["e1"])
+    ]
+
+    outcome = ManagedAgents.normalize(raw)
+
+    # Normalized convenience views over the wire...
+    assert outcome.text == "hi"
+    assert [%{name: "search"}] = outcome.server_tool_uses
+    assert [%{id: "e1"}] = outcome.custom_tool_uses
+    # ...and the raw provider events, untouched, for cross-referencing the provider's docs.
+    assert outcome.events == raw
   end
 
   test "implements the Provider behaviour" do

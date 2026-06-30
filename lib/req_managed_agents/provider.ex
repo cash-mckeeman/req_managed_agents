@@ -7,8 +7,15 @@ defmodule ReqManagedAgents.Provider do
 
   The canonical vocabulary uses Anthropic's `custom_tool_use` / `custom_tool_result`
   terms and names ONLY the client-side / return-of-control species. Server-side /
-  built-in tool activity stays in the raw `events` and is never represented here —
-  the repository thesis is a provider-managed loop with locally executed tools.
+  built-in tool activity is surfaced observe-only — the repository thesis is a
+  provider-managed loop with locally executed tools.
+
+  **Raw preservation.** Normalization never *swallows* the wire shapes: `turn_outcome`
+  carries the raw, JSON-decoded provider `events` it was derived from alongside the
+  normalized fields. The normalized view is a convenience over — not a replacement for —
+  the raw events, so a consumer debugging against the provider's own event documentation
+  (Anthropic SSE event types, Bedrock Converse blocks) can always cross-reference the
+  exact shapes that arrived. RMA normalizes the standard behaviour; it does not hide the wire.
   """
 
   @typedoc "A raw, decoded provider event (string-keyed wire map)."
@@ -24,7 +31,7 @@ defmodule ReqManagedAgents.Provider do
   A server-side (provider-executed) tool call — surfaced observe-only, never actionable.
   The managed loop runs these itself; the client must never submit a result for one.
   """
-  @type server_tool_use :: %{name: String.t(), input: map()}
+  @type server_tool_use :: %{id: String.t() | nil, name: String.t(), input: map()}
 
   @type terminal :: :end_turn | :requires_action | :terminated
 
@@ -33,7 +40,10 @@ defmodule ReqManagedAgents.Provider do
           stop_reason: String.t() | nil,
           custom_tool_uses: [custom_tool_use()],
           server_tool_uses: [server_tool_use()],
-          text: String.t()
+          text: String.t(),
+          # The raw, JSON-decoded provider events this outcome was normalized from —
+          # preserved verbatim so consumers can cross-reference the provider's wire docs.
+          events: [event()]
         }
 
   @doc "Reduce a streaming byte buffer to decoded events + leftover. (Transport seam.)"
@@ -43,7 +53,8 @@ defmodule ReqManagedAgents.Provider do
   Fold one turn's accumulated events into the canonical turn outcome. MUST surface
   only custom (client-side) tool calls in `custom_tool_uses`; server-side
   (provider-executed) tool calls are surfaced observe-only in `server_tool_uses` and
-  never in `custom_tool_uses`.
+  never in `custom_tool_uses`. MUST also preserve the input `events` verbatim in
+  `turn_outcome.events` — normalization is additive, never lossy.
   """
   @callback normalize([event()]) :: turn_outcome()
 
