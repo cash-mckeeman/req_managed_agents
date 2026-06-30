@@ -24,9 +24,15 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
   end
 
   test "every provider implements all Provider callbacks" do
-    for provider <- @providers, {fun, arity} <- Provider.behaviour_info(:callbacks) do
-      assert function_exported?(provider, fun, arity),
-             "#{inspect(provider)} missing #{fun}/#{arity}"
+    for provider <- @providers do
+      # function_exported?/3 returns false for an UNLOADED module; ensure each provider
+      # is loaded first so this assertion does not depend on suite ordering/seed.
+      Code.ensure_loaded!(provider)
+
+      for {fun, arity} <- Provider.behaviour_info(:callbacks) do
+        assert function_exported?(provider, fun, arity),
+               "#{inspect(provider)} missing #{fun}/#{arity}"
+      end
     end
   end
 

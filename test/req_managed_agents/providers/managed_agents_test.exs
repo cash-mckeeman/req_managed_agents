@@ -87,6 +87,7 @@ defmodule ReqManagedAgents.Providers.ManagedAgentsTest do
   end
 
   test "implements the Provider behaviour" do
+    Code.ensure_loaded!(ManagedAgents)
     callbacks = ReqManagedAgents.Provider.behaviour_info(:callbacks)
     for cb <- callbacks, do: assert function_exported?(ManagedAgents, elem(cb, 0), elem(cb, 1))
   end
