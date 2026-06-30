@@ -23,12 +23,15 @@ defmodule ReqManagedAgents do
   `{:ok, %{terminal:, stop_reason:, events:}}` or `{:error, reason}` (incl.
   `{:error, :timeout}`).
 
-  Runs in the calling process and **blocks** until a terminal event or the
-  `:timeout`, selectively receiving its own stream messages (it leaves unrelated
-  messages in the mailbox). The SSE consumer runs in a **linked** Task, so an
-  unexpected consumer crash propagates to the caller; handled stream errors are
-  returned as `{:error, reason}`. For a supervised, reconnecting loop use
-  `ReqManagedAgents.Session` instead.
+  Runs synchronously and **blocks** until a terminal event or the `:timeout`. The
+  session is started unlinked and monitored, and it traps exits, so an open failure
+  or an unexpected stream/consumer crash is surfaced to you as `{:error, reason}`
+  rather than killing the caller; handled stream errors are likewise returned as
+  `{:error, reason}`. For a supervised, reconnecting loop use
+  `ReqManagedAgents.Session.start_link/2` instead.
+
+  This is the Claude convenience form of `ReqManagedAgents.Session.run/2` — i.e.
+  `Session.run(ReqManagedAgents.Providers.ClaudeManagedAgents, opts)`.
   """
   def run_to_completion(opts),
     do: ReqManagedAgents.Session.run(ReqManagedAgents.Providers.ClaudeManagedAgents, opts)

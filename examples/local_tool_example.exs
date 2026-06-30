@@ -56,18 +56,21 @@ IO.puts("Created agent #{agent_id}")
     config: %{type: "cloud", networking: %{type: "unrestricted"}}
   })
 
-{:ok, _pid} =
-  ReqManagedAgents.start_session(
+# One-shot question → blocks until the agent finishes. `run_to_completion/1` is the
+# Claude convenience form of the provider-agnostic API; the explicit equivalent is
+#
+#     ReqManagedAgents.Session.run(ReqManagedAgents.Providers.ClaudeManagedAgents, opts)
+#
+# (`Demo.Handler.handle_event/2` still fires for each streamed event as it runs.)
+# For a long-lived chat, use `ReqManagedAgents.start_session/1` (≡
+# `Session.start_link(ClaudeManagedAgents, opts)`) + `ReqManagedAgents.Session.message/2`.
+{:ok, %{terminal: terminal, stop_reason: stop_reason}} =
+  ReqManagedAgents.run_to_completion(
     client: client,
     agent_id: agent_id,
     environment_id: env_id,
     prompt: "What plan is jane@acme.com on, and when was she last billed?",
-    handler: Demo.Handler,
-    notify: self()
+    handler: Demo.Handler
   )
 
-receive do
-  {:managed_agents_session, terminal} -> IO.puts("session finished: #{terminal}")
-after
-  60_000 -> IO.puts("timed out")
-end
+IO.puts("session finished: #{terminal} (#{inspect(stop_reason)})")
