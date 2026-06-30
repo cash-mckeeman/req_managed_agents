@@ -86,6 +86,46 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     assert boom["is_error"] == true
   end
 
+  # Assistant-text extraction. agent.message shape verified against Anthropic's Managed
+  # Agents docs and the biai-platform consumer:
+  # %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => ...}]}.
+  test "normalize/1 concatenates text blocks from agent.message events" do
+    events = [
+      %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => "Hello, "}]},
+      %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => "world."}]},
+      idle("end_turn")
+    ]
+
+    assert %{terminal: :end_turn, text: "Hello, world."} = ManagedAgents.normalize(events)
+  end
+
+  test "normalize/1 skips non-text content blocks (thinking/tool_use) when building text" do
+    events = [
+      %{
+        "type" => "agent.message",
+        "content" => [%{"type" => "thinking", "thinking" => "hmm"}, %{"type" => "text", "text" => "answer"}]
+      },
+      idle("end_turn")
+    ]
+
+    assert %{text: "answer"} = ManagedAgents.normalize(events)
+  end
+
+  test "normalize/1 surfaces assistant text alongside a requires_action turn" do
+    events = [
+      %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => "calling a tool"}]},
+      use_event("e1", "lookup", %{"q" => "hi"}),
+      idle("requires_action", ["e1"])
+    ]
+
+    assert %{terminal: :requires_action, text: "calling a tool", custom_tool_uses: [%{id: "e1"}]} =
+             ManagedAgents.normalize(events)
+  end
+
+  test "normalize/1 text is \"\" when no agent.message is present" do
+    assert %{text: ""} = ManagedAgents.normalize([idle("end_turn")])
+  end
+
   test "implements the Provider behaviour" do
     Code.ensure_loaded!(ManagedAgents)
     callbacks = ReqManagedAgents.Provider.behaviour_info(:callbacks)

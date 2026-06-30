@@ -21,6 +21,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     uses_by_id =
       for %{"type" => "agent.custom_tool_use", "id" => id} = e <- events, into: %{}, do: {id, e}
 
+    text = assistant_text(events)
+
     case latest_status(events) do
       %{"type" => "session.status_idle", "stop_reason" => %{"type" => reason} = sr} ->
         custom_tool_uses =
@@ -30,13 +32,13 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
           |> Enum.reject(&is_nil/1)
           |> Enum.map(fn e -> %{id: e["id"], name: e["name"], input: e["input"]} end)
 
-        outcome(terminal(reason), reason, custom_tool_uses)
+        outcome(terminal(reason), reason, custom_tool_uses, text)
 
       %{"type" => "session.status_terminated"} ->
-        outcome(:terminated, "terminated", [])
+        outcome(:terminated, "terminated", [], text)
 
       %{"type" => "session.error"} ->
-        outcome(:terminated, "error", [])
+        outcome(:terminated, "error", [], text)
 
       # A status_idle whose stop_reason carries no recognizable type — e.g. a null
       # stop_reason, which is jido's creation-time / end_turn idle. Its terminal verdict
@@ -45,11 +47,11 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
       # stop_reason. Defensive: never crash — conservatively treat an unrecognized idle as
       # terminal (the spec's `unknown_idle -> :terminated` row), preventing a hang.
       %{"type" => "session.status_idle"} ->
-        outcome(:terminated, nil, [])
+        outcome(:terminated, nil, [], text)
 
       # No status event present, or any other unrecognized shape.
       _ ->
-        outcome(:terminated, nil, [])
+        outcome(:terminated, nil, [], text)
     end
   end
 
@@ -65,9 +67,24 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     end)
   end
 
-  # `text` is best-effort; the assistant-text event shape is captured in a follow-up.
-  defp outcome(terminal, reason, custom_tool_uses),
-    do: %{terminal: terminal, stop_reason: reason, custom_tool_uses: custom_tool_uses, text: ""}
+  defp outcome(terminal, reason, custom_tool_uses, text),
+    do: %{terminal: terminal, stop_reason: reason, custom_tool_uses: custom_tool_uses, text: text}
+
+  # Assistant text for the turn: the concatenated `text` blocks of every `agent.message`
+  # event. Shape verified against Anthropic's Managed Agents docs and the biai-platform
+  # consumer — `%{"type" => "agent.message", "content" => [%{"type" => "text", "text" => …}, …]}`.
+  # `content` may also carry non-text blocks (thinking / tool_use); those are skipped.
+  defp assistant_text(events) do
+    events
+    |> Enum.flat_map(fn
+      %{"type" => "agent.message", "content" => blocks} when is_list(blocks) -> blocks
+      _ -> []
+    end)
+    |> Enum.map_join("", fn
+      %{"type" => "text", "text" => t} when is_binary(t) -> t
+      _ -> ""
+    end)
+  end
 
   defp latest_status(events) do
     events

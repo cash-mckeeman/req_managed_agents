@@ -19,4 +19,17 @@ defmodule ReqManagedAgents.SSEFixtures do
 
   def end_turn,
     do: %{"type" => "session.status_idle", "stop_reason" => %{"type" => "end_turn"}}
+
+  @doc """
+  An `agent.message` (assistant text) event. Shape verified against Anthropic's Managed
+  Agents docs and the biai-platform consumer:
+  `%{"type" => "agent.message", "content" => [%{"type" => "text", "text" => …}]}`.
+  """
+  def agent_message(text, opts \\ []) do
+    base = %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => text}]}
+    case opts[:id] do
+      nil -> base
+      id -> Map.put(base, "id", id)
+    end
+  end
 end
