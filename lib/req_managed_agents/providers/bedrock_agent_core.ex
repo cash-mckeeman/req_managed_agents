@@ -31,13 +31,15 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     create_fun = opts[:create_fun] || fn s -> Client.create_harness(opts[:client] || Client.new(), s) end
     list_fun = opts[:list_fun] || fn -> Client.list_harnesses(opts[:client] || Client.new()) end
     get_fun = opts[:get_fun] || fn hid -> Client.get_harness(opts[:client] || Client.new(), hid) end
+    poll_ms = opts[:ready_poll_ms] || @ready_poll_ms
+    max_polls = opts[:ready_max_polls] || @ready_max_polls
 
     case create_fun.(harness_spec) do
       {:ok, %{"harnessArn" => arn, "harnessId" => hid}} ->
-        with :ok <- wait_until_ready(get_fun, hid), do: {:ok, %{harness_arn: arn, harness_id: hid}}
+        with :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls), do: {:ok, %{harness_arn: arn, harness_id: hid}}
 
       {:error, {:http_error, 409, _}} ->
-        recover_existing(list_fun, get_fun, name)
+        recover_existing(list_fun, get_fun, name, poll_ms, max_polls)
 
       {:error, reason} ->
         {:error, reason}
@@ -57,17 +59,17 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   @doc false
   def harness_name(spec, prefix) do
     digest =
-      :crypto.hash(:sha256, :erlang.term_to_binary(spec))
+      :crypto.hash(:sha256, :erlang.term_to_binary(spec, [:deterministic]))
       |> Base.encode16(case: :lower)
       |> binary_part(0, 8)
 
     [prefix, "harness_#{digest}"] |> Enum.reject(&is_nil/1) |> Enum.join("_")
   end
 
-  defp recover_existing(list_fun, get_fun, name) do
+  defp recover_existing(list_fun, get_fun, name, poll_ms, max_polls) do
     with {:ok, %{"harnesses" => harnesses}} <- list_fun.(),
          %{"arn" => arn, "harnessId" => hid} <- recoverable_harness(harnesses, name),
-         :ok <- wait_until_ready(get_fun, hid) do
+         :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls) do
       {:ok, %{harness_arn: arn, harness_id: hid}}
     else
       nil -> {:error, {:harness_name_conflict, name}}
@@ -82,7 +84,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     end)
   end
 
-  defp wait_until_ready(get_fun, hid, polls_left \\ @ready_max_polls) do
+  defp wait_until_ready(get_fun, hid, poll_ms, polls_left) do
     case get_fun.(hid) do
       {:ok, %{"harness" => %{"status" => "READY"}}} ->
         :ok
@@ -91,8 +93,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
         {:error, {:harness_failed, s}}
 
       {:ok, %{"harness" => %{"status" => _}}} when polls_left > 0 ->
-        Process.sleep(@ready_poll_ms)
-        wait_until_ready(get_fun, hid, polls_left - 1)
+        Process.sleep(poll_ms)
+        wait_until_ready(get_fun, hid, poll_ms, polls_left - 1)
 
       {:ok, %{"harness" => _}} when polls_left == 0 ->
         {:error, :harness_ready_timeout}

@@ -258,6 +258,23 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     assert "/v1/agents/agent_1/archive" in Agent.get(calls, & &1)
   end
 
+  test "teardown/2 attempts both archives even if the first fails" do
+    {:ok, calls} = Agent.start_link(fn -> [] end)
+    client = Client.new(api_key: "sk-test", req_options: [plug: {Req.Test, __MODULE__.BothArchives}])
+
+    Req.Test.stub(__MODULE__.BothArchives, fn conn ->
+      Agent.update(calls, &[conn.request_path | &1])
+      case conn.request_path do
+        "/v1/agents/agent_1/archive" -> conn |> Plug.Conn.put_resp_content_type("application/json") |> Plug.Conn.resp(500, ~s({"e":"x"}))
+        "/v1/environments/env_1/archive" -> Req.Test.json(conn, %{"ok" => true})
+      end
+    end)
+
+    assert {:error, {:teardown_failed, _}} = ManagedAgents.teardown(%{agent_id: "agent_1", environment_id: "env_1"}, client: client)
+    paths = Agent.get(calls, & &1)
+    assert "/v1/agents/agent_1/archive" in paths and "/v1/environments/env_1/archive" in paths
+  end
+
   test "turn_boundary?/1 is true only for session status/terminal/error events" do
     assert ManagedAgents.turn_boundary?(%{"type" => "session.status_idle", "stop_reason" => %{"type" => "end_turn"}})
     assert ManagedAgents.turn_boundary?(%{"type" => "session.status_terminated"})

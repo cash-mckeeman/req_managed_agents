@@ -41,7 +41,7 @@ defmodule ReqManagedAgents.Provisioner do
   def reset,
     do: if(:ets.whereis(@table) != :undefined, do: :ets.delete_all_objects(@table), else: :ok)
 
-  defp hash(term), do: :crypto.hash(:sha256, :erlang.term_to_binary(term)) |> Base.encode16()
+  defp hash(term), do: :crypto.hash(:sha256, :erlang.term_to_binary(term, [:deterministic])) |> Base.encode16()
 
   defp ensure_table do
     case :ets.whereis(@table) do
