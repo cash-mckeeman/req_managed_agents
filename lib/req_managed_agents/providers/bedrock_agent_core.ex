@@ -62,10 +62,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
             {:error, {:harness_stream_error, type, message}}
 
           nil ->
-            if normalize(events).stop_reason != nil or retries_left == 0 do
-              {:ok, events, conn}
-            else
-              invoke(conn, messages, retries_left - 1)
+            cond do
+              # A real terminal (messageStop carried a stop_reason) — surface the turn.
+              normalize(events).stop_reason != nil -> {:ok, events, conn}
+              # A truncated stream (no terminal) — retry, then surface as early_termination.
+              retries_left > 0 -> invoke(conn, messages, retries_left - 1)
+              true -> {:error, :early_termination}
             end
         end
 

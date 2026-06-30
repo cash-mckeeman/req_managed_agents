@@ -14,8 +14,9 @@ defmodule ReqManagedAgents do
   @doc "Build a control-plane client. See `ReqManagedAgents.Client.new/1`."
   defdelegate new(opts \\ []), to: ReqManagedAgents.Client
 
-  @doc "Start a supervised managed-agent session. See `ReqManagedAgents.Session.start_link/1`."
-  defdelegate start_session(opts), to: ReqManagedAgents.Session, as: :start_link
+  @doc "Start a live managed-agent session (Claude Managed Agents). See `ReqManagedAgents.Session.start_link/2`."
+  def start_session(opts),
+    do: ReqManagedAgents.Session.start_link(ReqManagedAgents.Providers.ClaudeManagedAgents, opts)
 
   @doc """
   Run a managed-agent session synchronously to completion, returning
@@ -29,5 +30,6 @@ defmodule ReqManagedAgents do
   returned as `{:error, reason}`. For a supervised, reconnecting loop use
   `ReqManagedAgents.Session` instead.
   """
-  defdelegate run_to_completion(opts), to: ReqManagedAgents.RunToCompletion, as: :run
+  def run_to_completion(opts),
+    do: ReqManagedAgents.Session.run(ReqManagedAgents.Providers.ClaudeManagedAgents, opts)
 end

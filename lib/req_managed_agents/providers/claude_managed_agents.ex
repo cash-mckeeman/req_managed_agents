@@ -18,21 +18,30 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @impl true
   def open(opts, subscriber) do
     client = opts[:client] || Client.new()
-    body = %{agent: Keyword.fetch!(opts, :agent_id), environment_id: Keyword.fetch!(opts, :environment_id)}
 
-    case Client.create_session(client, body) do
-      {:ok, %{"id" => sid}} ->
-        ref = make_ref()
+    case opts[:session_id] do
+      nil ->
+        body = %{agent: Keyword.fetch!(opts, :agent_id), environment_id: Keyword.fetch!(opts, :environment_id)}
 
-        {:ok, _task} =
-          Task.start_link(fn ->
-            Stream.stream(client, sid, subscriber, ref: ref, telemetry_metadata: opts[:telemetry_metadata] || %{})
-          end)
+        case Client.create_session(client, body) do
+          {:ok, %{"id" => sid}} ->
+            ref = make_ref()
 
-        {:ok, %{client: client, session_id: sid, ref: ref}}
+            {:ok, _task} =
+              Task.start_link(fn ->
+                Stream.stream(client, sid, subscriber, ref: ref, telemetry_metadata: opts[:telemetry_metadata] || %{})
+              end)
 
-      {:error, reason} ->
-        {:error, {:create_session_failed, reason}}
+            {:ok, %{client: client, session_id: sid, ref: ref}}
+
+          {:error, reason} ->
+            {:error, {:create_session_failed, reason}}
+        end
+
+      sid ->
+        # Resume an existing session: don't create or kick off — the Session consolidates via
+        # reconnect/3 (list history, dedup, re-drive any unanswered tool call), opening the stream there.
+        {:ok, %{client: client, session_id: sid, ref: nil, resume: true}}
     end
   end
 

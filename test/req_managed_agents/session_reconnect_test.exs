@@ -1,6 +1,6 @@
 defmodule ReqManagedAgents.SessionReconnectTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Session2
+  alias ReqManagedAgents.Session
   alias ReqManagedAgents.FakeProviders.ReconnectingStreaming
 
   test "a live streaming session reconnects on a stream drop and re-drives unanswered tool calls" do
@@ -10,7 +10,7 @@ defmodule ReqManagedAgents.SessionReconnectTest do
     # kickoff push is dropped → the Session reconnects → reconnect/3 surfaces the unanswered
     # tool (t1) → the Session re-runs it locally and resumes → the next turn ends the run.
     {:ok, pid} =
-      Session2.start_link(ReconnectingStreaming,
+      Session.start_link(ReconnectingStreaming,
         handler: handler,
         notify: self(),
         pending: [%{id: "t1", name: "echo", input: %{"x" => 1}}],
@@ -25,7 +25,7 @@ defmodule ReqManagedAgents.SessionReconnectTest do
   test "a synchronous run/2 does NOT reconnect — a stream error surfaces as {:error, _}" do
     # ReconnectingStreaming drops the first push; under run/2 (a sync caller) that must surface.
     assert {:error, :stream_dropped} =
-             Session2.run(ReconnectingStreaming,
+             Session.run(ReconnectingStreaming,
                handler: fn _, _, _ -> {:ok, "x"} end,
                pending: [],
                turns: []

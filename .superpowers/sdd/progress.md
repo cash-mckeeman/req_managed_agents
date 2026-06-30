@@ -10,7 +10,7 @@ Reuse source (copy v1 modules from): .claude/worktrees/provider-abstraction
 - [x] Task 3: Providers.ClaudeManagedAgents (streaming) — commit fe29301a, 21 tests, suite 146
 - [x] Task 4: Unified Session core loop + fake-provider tests — commit 64c346fd, loop 4/4 (both modes proven), suite 150
 - [x] Task 5a: Session live UX (start_link/message/child_spec) — commit e0177c65, 2 tests, suite 152
-- [ ] Task 5b: Session reconnect-with-consolidation (provider reconnect/3 callback + seen-dedup)
+- [x] Task 5b: Session reconnect-with-consolidation (provider reconnect/3 + seen-dedup) — commit 197e27b2, 2 tests, suite 154 (controller-implemented)
 - [ ] Task 6: Collapse old drivers into Session
 - [ ] Task 7: Cross-mode conformance + cleanup
 

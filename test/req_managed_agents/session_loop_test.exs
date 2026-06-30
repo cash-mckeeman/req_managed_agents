@@ -1,6 +1,6 @@
 defmodule ReqManagedAgents.SessionLoopTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Session2
+  alias ReqManagedAgents.Session
   alias ReqManagedAgents.FakeProviders.{RequestResponse, Streaming}
 
   @turn1 [%{"type" => "tool", "id" => "t1", "name" => "echo", "input" => %{"x" => 1}},
@@ -13,7 +13,7 @@ defmodule ReqManagedAgents.SessionLoopTest do
       test = self()
       handler = fn name, input, _ctx -> send(test, {:tool_ran, name, input}); {:ok, "result-#{name}"} end
 
-      assert {:ok, result} = Session2.run(@provider, handler: handler, turns: [@turn1, @turn2])
+      assert {:ok, result} = Session.run(@provider, handler: handler, turns: [@turn1, @turn2])
       assert result.terminal == :end_turn
       # raw events from BOTH turns are accumulated verbatim
       assert result.events == @turn1 ++ @turn2
@@ -23,7 +23,7 @@ defmodule ReqManagedAgents.SessionLoopTest do
 
     test "#{inspect(provider)}: a turn that ends immediately returns :end_turn with no tools" do
       assert {:ok, %{terminal: :end_turn}} =
-               Session2.run(@provider, handler: fn _, _, _ -> {:ok, "x"} end, turns: [@turn2])
+               Session.run(@provider, handler: fn _, _, _ -> {:ok, "x"} end, turns: [@turn2])
       refute_received {:tool_ran, _, _}
     end
   end

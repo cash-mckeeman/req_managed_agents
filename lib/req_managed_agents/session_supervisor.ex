@@ -12,7 +12,11 @@ defmodule ReqManagedAgents.SessionSupervisor do
   @impl true
   def init(_init_arg), do: DynamicSupervisor.init(strategy: :one_for_one)
 
-  @doc "Start a supervised session."
+  @doc "Start a supervised live session (Claude Managed Agents)."
   def start_child(opts),
-    do: DynamicSupervisor.start_child(__MODULE__, {ReqManagedAgents.Session, opts})
+    do:
+      DynamicSupervisor.start_child(
+        __MODULE__,
+        {ReqManagedAgents.Session, {ReqManagedAgents.Providers.ClaudeManagedAgents, opts}}
+      )
 end

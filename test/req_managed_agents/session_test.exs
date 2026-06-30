@@ -1,6 +1,7 @@
 defmodule ReqManagedAgents.SessionTest do
   use ExUnit.Case
   alias ReqManagedAgents.{Client, Session}
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents
   import ReqManagedAgents.SSEFixtures
 
   defmodule EchoHandler do
@@ -66,7 +67,7 @@ defmodule ReqManagedAgents.SessionTest do
     end)
 
     {:ok, _pid} =
-      Session.start_link(
+      Session.start_link(ClaudeManagedAgents,
         client: client,
         agent_id: "agent_1",
         environment_id: "env_1",
@@ -125,7 +126,7 @@ defmodule ReqManagedAgents.SessionTest do
     end)
 
     {:ok, _pid} =
-      Session.start_link(
+      Session.start_link(ClaudeManagedAgents,
         client: client,
         session_id: "s9",
         handler: EchoHandler,
@@ -178,7 +179,7 @@ defmodule ReqManagedAgents.SessionTest do
     end)
 
     {:ok, _pid} =
-      Session.start_link(
+      Session.start_link(ClaudeManagedAgents,
         client: client,
         session_id: "s7",
         handler: EchoHandler,
@@ -216,7 +217,7 @@ defmodule ReqManagedAgents.SessionTest do
     end)
 
     {:ok, _pid} =
-      Session.start_link(
+      Session.start_link(ClaudeManagedAgents,
         client: client,
         agent_id: "agent_1",
         environment_id: "env_1",
