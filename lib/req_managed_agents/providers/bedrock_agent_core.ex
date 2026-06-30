@@ -13,6 +13,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   def mode, do: :request_response
 
   @impl true
+  def provision(_spec, _opts), do: {:error, :not_implemented}
+
+  @impl true
   def open(opts, _subscriber) do
     {:ok,
      %{

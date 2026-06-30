@@ -25,6 +25,8 @@ defmodule ReqManagedAgents.FakeProviders do
     @impl true
     def mode, do: :request_response
     @impl true
+    def provision(_spec, _opts), do: {:error, :not_implemented}
+    @impl true
     def open(opts, _subscriber), do: {:ok, %{turns: opts[:turns] || []}}
     @impl true
     def kickoff_input(_opts), do: :kickoff
@@ -43,6 +45,8 @@ defmodule ReqManagedAgents.FakeProviders do
     @behaviour ReqManagedAgents.Provider
     @impl true
     def mode, do: :streaming
+    @impl true
+    def provision(_spec, _opts), do: {:error, :not_implemented}
     @impl true
     def open(opts, subscriber) do
       {:ok, agent} = Agent.start_link(fn -> opts[:turns] || [] end)
@@ -78,6 +82,8 @@ defmodule ReqManagedAgents.FakeProviders do
     @behaviour ReqManagedAgents.Provider
     @impl true
     def mode, do: :streaming
+    @impl true
+    def provision(_spec, _opts), do: {:error, :not_implemented}
     @impl true
     def open(opts, subscriber) do
       {:ok, agent} =
@@ -129,6 +135,8 @@ defmodule ReqManagedAgents.FakeProviders do
     @impl true
     def mode, do: :streaming
     @impl true
+    def provision(_spec, _opts), do: {:error, :not_implemented}
+    @impl true
     def open(_opts, _sub), do: {:error, {:create_session_failed, :boom}}
     @impl true
     def kickoff_input(_), do: :k
@@ -149,6 +157,8 @@ defmodule ReqManagedAgents.FakeProviders do
     @behaviour ReqManagedAgents.Provider
     @impl true
     def mode, do: :request_response
+    @impl true
+    def provision(_spec, _opts), do: {:error, :not_implemented}
     @impl true
     def open(_opts, _sub), do: {:ok, %{}}
     @impl true

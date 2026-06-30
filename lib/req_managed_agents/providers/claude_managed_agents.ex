@@ -16,6 +16,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   def mode, do: :streaming
 
   @impl true
+  def provision(_spec, _opts), do: {:error, :not_implemented}
+
+  @impl true
   def open(opts, subscriber) do
     client = opts[:client] || Client.new()
 
