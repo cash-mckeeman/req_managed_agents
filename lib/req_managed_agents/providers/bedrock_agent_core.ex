@@ -23,7 +23,15 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
         %{id: id, name: name, input: input}
       end)
 
-    %{terminal: terminal(reason), stop_reason: reason, custom_tool_uses: custom_tool_uses, text: text}
+    %{
+      terminal: terminal(reason),
+      stop_reason: reason,
+      custom_tool_uses: custom_tool_uses,
+      # Harness built-in tools execute in-microVM and do not surface in the Converse
+      # stream as a distinct event we can model yet — so none are reported here.
+      server_tool_uses: [],
+      text: text
+    }
   end
 
   @impl true

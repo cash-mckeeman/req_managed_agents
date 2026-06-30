@@ -18,6 +18,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
                %{id: "e2", name: "g", input: %{"b" => 2}},
                %{id: "e1", name: "f", input: %{"a" => 1}}
              ],
+             server_tool_uses: [],
              text: ""
            }
   end
@@ -124,6 +125,33 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
 
   test "normalize/1 text is \"\" when no agent.message is present" do
     assert %{text: ""} = ManagedAgents.normalize([idle("end_turn")])
+  end
+
+  # Server-side tools (agent.tool_use) — observe-only. Shape verified against the
+  # biai-platform consumer: %{"type" => "agent.tool_use", "name" => ..., "input" => ...}.
+  test "normalize/1 surfaces agent.tool_use as observe-only server_tool_uses" do
+    events = [
+      %{"type" => "agent.tool_use", "name" => "web_search", "input" => %{"q" => "weather"}},
+      idle("end_turn")
+    ]
+
+    assert %{terminal: :end_turn, server_tool_uses: [%{name: "web_search", input: %{"q" => "weather"}}]} =
+             ManagedAgents.normalize(events)
+  end
+
+  test "thesis guard: a server-side agent.tool_use never enters custom_tool_uses" do
+    # A turn with BOTH a client-side custom tool (return-of-control) and a server-side tool
+    # the managed loop ran itself. Only the custom one is actionable; the server one is
+    # observe-only and must never be handed to the Handler.
+    events = [
+      use_event("e1", "lookup", %{"q" => "hi"}),
+      %{"type" => "agent.tool_use", "name" => "web_search", "input" => %{"q" => "x"}},
+      idle("requires_action", ["e1"])
+    ]
+
+    outcome = ManagedAgents.normalize(events)
+    assert [%{id: "e1", name: "lookup"}] = outcome.custom_tool_uses
+    assert [%{name: "web_search"}] = outcome.server_tool_uses
   end
 
   test "implements the Provider behaviour" do

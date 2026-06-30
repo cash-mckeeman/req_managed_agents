@@ -113,6 +113,9 @@ Internal representation (atom-keyed — these are RMA-internal types, distinct f
 
 @type terminal :: :end_turn | :requires_action | :terminated
 
+# A SERVER-SIDE (provider-executed) tool call — observe-only, never actionable.
+@type server_tool_use :: %{name: String.t(), input: map()}
+
 @type turn_outcome :: %{
         terminal: terminal(),
         stop_reason: String.t() | nil,           # raw provider string, preserved for fidelity
@@ -120,8 +123,9 @@ Internal representation (atom-keyed — these are RMA-internal types, distinct f
                                                  # populated only on terminal == :requires_action
                                                  # (else []; may also be [] if the server's
                                                  # event_ids reference no stashed custom tool).
-                                                 # Server-side tool activity is excluded by design.
-        text: String.t()                         # assistant text; best-effort (see "text field" below)
+        server_tool_uses: [server_tool_use()],   # provider-executed tools, OBSERVE-ONLY;
+                                                 # never actionable, never in custom_tool_uses.
+        text: String.t()                         # assistant text from agent.message
       }
 ```
 
@@ -167,7 +171,8 @@ defmodule ReqManagedAgents.Provider do
   @doc """
   Fold one turn's accumulated events into the canonical turn outcome. MUST surface
   only client-side (return-of-control) tool calls in `custom_tool_uses`; server-side
-  tool activity stays in the raw events and out of the actionable path.
+  (provider-executed) tool calls are surfaced observe-only in `server_tool_uses` and
+  never in `custom_tool_uses`.
   """
   @callback normalize([event()]) :: turn_outcome()
 
@@ -253,7 +258,7 @@ TDD per the implementation plan. Key strategy:
 
 - **Module namespace: `ReqManagedAgents.Providers.{AgentCore,ManagedAgents}`.** Thin behaviour-implementing modules that compose the existing internals; keeps providers discoverable and parallel.
 - **Terminal taxonomy collapses to three atoms** (`:end_turn` / `:requires_action` / `:terminated`). The raw provider string is preserved in `turn_outcome.stop_reason`, so `:retries_exhausted`/`:unknown_idle`/`:guardrail_intervened` fidelity is available there. This is the one externally observable change (see Migration / risk).
-- **Server-side tool activity stays in raw `events` for v1.** No `server_tool_uses` / `server_tool_results` fields on `turn_outcome`. The species is named and excluded from `custom_tool_uses`; surfacing it as a dedicated observability field is a clean additive follow-up if a consumer needs it.
+- **Server-side tool *uses* are surfaced observe-only** (follow-up done). `turn_outcome` carries a `server_tool_uses :: [%{name, input}]` field. `ClaudeManagedAgents.normalize/1` populates it from `agent.tool_use` events (shape verified against the `biai-platform` consumer); `BedrockAgentCore` reports `[]` (its harness built-in tools don't surface a modelable event yet). These are never actionable and never enter `custom_tool_uses`. Server-side tool **results** still remain in raw `events` — a `server_tool_results` field is a further additive follow-up if a consumer needs it.
 
 ## Open decisions for plan-time
 

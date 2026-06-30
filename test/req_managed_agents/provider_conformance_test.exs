@@ -44,6 +44,7 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
       assert outcome.terminal == :requires_action
       assert [%{id: id, name: name, input: input}] = outcome.custom_tool_uses
       assert is_binary(id) and is_binary(name) and is_map(input)
+      assert is_list(outcome.server_tool_uses)
       assert is_binary(outcome.text)
     end
   end

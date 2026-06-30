@@ -20,12 +20,19 @@ defmodule ReqManagedAgents.Provider do
   @typedoc "A locally-produced result for a custom_tool_use — what the client submits to resume."
   @type custom_tool_result :: %{tool_use_id: String.t(), text: String.t(), is_error: boolean()}
 
+  @typedoc """
+  A server-side (provider-executed) tool call — surfaced observe-only, never actionable.
+  The managed loop runs these itself; the client must never submit a result for one.
+  """
+  @type server_tool_use :: %{name: String.t(), input: map()}
+
   @type terminal :: :end_turn | :requires_action | :terminated
 
   @type turn_outcome :: %{
           terminal: terminal(),
           stop_reason: String.t() | nil,
           custom_tool_uses: [custom_tool_use()],
+          server_tool_uses: [server_tool_use()],
           text: String.t()
         }
 
@@ -34,8 +41,9 @@ defmodule ReqManagedAgents.Provider do
 
   @doc """
   Fold one turn's accumulated events into the canonical turn outcome. MUST surface
-  only custom (client-side) tool calls in `custom_tool_uses`; server-side tool
-  activity stays in the raw events and out of the actionable path.
+  only custom (client-side) tool calls in `custom_tool_uses`; server-side
+  (provider-executed) tool calls are surfaced observe-only in `server_tool_uses` and
+  never in `custom_tool_uses`.
   """
   @callback normalize([event()]) :: turn_outcome()
 

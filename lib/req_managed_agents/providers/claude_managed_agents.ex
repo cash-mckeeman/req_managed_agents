@@ -5,9 +5,10 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   Client-side tool calls arrive as `agent.custom_tool_use` events; a
   `session.status_idle` with `stop_reason.type == "requires_action"` lists the
   `event_ids` requiring local execution. Only those ids are surfaced as
-  `custom_tool_uses` — provider-executed tools are not in `event_ids` and stay in
-  the raw events. `normalize/1` keys off the most recent status event so it is
-  correct when called on session-wide accumulated events.
+  `custom_tool_uses`. Provider-executed `agent.tool_use` events never enter
+  `custom_tool_uses` — they are surfaced observe-only as `server_tool_uses`.
+  `normalize/1` keys off the most recent status event so it is correct when called on
+  session-wide accumulated events; it also extracts assistant `text` from `agent.message`.
   """
   @behaviour ReqManagedAgents.Provider
 
@@ -21,7 +22,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     uses_by_id =
       for %{"type" => "agent.custom_tool_use", "id" => id} = e <- events, into: %{}, do: {id, e}
 
-    text = assistant_text(events)
+    extra = %{server_tool_uses: server_tool_uses(events), text: assistant_text(events)}
 
     case latest_status(events) do
       %{"type" => "session.status_idle", "stop_reason" => %{"type" => reason} = sr} ->
@@ -32,13 +33,13 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
           |> Enum.reject(&is_nil/1)
           |> Enum.map(fn e -> %{id: e["id"], name: e["name"], input: e["input"]} end)
 
-        outcome(terminal(reason), reason, custom_tool_uses, text)
+        outcome(terminal(reason), reason, custom_tool_uses, extra)
 
       %{"type" => "session.status_terminated"} ->
-        outcome(:terminated, "terminated", [], text)
+        outcome(:terminated, "terminated", [], extra)
 
       %{"type" => "session.error"} ->
-        outcome(:terminated, "error", [], text)
+        outcome(:terminated, "error", [], extra)
 
       # A status_idle whose stop_reason carries no recognizable type — e.g. a null
       # stop_reason, which is jido's creation-time / end_turn idle. Its terminal verdict
@@ -47,11 +48,11 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
       # stop_reason. Defensive: never crash — conservatively treat an unrecognized idle as
       # terminal (the spec's `unknown_idle -> :terminated` row), preventing a hang.
       %{"type" => "session.status_idle"} ->
-        outcome(:terminated, nil, [], text)
+        outcome(:terminated, nil, [], extra)
 
       # No status event present, or any other unrecognized shape.
       _ ->
-        outcome(:terminated, nil, [], text)
+        outcome(:terminated, nil, [], extra)
     end
   end
 
@@ -67,8 +68,17 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     end)
   end
 
-  defp outcome(terminal, reason, custom_tool_uses, text),
-    do: %{terminal: terminal, stop_reason: reason, custom_tool_uses: custom_tool_uses, text: text}
+  defp outcome(terminal, reason, custom_tool_uses, extra),
+    do: Map.merge(%{terminal: terminal, stop_reason: reason, custom_tool_uses: custom_tool_uses}, extra)
+
+  # Server-side (provider-executed) tool calls — observe-only, surfaced for telemetry/UI.
+  # Shape verified against the biai-platform consumer: `%{"type" => "agent.tool_use",
+  # "name" => …, "input" => …}` — distinct from the client-side `agent.custom_tool_use`.
+  # These NEVER enter `custom_tool_uses`: the managed loop runs them itself.
+  defp server_tool_uses(events) do
+    for %{"type" => "agent.tool_use", "name" => name, "input" => input} <- events,
+        do: %{name: name, input: input}
+  end
 
   # Assistant text for the turn: the concatenated `text` blocks of every `agent.message`
   # event. Shape verified against Anthropic's Managed Agents docs and the biai-platform

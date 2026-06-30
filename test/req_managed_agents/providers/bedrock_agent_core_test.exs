@@ -19,6 +19,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
              terminal: :requires_action,
              stop_reason: "tool_use",
              custom_tool_uses: [%{id: "tu_1", name: "echo", input: %{"text" => "hi"}}],
+             server_tool_uses: [],
              text: ""
            }
   end
