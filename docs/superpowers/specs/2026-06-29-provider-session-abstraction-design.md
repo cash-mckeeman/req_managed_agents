@@ -212,6 +212,24 @@ adding the *invocation* callbacks and the unified `Session`, then deleting the t
    `:request_response` provider (proving the loop is mode-agnostic); migrate the
    `run_to_completion`/`session`/`agent_core` driver tests onto `Session`.
 
+## Intentional behavior changes vs the old drivers
+
+The collapse preserves the public result shape and resilience properties, but a few behaviors
+change deliberately (all surfaced by the whole-branch review and accepted, not accidental):
+
+- **`stop_reason` is now the canonical string on the Claude path.** The old Claude drivers
+  returned the raw `stop_reason` **map** (`%{"type" => "end_turn", …}`); the unified result
+  returns the string `"end_turn"`, consistent with the AgentCore path. The full raw map is
+  always available in `turn_outcome.events` (the raw-preservation principle), so nothing is lost.
+- **`notify` terminal taxonomy is the canonical three atoms.** A streaming session that used to
+  notify `:error`/`:retries_exhausted` now notifies `:terminated`; the raw provider reason is in
+  the result's `stop_reason` / `events`.
+- **Telemetry is unified under `[:req_managed_agents, :session, …]`.** The old per-driver
+  `[:req_managed_agents, :agent_core, :terminal | :tool_uses]` events are gone; both providers now
+  emit `[:session, :terminal]` and a per-turn `[:session, :tool_uses]` (carrying the MIM-52
+  duplicate-id sentinel). The OTel bridge already maps `:session, :terminal`.
+- **`run_to_completion` default timeout is 600s** (was 120s), matching the unified default.
+
 ## Non-goals
 
 - New providers (OpenAI, Google) — the behaviour is *designed to admit* them (each picks a
