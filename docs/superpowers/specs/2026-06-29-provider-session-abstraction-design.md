@@ -217,10 +217,13 @@ adding the *invocation* callbacks and the unified `Session`, then deleting the t
 The collapse preserves the public result shape and resilience properties, but a few behaviors
 change deliberately (all surfaced by the whole-branch review and accepted, not accidental):
 
-- **`stop_reason` is now the canonical string on the Claude path.** The old Claude drivers
-  returned the raw `stop_reason` **map** (`%{"type" => "end_turn", …}`); the unified result
-  returns the string `"end_turn"`, consistent with the AgentCore path. The full raw map is
-  always available in `turn_outcome.events` (the raw-preservation principle), so nothing is lost.
+- **`stop_reason` keeps each provider's RAW native shape.** `terminal` (the canonical three
+  atoms) is the uniform signal to branch on; `stop_reason` is preserved verbatim — a map for
+  Claude Managed Agents (`%{"type" => "end_turn", …}`, exactly as the old driver returned), a
+  bare string for Bedrock AgentCore (`"end_turn"`). There is no shape native to both providers,
+  so flattening Claude's map to a string would lose information for no functional gain (the loop
+  dispatches on `terminal`, never on `stop_reason`). Neither provider's contract changes vs PR11;
+  the QA-CHECKPOINT confirms this.
 - **`notify` terminal taxonomy is the canonical three atoms.** A streaming session that used to
   notify `:error`/`:retries_exhausted` now notifies `:terminated`; the raw provider reason is in
   the result's `stop_reason` / `events`.

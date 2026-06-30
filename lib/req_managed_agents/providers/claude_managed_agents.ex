@@ -113,11 +113,14 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
           |> Enum.reject(&is_nil/1)
           |> Enum.map(fn e -> %{id: e["id"], name: e["name"], input: e["input"]} end)
 
-        outcome(terminal(reason), reason, custom_tool_uses, extra)
+        # stop_reason is the provider's RAW value (the map), preserved verbatim as the old driver
+        # returned it; `terminal` is the uniform canonical signal. (AgentCore's raw value is a
+        # bare string — each provider keeps its native shape; see the Provider behaviour.)
+        outcome(terminal(reason), sr, custom_tool_uses, extra)
 
-      %{"type" => "session.status_terminated"} -> outcome(:terminated, "terminated", [], extra)
-      %{"type" => "session.error"} -> outcome(:terminated, "error", [], extra)
-      %{"type" => "session.status_idle"} -> outcome(:terminated, nil, [], extra)
+      %{"type" => "session.status_terminated"} = s -> outcome(:terminated, s["stop_reason"], [], extra)
+      %{"type" => "session.error"} = s -> outcome(:terminated, s["stop_reason"], [], extra)
+      %{"type" => "session.status_idle"} = s -> outcome(:terminated, s["stop_reason"], [], extra)
       _ -> outcome(:terminated, nil, [], extra)
     end
   end

@@ -30,9 +30,16 @@ defmodule ReqManagedAgents.Provider do
 
   @type terminal :: :end_turn | :requires_action | :terminated
 
+  @typedoc """
+  A normalized turn result. `terminal` is the UNIFORM canonical signal every provider maps to —
+  branch on it. `stop_reason` is the provider's RAW stop reason, kept in its native shape (a map
+  for Claude Managed Agents, e.g. `%{"type" => "end_turn"}`; a bare string for Bedrock AgentCore,
+  e.g. `"end_turn"`) — preserved verbatim for diagnostics, not flattened. The raw events are in
+  `events`.
+  """
   @type turn_outcome :: %{
           terminal: terminal(),
-          stop_reason: String.t() | nil,
+          stop_reason: String.t() | map() | nil,
           custom_tool_uses: [custom_tool_use()],
           server_tool_uses: [server_tool_use()],
           text: String.t(),

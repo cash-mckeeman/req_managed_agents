@@ -13,7 +13,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
 
     assert ManagedAgents.normalize(events) == %{
              terminal: :requires_action,
-             stop_reason: "requires_action",
+             # stop_reason is the provider's raw map, preserved verbatim (not collapsed to a string)
+             stop_reason: %{"type" => "requires_action", "event_ids" => ["e2", "e1"]},
              custom_tool_uses: [
                %{id: "e2", name: "g", input: %{"b" => 2}},
                %{id: "e1", name: "f", input: %{"a" => 1}}
@@ -26,7 +27,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   end
 
   test "normalize/1 maps an end_turn idle to :end_turn with no custom_tool_uses" do
-    assert %{terminal: :end_turn, stop_reason: "end_turn", custom_tool_uses: []} =
+    assert %{terminal: :end_turn, stop_reason: %{"type" => "end_turn"}, custom_tool_uses: []} =
              ManagedAgents.normalize([idle("end_turn")])
   end
 
