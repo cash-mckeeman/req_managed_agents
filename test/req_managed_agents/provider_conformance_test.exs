@@ -3,7 +3,7 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
   alias ReqManagedAgents.Providers.{BedrockAgentCore, ClaudeManagedAgents}
 
   # Every provider implements the shared callbacks; each mode adds its own.
-  @shared [{:mode, 0}, {:open, 2}, {:kickoff_input, 1}, {:user_input, 1}, {:resume_input, 2}, {:normalize, 1}]
+  @shared [{:mode, 0}, {:open, 2}, {:kickoff_input, 1}, {:user_input, 1}, {:resume_input, 2}, {:normalize, 1}, {:provision, 2}]
 
   test "BedrockAgentCore is a complete :request_response provider" do
     Code.ensure_loaded!(BedrockAgentCore)
@@ -12,6 +12,8 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
     for {f, a} <- @shared ++ [{:poll_turn, 2}] do
       assert function_exported?(BedrockAgentCore, f, a), "BedrockAgentCore missing #{f}/#{a}"
     end
+
+    assert function_exported?(BedrockAgentCore, :teardown, 2), "BedrockAgentCore missing teardown/2"
   end
 
   test "ClaudeManagedAgents is a complete :streaming provider" do
@@ -21,6 +23,8 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
     for {f, a} <- @shared ++ [{:push_input, 2}, {:turn_boundary?, 1}, {:reconnect, 3}] do
       assert function_exported?(ClaudeManagedAgents, f, a), "ClaudeManagedAgents missing #{f}/#{a}"
     end
+
+    assert function_exported?(ClaudeManagedAgents, :teardown, 2), "ClaudeManagedAgents missing teardown/2"
   end
 
   test "both providers normalize to the same canonical turn_outcome keys" do
