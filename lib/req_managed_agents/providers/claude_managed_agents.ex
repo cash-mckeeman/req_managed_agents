@@ -27,12 +27,12 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
           {:ok, %{"id" => sid}} ->
             ref = make_ref()
 
-            {:ok, _task} =
+            {:ok, task} =
               Task.start_link(fn ->
                 Stream.stream(client, sid, subscriber, ref: ref, telemetry_metadata: opts[:telemetry_metadata] || %{})
               end)
 
-            {:ok, %{client: client, session_id: sid, ref: ref}}
+            {:ok, %{client: client, session_id: sid, ref: ref, consumer: task}}
 
           {:error, reason} ->
             {:error, {:create_session_failed, reason}}
@@ -85,12 +85,12 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
         ref = make_ref()
 
-        {:ok, _task} =
+        {:ok, task} =
           Task.start_link(fn ->
             Stream.stream(conn.client, conn.session_id, subscriber, ref: ref)
           end)
 
-        {:ok, %{conn | ref: ref}, pending, seen}
+        {:ok, Map.merge(conn, %{ref: ref, consumer: task}), pending, seen}
 
       {:error, reason} ->
         {:error, reason}

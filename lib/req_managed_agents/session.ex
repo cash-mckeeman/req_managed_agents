@@ -25,17 +25,32 @@ defmodule ReqManagedAgents.Session do
   `:session_id` to resume) are forwarded to the provider's `open/2`.
   """
   use GenServer
+  require Logger
   alias ReqManagedAgents.{Provider, Tools}
+
+  @max_tool_concurrency 8
 
   @spec run(module(), keyword()) :: {:ok, map()} | {:error, term()}
   def run(provider, opts) do
-    case GenServer.start_link(__MODULE__, {provider, Keyword.put(opts, :caller, self())}) do
+    # start (NOT start_link) + monitor: an open/init failure or an unexpected GenServer death
+    # surfaces as a value here instead of a link exit that would kill the caller.
+    case GenServer.start(__MODULE__, {provider, Keyword.put(opts, :caller, self())}) do
       {:ok, pid} ->
+        mref = Process.monitor(pid)
         timeout = opts[:timeout] || 600_000
+
         receive do
-          {:session_result, ^pid, result} -> result
+          {:session_result, ^pid, result} ->
+            Process.demonitor(mref, [:flush])
+            result
+
+          {:DOWN, ^mref, :process, ^pid, reason} ->
+            {:error, reason}
         after
-          timeout -> GenServer.stop(pid, :normal); {:error, :timeout}
+          timeout ->
+            Process.demonitor(mref, [:flush])
+            GenServer.stop(pid, :normal)
+            {:error, :timeout}
         end
 
       {:error, reason} ->
@@ -60,19 +75,25 @@ defmodule ReqManagedAgents.Session do
 
   @impl true
   def init({provider, opts}) do
+    # Trap exits so a crash in the linked stream-consumer / poll-turn Task arrives as {:EXIT,…}
+    # (driving reconnect or a surfaced error) instead of killing this process and its caller.
+    Process.flag(:trap_exit, true)
+
     case provider.open(opts, self()) do
       {:ok, conn} ->
         state = %{
           provider: provider, mode: provider.mode(), conn: conn, opts: opts,
           handler: Keyword.fetch!(opts, :handler), context: opts[:context],
           caller: opts[:caller], notify: opts[:notify], meta: opts[:telemetry_metadata] || %{},
-          ref: Map.get(conn, :ref), kicked_off: false, seen: MapSet.new(), reconnect_attempts: 0,
+          ref: Map.get(conn, :ref), consumer: Map.get(conn, :consumer),
+          kicked_off: false, seen: MapSet.new(), reconnect_attempts: 0,
           events: [], turn_events: [], turns: 0, max_turns: opts[:max_turns] || 50
         }
         {:ok, state, {:continue, if(Map.get(conn, :resume), do: :resume, else: :maybe_kickoff)}}
 
+      # Surface the provider's error verbatim (e.g. {:create_session_failed, _}) — no extra wrapping.
       {:error, reason} ->
-        {:stop, {:open_failed, reason}}
+        {:stop, reason}
     end
   end
 
@@ -120,12 +141,19 @@ defmodule ReqManagedAgents.Session do
   def handle_info(:reconnect, s) do
     case s.provider.reconnect(s.conn, self(), s.seen) do
       {:ok, conn, pending, seen} ->
-        s = %{s | conn: conn, ref: Map.get(conn, :ref), seen: seen, turn_events: [], reconnect_attempts: 0}
+        # reconnect_attempts is NOT reset here — only a real terminal (finish/2) resets it — so a
+        # connect→drop flap actually escalates the backoff instead of hammering at 500ms.
+        s = %{s | conn: conn, ref: Map.get(conn, :ref), consumer: Map.get(conn, :consumer), seen: seen, turn_events: []}
         if pending == [], do: {:noreply, s}, else: redrive(s, pending)
 
-      {:error, _reason} ->
-        Process.send_after(self(), :reconnect, backoff_ms(s))
-        {:noreply, %{s | reconnect_attempts: s.reconnect_attempts + 1}}
+      # A sync run/2 surfaces a list/reconnect failure; a live session backs off and retries.
+      {:error, reason} ->
+        if s.caller do
+          stop_error(s, reason)
+        else
+          Process.send_after(self(), :reconnect, backoff_ms(s))
+          {:noreply, %{s | reconnect_attempts: s.reconnect_attempts + 1}}
+        end
     end
   end
 
@@ -135,10 +163,25 @@ defmodule ReqManagedAgents.Session do
   end
 
   def handle_info({:turn, {:error, reason}}, s), do: stop_error(s, reason)
+
+  # Linked-Task exits: a clean exit is fine; an abnormal consumer-task crash drives reconnect
+  # (live) or surfaces an error (sync); any other linked exit (parent/supervisor) stops us.
+  def handle_info({:EXIT, _pid, :normal}, s), do: {:noreply, s}
+
+  def handle_info({:EXIT, pid, _reason}, %{consumer: pid, caller: nil} = s) do
+    Process.send_after(self(), :reconnect, backoff_ms(s))
+    {:noreply, %{s | reconnect_attempts: s.reconnect_attempts + 1}}
+  end
+
+  def handle_info({:EXIT, pid, reason}, %{consumer: pid} = s), do: stop_error(s, reason)
+  def handle_info({:EXIT, _pid, reason}, s), do: {:stop, reason, s}
+
   def handle_info(_other, s), do: {:noreply, s}
 
   @impl true
-  def handle_cast({:message, text}, s), do: drive(s, s.provider.user_input(text))
+  # A follow-up message starts a fresh request: reset the per-request turn counter so max_turns
+  # bounds a runaway tool loop within one request, not the session's whole lifetime.
+  def handle_cast({:message, text}, s), do: drive(%{s | turns: 0}, s.provider.user_input(text))
 
   defp kickoff(s), do: drive(%{s | kicked_off: true}, s.provider.kickoff_input(s.opts))
 
@@ -146,14 +189,32 @@ defmodule ReqManagedAgents.Session do
   defp drive(%{mode: :request_response} = s, input) do
     parent = self()
     %{provider: p, conn: c} = s
-    Task.start_link(fn -> send(parent, {:turn, p.poll_turn(c, input)}) end)
+
+    Task.start_link(fn ->
+      # Convert a provider raise into a surfaced error so it can't crash the Session (and, for a
+      # sync run/2, the caller) — the {:ok}|{:error} contract holds even on malformed data.
+      result =
+        try do
+          p.poll_turn(c, input)
+        rescue
+          e -> {:error, {:provider_error, e}}
+        end
+
+      send(parent, {:turn, result})
+    end)
+
     {:noreply, s}
   end
 
   defp drive(%{mode: :streaming} = s, input) do
     case s.provider.push_input(s.conn, input) do
-      :ok -> {:noreply, %{s | turn_events: []}}
-      {:error, reason} -> stop_error(s, reason)
+      :ok ->
+        {:noreply, %{s | turn_events: []}}
+
+      # A sync run/2 surfaces a post failure; a live session stays alive (the message is dropped,
+      # matching the old fire-and-forget POST) rather than silently dying with no notify.
+      {:error, reason} ->
+        if s.caller, do: stop_error(s, reason), else: {:noreply, %{s | turn_events: []}}
     end
   end
 
@@ -161,9 +222,11 @@ defmodule ReqManagedAgents.Session do
   defp handle_turn(s, turn_events) do
     s = %{s | events: s.events ++ turn_events, turns: s.turns + 1}
     outcome = s.provider.normalize(turn_events)
+    emit_tool_use_telemetry(s, outcome.custom_tool_uses)
 
     cond do
       s.turns > s.max_turns ->
+        notify(s, :terminated)
         stop_error(s, {:max_turns_exceeded, s.max_turns})
 
       outcome.terminal == :requires_action ->
@@ -175,11 +238,36 @@ defmodule ReqManagedAgents.Session do
     end
   end
 
+  # Per-turn observability + a MIM-52 regression sentinel: custom_tool_uses are unique by id by
+  # construction, so a duplicate reaching here is a regression (a duplicate id in the resume makes
+  # a provider reject the next turn).
+  defp emit_tool_use_telemetry(s, custom_tool_uses) do
+    ids = Enum.map(custom_tool_uses, & &1.id)
+
+    :telemetry.execute(
+      [:req_managed_agents, :session, :tool_uses],
+      %{tool_use_count: length(ids)},
+      Map.merge(s.meta, %{turn: s.turns, tool_use_ids: ids})
+    )
+
+    case ids -- Enum.uniq(ids) do
+      [] -> :ok
+      dups -> Logger.warning("duplicate tool_use id(s) #{inspect(dups)} at turn #{s.turns} — MIM-52 regression")
+    end
+  end
+
   defp run_tools(custom_tool_uses, s) do
-    Enum.map(custom_tool_uses, fn %{id: id, name: name, input: input} ->
-      wire = Tools.run(s.handler, id, name, input, s.context, s.meta)
-      Provider.result_of(id, wire)
-    end)
+    custom_tool_uses
+    |> Task.async_stream(
+      fn %{id: id, name: name, input: input} ->
+        wire = Tools.run(s.handler, id, name, input, s.context, s.meta)
+        Provider.result_of(id, wire)
+      end,
+      max_concurrency: @max_tool_concurrency,
+      timeout: :infinity,
+      ordered: true
+    )
+    |> Enum.map(fn {:ok, r} -> r end)
   end
 
   # Re-run unanswered tool calls recovered on reconnect, then resume the loop.
@@ -193,7 +281,8 @@ defmodule ReqManagedAgents.Session do
   defp finish(s, terminal, stop_reason) do
     :telemetry.execute([:req_managed_agents, :session, :terminal], %{}, Map.put(s.meta, :terminal, terminal))
     notify(s, terminal)
-    reply(s, {:ok, %{terminal: terminal, stop_reason: stop_reason, events: s.events}})
+    # Real terminal reached — reset the reconnect backoff for any subsequent live activity.
+    reply(%{s | reconnect_attempts: 0}, {:ok, %{terminal: terminal, stop_reason: stop_reason, events: s.events}})
   end
 
   defp stop_error(s, reason), do: reply(s, {:error, reason})

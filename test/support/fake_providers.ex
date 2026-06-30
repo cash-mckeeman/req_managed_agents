@@ -122,4 +122,44 @@ defmodule ReqManagedAgents.FakeProviders do
     @impl true
     defdelegate normalize(events), to: Shared
   end
+
+  # open/2 fails — to assert the Session surfaces the provider error verbatim.
+  defmodule FailingOpen do
+    @behaviour ReqManagedAgents.Provider
+    @impl true
+    def mode, do: :streaming
+    @impl true
+    def open(_opts, _sub), do: {:error, {:create_session_failed, :boom}}
+    @impl true
+    def kickoff_input(_), do: :k
+    @impl true
+    def user_input(_), do: :u
+    @impl true
+    def resume_input(_, results), do: {:resume, results}
+    @impl true
+    def push_input(_, _), do: :ok
+    @impl true
+    def turn_boundary?(_), do: true
+    @impl true
+    defdelegate normalize(events), to: Shared
+  end
+
+  # poll_turn/2 RAISES — to assert the Session surfaces it as {:error, _} without killing the caller.
+  defmodule CrashingPoll do
+    @behaviour ReqManagedAgents.Provider
+    @impl true
+    def mode, do: :request_response
+    @impl true
+    def open(_opts, _sub), do: {:ok, %{}}
+    @impl true
+    def kickoff_input(_), do: :k
+    @impl true
+    def user_input(_), do: :u
+    @impl true
+    def resume_input(_, results), do: {:resume, results}
+    @impl true
+    def poll_turn(_conn, _input), do: raise("boom in poll_turn")
+    @impl true
+    defdelegate normalize(events), to: Shared
+  end
 end

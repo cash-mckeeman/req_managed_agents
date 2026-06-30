@@ -10,12 +10,11 @@ defmodule ReqManagedAgents.OpenTelemetry do
 
   ## Scope
 
-  This bridge covers the **Claude Managed Agents** path (the Session / RunToCompletion
-  SSE telemetry: `[:req_managed_agents, :stream|:tool|:session, …]`). The AWS Bedrock
-  **AgentCore** path emits different event names (`[:req_managed_agents, :agent_core, …]`,
-  including its own `:agent_core, :terminal`) and is intentionally NOT mapped here — a
-  caller routing through `ReqManagedAgents.AgentCore` would capture tool events but no
-  `"turn_complete"`.
+  Both backends now run through the unified `ReqManagedAgents.Session`, which emits
+  `[:req_managed_agents, :session, :terminal | :tool_uses]` (plus the streaming
+  `[:req_managed_agents, :stream | :tool, …]` events) regardless of provider — so this bridge
+  covers AgentCore and Claude Managed Agents alike. (The old per-driver
+  `[:req_managed_agents, :agent_core, …]` events were retired with the driver collapse.)
   """
   require Logger
   @compile {:no_warn_undefined, [:otel_tracer, :opentelemetry]}
