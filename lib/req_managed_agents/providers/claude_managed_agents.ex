@@ -62,6 +62,33 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   def turn_boundary?(_), do: false
 
   @impl true
+  def reconnect(conn, subscriber, seen) do
+    # The event stream has no replay: on reconnect, list past events, grow the dedup set, and
+    # recover any tool call left unanswered across the drop (the Session re-runs + resumes those).
+    case Client.list_all_events(conn.client, conn.session_id) do
+      {:ok, past} ->
+        {_fresh, seen} = ReqManagedAgents.Consolidate.dedupe(past, seen)
+
+        pending =
+          past
+          |> ReqManagedAgents.Consolidate.unanswered_tool_uses()
+          |> Enum.map(fn e -> %{id: e["id"], name: e["name"], input: e["input"]} end)
+
+        ref = make_ref()
+
+        {:ok, _task} =
+          Task.start_link(fn ->
+            Stream.stream(conn.client, conn.session_id, subscriber, ref: ref)
+          end)
+
+        {:ok, %{conn | ref: ref}, pending, seen}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @impl true
   def normalize(events) do
     uses_by_id =
       for %{"type" => "agent.custom_tool_use", "id" => id} = e <- events, into: %{}, do: {id, e}

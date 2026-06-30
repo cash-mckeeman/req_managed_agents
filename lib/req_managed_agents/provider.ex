@@ -71,7 +71,14 @@ defmodule ReqManagedAgents.Provider do
   @doc ":streaming only — does this event close a turn (so accumulated events form one)?"
   @callback turn_boundary?(event()) :: boolean()
 
-  @optional_callbacks poll_turn: 2, push_input: 2, turn_boundary?: 1
+  @doc """
+  :streaming only — after a stream drop, re-open the stream (delivering to `subscriber`) and
+  return any unanswered tool calls to re-drive locally, plus the grown `seen` set.
+  """
+  @callback reconnect(conn(), subscriber :: pid(), seen :: MapSet.t()) ::
+              {:ok, conn(), [custom_tool_use()], MapSet.t()} | {:error, term()}
+
+  @optional_callbacks poll_turn: 2, push_input: 2, turn_boundary?: 1, reconnect: 3
 
   @doc """
   Extract a canonical `custom_tool_result` from a `Tools.run/6` wire event

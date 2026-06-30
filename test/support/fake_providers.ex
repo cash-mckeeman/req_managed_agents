@@ -71,4 +71,55 @@ defmodule ReqManagedAgents.FakeProviders do
     @impl true
     defdelegate normalize(events), to: Shared
   end
+
+  # Streaming fake that drops the very first push (simulating a mid-turn stream loss), then
+  # serves `opts[:turns]` normally; its `reconnect/3` returns `opts[:pending]` to re-drive.
+  defmodule ReconnectingStreaming do
+    @behaviour ReqManagedAgents.Provider
+    @impl true
+    def mode, do: :streaming
+    @impl true
+    def open(opts, subscriber) do
+      {:ok, agent} =
+        Agent.start_link(fn -> %{turns: opts[:turns] || [], pending: opts[:pending] || [], dropped: false} end)
+
+      ref = make_ref()
+      send(subscriber, {:managed_agents, ref, :connected})
+      {:ok, %{agent: agent, subscriber: subscriber, ref: ref}}
+    end
+    @impl true
+    def kickoff_input(_opts), do: :kickoff
+    @impl true
+    def user_input(text), do: {:user, text}
+    @impl true
+    def resume_input(_uses, results), do: {:resume, results}
+    @impl true
+    def push_input(conn, _input) do
+      drop? = Agent.get_and_update(conn.agent, fn st -> {not st.dropped, %{st | dropped: true}} end)
+
+      if drop? do
+        send(conn.subscriber, {:managed_agents, conn.ref, {:error, :stream_dropped}})
+      else
+        turn =
+          Agent.get_and_update(conn.agent, fn
+            %{turns: [t | rest]} = st -> {t, %{st | turns: rest}}
+            %{turns: []} = st -> {[%{"type" => "stop", "terminal" => :end_turn}], st}
+          end)
+
+        Enum.each(turn, fn ev -> send(conn.subscriber, {:managed_agents, conn.ref, {:event, ev}}) end)
+      end
+
+      :ok
+    end
+    @impl true
+    def turn_boundary?(%{"type" => "stop"}), do: true
+    def turn_boundary?(_), do: false
+    @impl true
+    def reconnect(conn, subscriber, seen) do
+      pending = Agent.get(conn.agent, & &1.pending)
+      {:ok, %{conn | ref: make_ref(), subscriber: subscriber}, pending, seen}
+    end
+    @impl true
+    defdelegate normalize(events), to: Shared
+  end
 end

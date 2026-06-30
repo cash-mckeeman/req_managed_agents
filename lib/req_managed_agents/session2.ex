@@ -21,6 +21,21 @@ defmodule ReqManagedAgents.Session2 do
     end
   end
 
+  @doc "Start a long-lived session. Unlike run/2, it stays alive after a terminal for follow-ups."
+  @spec start_link(module(), keyword()) :: GenServer.on_start()
+  def start_link(provider, opts) do
+    GenServer.start_link(__MODULE__, {provider, opts}, name: opts[:name])
+  end
+
+  @doc "Return a child_spec for a live session."
+  def child_spec({provider, opts}) do
+    %{id: opts[:name] || __MODULE__, start: {__MODULE__, :start_link, [provider, opts]}, restart: :transient}
+  end
+
+  @doc "Send a follow-up user message into a running live session."
+  @spec message(pid(), String.t()) :: :ok
+  def message(pid, text), do: GenServer.cast(pid, {:message, text})
+
   @impl true
   def init({provider, opts}) do
     case provider.open(opts, self()) do
@@ -29,7 +44,7 @@ defmodule ReqManagedAgents.Session2 do
           provider: provider, mode: provider.mode(), conn: conn, opts: opts,
           handler: Keyword.fetch!(opts, :handler), context: opts[:context],
           caller: opts[:caller], notify: opts[:notify], meta: opts[:telemetry_metadata] || %{},
-          ref: Map.get(conn, :ref), kicked_off: false,
+          ref: Map.get(conn, :ref), kicked_off: false, seen: MapSet.new(), reconnect_attempts: 0,
           events: [], turn_events: [], turns: 0, max_turns: opts[:max_turns] || 50
         }
         {:ok, state, {:continue, :maybe_kickoff}}
@@ -49,13 +64,41 @@ defmodule ReqManagedAgents.Session2 do
   def handle_info({:managed_agents, ref, :connected}, %{ref: ref} = s), do: {:noreply, s}
 
   def handle_info({:managed_agents, ref, {:event, ev}}, %{ref: ref} = s) do
-    forward_raw(s, ev)
-    s = %{s | turn_events: s.turn_events ++ [ev]}
-    if s.provider.turn_boundary?(ev), do: handle_turn(s, s.turn_events), else: {:noreply, s}
+    id = ev["id"]
+
+    if is_binary(id) and MapSet.member?(s.seen, id) do
+      # Already processed (re-delivered after a reconnect) — skip.
+      {:noreply, s}
+    else
+      s = %{s | seen: if(is_binary(id), do: MapSet.put(s.seen, id), else: s.seen)}
+      forward_raw(s, ev)
+      s = %{s | turn_events: s.turn_events ++ [ev]}
+      if s.provider.turn_boundary?(ev), do: handle_turn(s, s.turn_events), else: {:noreply, s}
+    end
   end
 
   def handle_info({:managed_agents, ref, :done}, %{ref: ref} = s), do: {:noreply, s}
+
+  # A LIVE streaming session (no synchronous caller) reconnects-with-consolidation on a stream
+  # drop; a synchronous run/2 surfaces the error instead.
+  def handle_info({:managed_agents, ref, {:error, _reason}}, %{ref: ref, caller: nil} = s) do
+    Process.send_after(self(), :reconnect, backoff_ms(s))
+    {:noreply, %{s | reconnect_attempts: s.reconnect_attempts + 1}}
+  end
+
   def handle_info({:managed_agents, ref, {:error, reason}}, %{ref: ref} = s), do: stop_error(s, reason)
+
+  def handle_info(:reconnect, s) do
+    case s.provider.reconnect(s.conn, self(), s.seen) do
+      {:ok, conn, pending, seen} ->
+        s = %{s | conn: conn, ref: Map.get(conn, :ref), seen: seen, turn_events: [], reconnect_attempts: 0}
+        if pending == [], do: {:noreply, s}, else: redrive(s, pending)
+
+      {:error, _reason} ->
+        Process.send_after(self(), :reconnect, backoff_ms(s))
+        {:noreply, %{s | reconnect_attempts: s.reconnect_attempts + 1}}
+    end
+  end
 
   def handle_info({:turn, {:ok, events, conn}}, s) do
     Enum.each(events, &forward_raw(s, &1))
@@ -109,6 +152,14 @@ defmodule ReqManagedAgents.Session2 do
       Provider.result_of(id, wire)
     end)
   end
+
+  # Re-run unanswered tool calls recovered on reconnect, then resume the loop.
+  defp redrive(s, pending) do
+    results = run_tools(pending, s)
+    drive(s, s.provider.resume_input(pending, results))
+  end
+
+  defp backoff_ms(%{reconnect_attempts: n}), do: min(500 * Integer.pow(2, min(n, 7)), :timer.minutes(60))
 
   defp finish(s, terminal, stop_reason) do
     :telemetry.execute([:req_managed_agents, :session, :terminal], %{}, Map.put(s.meta, :terminal, terminal))
