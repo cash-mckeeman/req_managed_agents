@@ -44,7 +44,7 @@ The existing code already encodes this distinction in its wire vocabulary — th
 1. **Managed Agents** — `ReqManagedAgents.Client` over `https://api.anthropic.com` (`anthropic-beta: managed-agents-2026-04-01`), streamed via `ReqManagedAgents.SSE`, driven by `ReqManagedAgents.RunToCompletion`.
 2. **Bedrock AgentCore** — `ReqManagedAgents.AgentCore.Client` over `bedrock-agentcore.<region>.amazonaws.com`, streamed via `ReqManagedAgents.AgentCore.EventStream`, normalized by `ReqManagedAgents.AgentCore.Converse`, driven by `ReqManagedAgents.AgentCore.invoke_to_completion/1`.
 
-**Implementation outcome:** the Managed Agents side turned out to have a *third* turn driver beyond `RunToCompletion` — the stateful `ReqManagedAgents.Session` GenServer — which was also migrated onto `Providers.ManagedAgents` (it has no full event list, so it calls `normalize/1` on a synthetic per-turn list, `Map.values(stash) ++ [status_event]`). So **all three drivers** (`RunToCompletion`, `Session`, `AgentCore.invoke_to_completion/1`) now emit the canonical 3-atom terminal — the collapse is uniform. `Event.classify/1` is **retained**, not retired: it still backs `ReqManagedAgents.Profile`'s wire-compat `terminal?/3` predicate (currently unused scaffolding). Migrating `Profile` off `classify` and then retiring `classify` is explicit follow-up.
+**Implementation outcome:** the Managed Agents side turned out to have a *third* turn driver beyond `RunToCompletion` — the stateful `ReqManagedAgents.Session` GenServer — which was also migrated onto `Providers.ClaudeManagedAgents` (it has no full event list, so it calls `normalize/1` on a synthetic per-turn list, `Map.values(stash) ++ [status_event]`). So **all three drivers** (`RunToCompletion`, `Session`, `AgentCore.invoke_to_completion/1`) now emit the canonical 3-atom terminal — the collapse is uniform. `Event.classify/1` is **retained**, not retired: it still backs `ReqManagedAgents.Profile`'s wire-compat `terminal?/3` predicate (currently unused scaffolding). Migrating `Profile` off `classify` and then retiring `classify` is explicit follow-up.
 
 **Review-confirmed behaviors & known limitations** (from the whole-branch review):
 
@@ -190,7 +190,7 @@ end
 ### `ReqManagedAgents.Provider` (new)
 Behaviour + canonical types only. No logic.
 
-### `ReqManagedAgents.Providers.AgentCore` (new, thin)
+### `ReqManagedAgents.Providers.BedrockAgentCore` (new, thin)
 `@behaviour ReqManagedAgents.Provider`. Composes existing AgentCore pieces:
 - `decode/1` → delegates `AgentCore.EventStream.decode/1`.
 - `normalize/1` → wraps `AgentCore.Converse.parse/1`, mapping its `%{"toolUseId", "name", "input"}` entries to canonical `custom_tool_use` `%{id, name, input}` and its raw `stop_reason` to a canonical `terminal` via `terminal/1`. The toolUse blocks `parse/1` surfaces (at `stopReason: "tool_use"`) are the return-of-control `inline_function` calls — client-side by construction; harness-executed built-in tools do not produce a `tool_use` stop and so never appear here.
@@ -199,7 +199,7 @@ Behaviour + canonical types only. No logic.
 
 `Converse.parse/1`, `resume_messages/2`, and `inline_function/3` keep their current internals (including the MIM-52 id-keyed fold) — they are wrapped, not rewritten.
 
-### `ReqManagedAgents.Providers.ManagedAgents` (new)
+### `ReqManagedAgents.Providers.ClaudeManagedAgents` (new)
 `@behaviour ReqManagedAgents.Provider`. The genuinely new normalization, built on confirmed event shapes:
 - `decode/1` → delegates `ReqManagedAgents.SSE.decode/1`.
 - `normalize/1` → folds the event list. Accumulates `agent.custom_tool_use` events (`%{"id", "name", "input"}`) — the `custom_` prefix marks these client-side. On a `session.status_idle`, reads `stop_reason.type`; when `"requires_action"`, emits `custom_tool_uses` = the accumulated custom-tool-use events whose `id ∈ stop_reason.event_ids`, as canonical `%{id, name, input}`, in `event_ids` order; sets `terminal` via `terminal/1` and `stop_reason` to the raw type string. (Mirrors how `Converse.parse/1` emits client tool uses on `stopReason: "tool_use"`.) Any provider-executed tool events seen along the way stay in the raw `events` and are never added to `custom_tool_uses`. Populates `text` best-effort.
@@ -207,8 +207,8 @@ Behaviour + canonical types only. No logic.
 - `resume/2` → maps canonical `custom_tool_result`s to `Event.custom_tool_result/3` events (the wire shape `RunToCompletion.resolve/2` posts today).
 
 ### Drivers (refactored, topology unchanged)
-- **`AgentCore.invoke_to_completion/1`** — replace direct calls to `Converse` / `EventStream` / `terminal_atom` with `Providers.AgentCore.{decode,normalize,terminal,resume}`. The MIM-52 telemetry sentinel (`emit_tool_use_telemetry/2`) moves to operate on canonical `custom_tool_uses`. Per-turn loop unchanged.
-- **`RunToCompletion.run/1`** — `do_event/3` and `resolve/2` consume `Providers.ManagedAgents.normalize/1` to obtain canonical `custom_tool_uses` + `terminal` at a `requires_action` idle, and `Providers.ManagedAgents.resume/2` to build the result events. Stateful push-loop, `seen` de-dup, and the `Stream`/`Task` plumbing are unchanged.
+- **`AgentCore.invoke_to_completion/1`** — replace direct calls to `Converse` / `EventStream` / `terminal_atom` with `Providers.BedrockAgentCore.{decode,normalize,terminal,resume}`. The MIM-52 telemetry sentinel (`emit_tool_use_telemetry/2`) moves to operate on canonical `custom_tool_uses`. Per-turn loop unchanged.
+- **`RunToCompletion.run/1`** — `do_event/3` and `resolve/2` consume `Providers.ClaudeManagedAgents.normalize/1` to obtain canonical `custom_tool_uses` + `terminal` at a `requires_action` idle, and `Providers.ClaudeManagedAgents.resume/2` to build the result events. Stateful push-loop, `seen` de-dup, and the `Stream`/`Task` plumbing are unchanged.
 
 Both drivers keep returning `{:ok, %{terminal: terminal(), stop_reason: term(), events: [event()]}}` — now with `terminal` drawn from the unified taxonomy.
 
@@ -235,7 +235,7 @@ TDD per the implementation plan. Key strategy:
 2. **Behaviour conformance test** (shared): for each provider module, assert it implements all `Provider` callbacks and that `normalize/1` of its golden fixture yields a well-formed `turn_outcome` — `terminal` in the canonical set, `custom_tool_uses` matching canonical `%{id, name, input}`, `custom_tool_uses` populated only on `:requires_action` (empty for terminal outcomes; see "Review-confirmed behaviors").
 3. **Server-side exclusion test** (the thesis guard): a fixture containing both a client-side (return-of-control) tool call *and* a server-side/built-in tool use+result normalizes to `custom_tool_uses` holding **only** the client-side call; the server-side activity remains in `events` and never reaches the actionable path. One per backend.
 4. **Cross-provider symmetry test:** a `requires_action`/`tool_use` fixture from each backend normalizes to the *same canonical shape* (modulo ids/names), proving the vocabulary is genuinely shared.
-5. **MIM-52 regression preserved:** the index-reuse vector (`[{0,A},{0,B},{1,C}]`) still recovers both tools through `Providers.AgentCore.normalize/1`.
+5. **MIM-52 regression preserved:** the index-reuse vector (`[{0,A},{0,B},{1,C}]`) still recovers both tools through `Providers.BedrockAgentCore.normalize/1`.
 6. **Driver tests unchanged in behavior:** existing `RunToCompletion` and `invoke_to_completion` tests pass without modification to their assertions (the refactor is internal).
 
 ## Migration / risk
