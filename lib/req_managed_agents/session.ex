@@ -1,7 +1,29 @@
 defmodule ReqManagedAgents.Session do
-  @moduledoc false
-  # Unified provider-agnostic agent loop. One GenServer drives any Provider in either transport
-  # mode; the mode only changes how a turn's events are ACQUIRED (poll vs collect-from-stream).
+  @moduledoc """
+  The one agent loop, provider- and transport-agnostic.
+
+  A `Session` drives any `ReqManagedAgents.Provider` to completion: invoke a turn → normalize →
+  run the return-of-control tools locally via the `:handler` → resume → repeat until a terminal.
+  The provider's `mode/0` (`:streaming` push or `:request_response` pull) only changes how a
+  turn's events are *acquired*; the loop, the result shape, and the raw-event passthrough are
+  identical across providers.
+
+  Pick a provider — `ReqManagedAgents.Providers.ClaudeManagedAgents` (streaming) or
+  `ReqManagedAgents.Providers.BedrockAgentCore` (request/response) — and:
+
+      # synchronous run-to-completion
+      {:ok, %{terminal: t, stop_reason: r, events: raw}} =
+        ReqManagedAgents.Session.run(provider, handler: MyTools, prompt: "Hi", ...)
+
+      # live, long-lived (stays alive after a terminal; `:notify` gets {:managed_agents_session, t})
+      {:ok, pid} = ReqManagedAgents.Session.start_link(provider, handler: MyTools, notify: self(), ...)
+      ReqManagedAgents.Session.message(pid, "follow-up")
+
+  Required opts: `:handler` (a `ReqManagedAgents.Handler` module or a 3-arity fn). Optional:
+  `:context`, `:prompt`, `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`.
+  Provider-specific opts (e.g. `:agent_id`/`:environment_id`, `:harness_arn`/`:runtime_session_id`,
+  `:session_id` to resume) are forwarded to the provider's `open/2`.
+  """
   use GenServer
   alias ReqManagedAgents.{Provider, Tools}
 
