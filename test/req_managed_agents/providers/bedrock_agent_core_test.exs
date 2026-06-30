@@ -100,4 +100,54 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       assert function_exported?(P, f, a)
     end
   end
+
+  # ── provision / teardown ──────────────────────────────────────────────────────
+
+  @spec_bedrock %{system_prompt: "be helpful", tools: [%{"name" => "t"}], terminal_tool: nil,
+                  model_config: %{"bedrockModelConfig" => %{"modelId" => "anthropic.claude-sonnet-4"}}}
+
+  defp prov_opts(create_fun, extra \\ []) do
+    [execution_role_arn: "arn:aws:iam::1:role/R", create_fun: create_fun,
+     get_fun: fn _hid -> {:ok, %{"harness" => %{"status" => "READY"}}} end] ++ extra
+  end
+
+  test "provision/2 creates a harness, polls READY, returns {harness_arn, harness_id}" do
+    create = fn harness_spec ->
+      assert harness_spec.system_prompt == "be helpful"
+      assert harness_spec.model == @spec_bedrock.model_config
+      assert harness_spec.execution_role_arn == "arn:aws:iam::1:role/R"
+      assert is_binary(harness_spec.name)
+      {:ok, %{"harnessArn" => "arn:harness/x", "harnessId" => "h1"}}
+    end
+
+    assert {:ok, %{harness_arn: "arn:harness/x", harness_id: "h1"}} =
+             P.provision(@spec_bedrock, prov_opts(create))
+  end
+
+  test "provision/2 recovers an existing harness when CreateHarness 409s" do
+    name = P.harness_name(@spec_bedrock, nil)
+    create = fn _ -> {:error, {:http_error, 409, %{}}} end
+
+    list = fn ->
+      {:ok, %{"harnesses" => [%{"harnessName" => name, "harnessId" => "h9", "arn" => "arn:harness/exist", "status" => "READY"}]}}
+    end
+
+    assert {:ok, %{harness_arn: "arn:harness/exist", harness_id: "h9"}} =
+             P.provision(@spec_bedrock, prov_opts(create, list_fun: list))
+  end
+
+  test "provision/2 returns an error (not a raise) when list_harnesses is malformed on 409" do
+    create = fn _ -> {:error, {:http_error, 409, %{}}} end
+    list = fn -> {:ok, %{}} end
+
+    assert {:error, {:unexpected_list_response, {:ok, %{}}}} =
+             P.provision(@spec_bedrock, prov_opts(create, list_fun: list))
+  end
+
+  test "teardown/2 deletes the harness by id" do
+    {:ok, deleted} = Agent.start_link(fn -> nil end)
+    delete = fn hid -> Agent.update(deleted, fn _ -> hid end); {:ok, %{}} end
+    assert :ok = P.teardown(%{harness_arn: "a", harness_id: "h1"}, delete_fun: delete)
+    assert Agent.get(deleted, & &1) == "h1"
+  end
 end

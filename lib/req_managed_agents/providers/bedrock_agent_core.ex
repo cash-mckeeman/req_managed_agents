@@ -12,8 +12,98 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   @impl true
   def mode, do: :request_response
 
+  @ready_poll_ms 5_000
+  @ready_max_polls 72
+  @nonreusable_status ~w(DELETING DELETE_FAILED CREATE_FAILED UPDATE_FAILED)
+
   @impl true
-  def provision(_spec, _opts), do: {:error, :not_implemented}
+  def provision(spec, opts) do
+    name = harness_name(spec, opts[:name_prefix])
+
+    harness_spec = %{
+      name: name,
+      execution_role_arn: Keyword.fetch!(opts, :execution_role_arn),
+      system_prompt: spec.system_prompt,
+      model: spec.model_config,
+      tools: spec.tools
+    }
+
+    create_fun = opts[:create_fun] || fn s -> Client.create_harness(opts[:client] || Client.new(), s) end
+    list_fun = opts[:list_fun] || fn -> Client.list_harnesses(opts[:client] || Client.new()) end
+    get_fun = opts[:get_fun] || fn hid -> Client.get_harness(opts[:client] || Client.new(), hid) end
+
+    case create_fun.(harness_spec) do
+      {:ok, %{"harnessArn" => arn, "harnessId" => hid}} ->
+        with :ok <- wait_until_ready(get_fun, hid), do: {:ok, %{harness_arn: arn, harness_id: hid}}
+
+      {:error, {:http_error, 409, _}} ->
+        recover_existing(list_fun, get_fun, name)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @impl true
+  def teardown(%{harness_id: hid}, opts) do
+    delete_fun = opts[:delete_fun] || fn id -> Client.delete_harness(opts[:client] || Client.new(), id) end
+
+    case delete_fun.(hid) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc false
+  def harness_name(spec, prefix) do
+    digest =
+      :crypto.hash(:sha256, :erlang.term_to_binary(spec))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 8)
+
+    [prefix, "harness_#{digest}"] |> Enum.reject(&is_nil/1) |> Enum.join("_")
+  end
+
+  defp recover_existing(list_fun, get_fun, name) do
+    with {:ok, %{"harnesses" => harnesses}} <- list_fun.(),
+         %{"arn" => arn, "harnessId" => hid} <- recoverable_harness(harnesses, name),
+         :ok <- wait_until_ready(get_fun, hid) do
+      {:ok, %{harness_arn: arn, harness_id: hid}}
+    else
+      nil -> {:error, {:harness_name_conflict, name}}
+      {:error, reason} -> {:error, reason}
+      other -> {:error, {:unexpected_list_response, other}}
+    end
+  end
+
+  defp recoverable_harness(harnesses, name) do
+    Enum.find(harnesses, fn h ->
+      h["harnessName"] == name and h["status"] not in @nonreusable_status
+    end)
+  end
+
+  defp wait_until_ready(get_fun, hid, polls_left \\ @ready_max_polls) do
+    case get_fun.(hid) do
+      {:ok, %{"harness" => %{"status" => "READY"}}} ->
+        :ok
+
+      {:ok, %{"harness" => %{"status" => s}}} when s in ["CREATE_FAILED", "UPDATE_FAILED", "DELETE_FAILED"] ->
+        {:error, {:harness_failed, s}}
+
+      {:ok, %{"harness" => %{"status" => _}}} when polls_left > 0 ->
+        Process.sleep(@ready_poll_ms)
+        wait_until_ready(get_fun, hid, polls_left - 1)
+
+      {:ok, %{"harness" => _}} when polls_left == 0 ->
+        {:error, :harness_ready_timeout}
+
+      {:ok, other} ->
+        {:error, {:unexpected_get_harness_response, other}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   @impl true
   def open(opts, _subscriber) do
