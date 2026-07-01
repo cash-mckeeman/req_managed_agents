@@ -189,6 +189,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       stop_reason: reason,
       text: text,
       custom_tool_uses: custom,
+      # Harness built-in tools execute in-microVM and do not surface a modelable event yet.
       server_tool_uses: [],
       usage: to_usage(usage),
       events: events

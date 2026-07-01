@@ -26,12 +26,13 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   test "normalize/1 maps a tool_use turn to a %TurnResult{} with %ToolUse{}" do
     events = [
       %{"contentBlockStart" => %{"contentBlockIndex" => 0, "start" => %{"toolUse" => %{"toolUseId" => "t1", "name" => "lookup"}}}},
-      %{"contentBlockDelta" => %{"contentBlockIndex" => 0, "delta" => %{"toolUse" => %{"input" => "{}"}}}},
+      %{"contentBlockDelta" => %{"contentBlockIndex" => 0, "delta" => %{"toolUse" => %{"input" => "{\"text\":\"hi\"}"}}}},
       %{"messageStop" => %{"stopReason" => "tool_use"}}
     ]
 
     assert %TurnResult{terminal: :requires_action, stop_reason: "tool_use",
-             custom_tool_uses: [%ToolUse{id: "t1", name: "lookup"}], server_tool_uses: []} = P.normalize(events)
+             custom_tool_uses: [%ToolUse{id: "t1", name: "lookup", input: %{"text" => "hi"}}],
+             server_tool_uses: []} = P.normalize(events)
   end
 
   test "normalize/1 maps an end_turn to a %TurnResult{}" do

@@ -12,10 +12,10 @@ defmodule ReqManagedAgents.Session do
   `ReqManagedAgents.Providers.BedrockAgentCore` (request/response) — and:
 
       # synchronous run-to-completion
-      {:ok, %{terminal: t, stop_reason: r, events: raw}} =
+      {:ok, %ReqManagedAgents.SessionResult{terminal: t, stop_reason: r, events: raw}} =
         ReqManagedAgents.Session.run(provider, handler: MyTools, prompt: "Hi", ...)
 
-      # live, long-lived (stays alive after a terminal; `:notify` gets {:managed_agents_session, t})
+      # live, long-lived (stays alive after a terminal; `:notify` gets {:managed_agents_session, %ReqManagedAgents.SessionResult{}})
       {:ok, pid} = ReqManagedAgents.Session.start_link(provider, handler: MyTools, notify: self(), ...)
       ReqManagedAgents.Session.message(pid, "follow-up")
 
@@ -30,7 +30,7 @@ defmodule ReqManagedAgents.Session do
 
   @max_tool_concurrency 8
 
-  @spec run(module(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec run(module(), keyword()) :: {:ok, ReqManagedAgents.SessionResult.t()} | {:error, term()}
   def run(provider, opts) do
     # start (NOT start_link) + monitor: an open/init failure or an unexpected GenServer death
     # surfaces as a value here instead of a link exit that would kill the caller.
@@ -186,7 +186,7 @@ defmodule ReqManagedAgents.Session do
     do: drive(reset_acc(%{s | turns: 0}), s.provider.user_input(text))
 
   defp reset_acc(s),
-    do: %{s | custom_tool_uses: [], server_tool_uses: [], usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []}}
+    do: %{s | events: [], custom_tool_uses: [], server_tool_uses: [], usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []}}
 
   defp kickoff(s), do: drive(%{s | kicked_off: true}, s.provider.kickoff_input(s.opts))
 
@@ -232,7 +232,7 @@ defmodule ReqManagedAgents.Session do
 
     cond do
       s.turns > s.max_turns ->
-        notify(s, :terminated)
+        notify(s, session_result(s, tr, :terminated))
         stop_error(s, {:max_turns_exceeded, s.max_turns})
 
       tr.terminal == :requires_action ->
@@ -295,15 +295,17 @@ defmodule ReqManagedAgents.Session do
 
   defp backoff_ms(%{reconnect_attempts: n}), do: min(500 * Integer.pow(2, min(n, 7)), :timer.minutes(60))
 
-  defp finish(s, %TurnResult{} = tr) do
-    :telemetry.execute([:req_managed_agents, :session, :terminal], %{}, Map.put(s.meta, :terminal, tr.terminal))
-
-    result = %SessionResult{
-      terminal: tr.terminal, stop_reason: tr.stop_reason, text: tr.text,
+  defp session_result(s, tr, terminal) do
+    %SessionResult{
+      terminal: terminal, stop_reason: tr.stop_reason, text: tr.text,
       custom_tool_uses: s.custom_tool_uses, server_tool_uses: s.server_tool_uses,
       usage: s.usage, turns: s.turns, events: s.events
     }
+  end
 
+  defp finish(s, %TurnResult{} = tr) do
+    :telemetry.execute([:req_managed_agents, :session, :terminal], %{}, Map.put(s.meta, :terminal, tr.terminal))
+    result = session_result(s, tr, tr.terminal)
     notify(s, result)
     # Real terminal reached — reset the reconnect backoff for any subsequent live activity.
     reply(%{s | reconnect_attempts: 0}, {:ok, result})

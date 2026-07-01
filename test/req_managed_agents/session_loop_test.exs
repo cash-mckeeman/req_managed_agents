@@ -15,12 +15,12 @@ defmodule ReqManagedAgents.SessionLoopTest do
       handler = fn name, input, _ctx -> send(test, {:tool_ran, name, input}); {:ok, "result-#{name}"} end
 
       assert {:ok, result} = Session.run(@provider, handler: handler, turns: [@turn1, @turn2])
-      assert {:ok, %SessionResult{
+      assert %SessionResult{
                terminal: :end_turn,
                turns: 2,
                custom_tool_uses: [%ToolUse{}],
                usage: %Usage{input_tokens: 2, output_tokens: 2, raw: [_, _]}
-             }} = {:ok, result}
+             } = result
       # raw events from BOTH turns are accumulated verbatim
       assert result.events == @turn1 ++ @turn2
       # the local tool ran with the right args

@@ -146,7 +146,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
       %{"type" => "session.status_idle", "stop_reason" => %{"type" => reason} = sr} ->
         custom =
           sr |> Map.get("event_ids", []) |> Enum.map(&uses_by_id[&1]) |> Enum.reject(&is_nil/1)
-          |> Enum.map(fn e -> %ToolUse{id: e["id"], name: e["name"], input: e["input"]} end)
+          |> Enum.map(fn e -> %ToolUse{id: e["id"], name: e["name"], input: e["input"] || %{}} end)
 
         turn_result(terminal(reason), sr, custom, events)
 

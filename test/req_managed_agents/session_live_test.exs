@@ -20,7 +20,11 @@ defmodule ReqManagedAgents.SessionLiveTest do
     assert Process.alive?(pid)
 
     Session.message(pid, "again")
-    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn}}, 1000
+    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn} = msg_result}, 1000
+    # reset_acc zeros out events/tool_uses/usage for the new message — only the new turn's data
+    assert msg_result.events == @done
+    assert msg_result.custom_tool_uses == []
+    assert msg_result.usage.input_tokens == 1
     assert Process.alive?(pid)
   end
 
