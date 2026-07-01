@@ -15,7 +15,7 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
     {:ok, bypass: bypass, client: client}
   end
 
-  test "create_harness signs the request and returns the harnessArn", %{
+  test "create_harness signs the request and returns the created harness (wrapped shape)", %{
     bypass: bypass,
     client: client
   } do
@@ -34,7 +34,7 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
       |> Plug.Conn.put_resp_content_type("application/json")
       |> Plug.Conn.resp(
         200,
-        ~s({"harnessArn":"arn:aws:bedrock-agentcore:us-east-1:1:harness/ba"})
+        ~s({"harness":{"arn":"arn:aws:bedrock-agentcore:us-east-1:1:harness/ba","harnessId":"ba-1","status":"CREATING"}})
       )
     end)
 
@@ -54,7 +54,7 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
       model: %{"bedrockModelConfig" => %{"modelId" => "anthropic.claude-sonnet-4"}}
     }
 
-    assert {:ok, %{"harnessArn" => "arn:aws:bedrock-agentcore:us-east-1:1:harness/ba"}} =
+    assert {:ok, %{"harness" => %{"arn" => "arn:aws:bedrock-agentcore:us-east-1:1:harness/ba"}}} =
              Client.create_harness(client, spec)
   end
 

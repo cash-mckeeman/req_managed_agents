@@ -35,7 +35,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     max_polls = opts[:ready_max_polls] || @ready_max_polls
 
     case create_fun.(harness_spec) do
-      {:ok, %{"harnessArn" => arn, "harnessId" => hid}} ->
+      {:ok, %{"harness" => %{"arn" => arn, "harnessId" => hid}}} ->
         with :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls), do: {:ok, %{harness_arn: arn, harness_id: hid}}
 
       {:error, {:http_error, 409, _}} ->
