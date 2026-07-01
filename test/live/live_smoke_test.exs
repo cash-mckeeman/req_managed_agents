@@ -50,7 +50,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
         notify: self()
       )
 
-    assert_receive {:managed_agents_session, :end_turn}, 90_000
+    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn}}, 90_000
   end
 
   @tag timeout: 120_000
@@ -83,7 +83,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
         ]
       })
 
-    assert {:ok, %{terminal: :end_turn}} =
+    assert {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn} = result} =
              ReqManagedAgents.run_to_completion(
                client: client,
                agent_id: agent_id,
@@ -92,6 +92,23 @@ defmodule ReqManagedAgents.LiveSmokeTest do
                handler: Handler,
                timeout: 90_000
              )
+
+    # THE real test for usage: confirm the reconciled wire-shape against the live beta.
+    # Dump every event that could carry usage so we can eyeball the actual shape
+    # (we reconciled it as `span.model_request_end` → `model_usage`, not first-hand).
+    usage_events =
+      Enum.filter(result.events, fn e ->
+        is_map(e) and (e["type"] == "span.model_request_end" or Map.has_key?(e, "model_usage") or Map.has_key?(e, "usage"))
+      end)
+
+    IO.inspect(usage_events, label: "LIVE usage-bearing events (confirm the shape)", limit: :infinity, printable_limit: :infinity)
+    IO.inspect(result.usage, label: "LIVE SessionResult.usage")
+
+    assert %ReqManagedAgents.Usage{input_tokens: input, output_tokens: output} = result.usage,
+           "expected a %Usage{} on the live result, got: #{inspect(result.usage)}"
+
+    assert input > 0 and output > 0,
+           "expected non-zero live token usage (our Claude usage wire-shape may be wrong) — got #{inspect(result.usage)}; raw usage events: #{inspect(usage_events)}"
   end
 
   @tag timeout: 60_000
