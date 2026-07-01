@@ -1,6 +1,7 @@
 defmodule ReqManagedAgents.SessionLoopTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.Session
+  alias ReqManagedAgents.{SessionResult, ToolUse, Usage}
   alias ReqManagedAgents.FakeProviders.{RequestResponse, Streaming}
 
   @turn1 [%{"type" => "tool", "id" => "t1", "name" => "echo", "input" => %{"x" => 1}},
@@ -14,7 +15,12 @@ defmodule ReqManagedAgents.SessionLoopTest do
       handler = fn name, input, _ctx -> send(test, {:tool_ran, name, input}); {:ok, "result-#{name}"} end
 
       assert {:ok, result} = Session.run(@provider, handler: handler, turns: [@turn1, @turn2])
-      assert result.terminal == :end_turn
+      assert {:ok, %SessionResult{
+               terminal: :end_turn,
+               turns: 2,
+               custom_tool_uses: [%ToolUse{}],
+               usage: %Usage{input_tokens: 2, output_tokens: 2, raw: [_, _]}
+             }} = {:ok, result}
       # raw events from BOTH turns are accumulated verbatim
       assert result.events == @turn1 ++ @turn2
       # the local tool ran with the right args

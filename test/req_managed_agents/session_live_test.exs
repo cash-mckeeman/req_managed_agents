@@ -15,12 +15,12 @@ defmodule ReqManagedAgents.SessionLiveTest do
     {:ok, pid} =
       Session.start_link(Streaming, handler: handler, notify: self(), turns: [@ra, @done, @done])
 
-    assert_receive {:managed_agents_session, :end_turn}, 1000
+    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn}}, 1000
     assert_received {:tool, "echo", %{"x" => 1}}
     assert Process.alive?(pid)
 
     Session.message(pid, "again")
-    assert_receive {:managed_agents_session, :end_turn}, 1000
+    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn}}, 1000
     assert Process.alive?(pid)
   end
 
