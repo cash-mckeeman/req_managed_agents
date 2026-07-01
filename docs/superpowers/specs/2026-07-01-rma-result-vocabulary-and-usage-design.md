@@ -113,16 +113,29 @@ New Session state (folded once per turn, before the continue/finish branch): sum
   receives the `%SessionResult{}` (consistent with `run/2`'s return) rather than a bare terminal
   atom.
 
-## Usage extraction
+## Usage extraction (wire shapes RECONCILED — no longer assumptions)
 
-- **Claude (`ClaudeManagedAgents.normalize`):** read `usage` from the turn's events that carry it
-  (the same `"usage"` key `stream.ex` surfaces). `%Usage{input_tokens, output_tokens, raw: [that map]}`.
-- **Bedrock (`BedrockAgentCore.normalize` + `Converse`):** add extraction of the Converse
-  `metadata.usage` frame (`inputTokens` / `outputTokens` / `totalTokens`). `Converse.parse` gains a
-  usage field; the provider maps it to `%Usage{}`.
-- `usage.raw` is the **list** of per-turn provider usage objects (a run has one per leg); the
-  canonical `input_tokens`/`output_tokens` are the summed integers. A turn with no usage → the
-  provider's `TurnResult.usage` is `nil` and contributes nothing to the sum.
+Reconciled 2026-07-01 against `req_llm`'s live provider parsers, real fixtures, biai-platform's live
+CMA consumer, and the AWS/Anthropic docs:
+
+- **Claude (`ClaudeManagedAgents.normalize`):** Managed Agents reports usage on **`span.model_request_end`**
+  events under the **`model_usage`** key (fallback `usage`), Anthropic snake_case
+  `input_tokens`/`output_tokens`. A turn may make several model requests, so **sum across all
+  `span.model_request_end` events** in the turn; `raw` = the list of those usage objects. Confirmed
+  against `biai-platform/lib/bizinsights/managed_agents/chat_handler.ex`.
+  (Note the earlier assumption — a generic `"usage"` key — was WRONG; it would have yielded
+  `usage: nil` on real runs. `stream.ex`/OTel telemetry reads the same wrong `"usage"` key and has
+  the same bug — a follow-up for the telemetry path / MIM-47.)
+- **Bedrock (`BedrockAgentCore.normalize` + `Converse`):** extract the Converse `metadata.usage`
+  frame — camelCase `inputTokens` / `outputTokens` / `totalTokens` (+ optional `cacheRead/WriteInputTokens`).
+  Consolidated (one object per response). Confirmed against `req_llm` `amazon_bedrock/converse.ex`
+  + a real fixture. (Caveat: confirmed for plain Converse; not yet against a live *AgentCore Harness*
+  `InvokeHarness` capture.)
+- `usage.raw` is the **list** of per-turn provider usage objects; the canonical
+  `input_tokens`/`output_tokens` are the summed integers. A turn with no usage → `TurnResult.usage`
+  is `nil` and contributes nothing to the sum.
+- **The `qa_provisioning` smoke asserts non-zero `usage.input_tokens`/`output_tokens`** through the
+  real extraction path against real-shape events — a wire-shape mismatch fails the smoke.
 
 ## Facade / shim
 

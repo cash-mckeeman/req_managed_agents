@@ -169,10 +169,26 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     }
   end
 
+  # Managed Agents reports token usage on each `span.model_request_end` event under `model_usage`
+  # (a turn may make several model requests — sum them). Confirmed against the biai-platform live
+  # consumer (chat_handler.ex); Anthropic's snake_case `input_tokens`/`output_tokens`.
   defp claude_usage(events) do
-    case Enum.find_value(events, fn ev -> ev["usage"] end) do
-      %{} = u -> %Usage{input_tokens: u["input_tokens"] || 0, output_tokens: u["output_tokens"] || 0, raw: [u]}
-      _ -> nil
+    usages =
+      for %{"type" => "span.model_request_end"} = ev <- events,
+          u = ev["model_usage"] || ev["usage"],
+          is_map(u),
+          do: u
+
+    case usages do
+      [] ->
+        nil
+
+      list ->
+        %Usage{
+          input_tokens: Enum.sum(Enum.map(list, &(&1["input_tokens"] || 0))),
+          output_tokens: Enum.sum(Enum.map(list, &(&1["output_tokens"] || 0))),
+          raw: list
+        }
     end
   end
 

@@ -48,14 +48,24 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   defp idle(reason, event_ids \\ []),
     do: %{"type" => "session.status_idle", "stop_reason" => %{"type" => reason, "event_ids" => event_ids}}
 
-  test "normalize/1 surfaces usage from a usage-bearing event" do
+  test "normalize/1 sums usage across span.model_request_end events (real Managed Agents shape)" do
     events = [
-      %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => "hi"}], "usage" => %{"input_tokens" => 10, "output_tokens" => 5}},
+      %{"type" => "span.model_request_end", "model_usage" => %{"input_tokens" => 10, "output_tokens" => 5}},
+      %{"type" => "span.model_request_end", "model_usage" => %{"input_tokens" => 3, "output_tokens" => 7}},
       idle("end_turn")
     ]
 
-    assert %ReqManagedAgents.TurnResult{usage: %ReqManagedAgents.Usage{input_tokens: 10, output_tokens: 5, raw: [%{"input_tokens" => 10}]}} =
-             ManagedAgents.normalize(events)
+    assert %ReqManagedAgents.TurnResult{
+             usage: %ReqManagedAgents.Usage{
+               input_tokens: 13,
+               output_tokens: 12,
+               raw: [%{"input_tokens" => 10}, %{"input_tokens" => 3}]
+             }
+           } = ManagedAgents.normalize(events)
+  end
+
+  test "normalize/1 yields usage: nil when no span.model_request_end event is present" do
+    assert %ReqManagedAgents.TurnResult{usage: nil} = ManagedAgents.normalize([idle("end_turn")])
   end
 
   test "normalize/1 emits requested custom_tool_uses in event_ids order on requires_action" do

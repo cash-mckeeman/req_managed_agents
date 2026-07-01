@@ -42,8 +42,10 @@ defmodule Mix.Tasks.ReqManagedAgents.QaProvisioning do
     healthy =
       Enum.map(providers, fn p ->
         ran? = p["ran_terminal"] == "end_turn"
-        ok? = p["provisioned"] and ran? and p["teardown_ok"]
-        say(row(p, ran?, ok?))
+        # A healthy run also surfaces non-zero token usage — a wrong usage wire-shape shows up here.
+        usage? = (p["usage_input"] || 0) > 0 and (p["usage_output"] || 0) > 0
+        ok? = p["provisioned"] and ran? and p["teardown_ok"] and usage?
+        say(row(p, ran?, usage?, ok?))
         ok?
       end)
 
@@ -57,9 +59,10 @@ defmodule Mix.Tasks.ReqManagedAgents.QaProvisioning do
     end
   end
 
-  defp row(p, ran?, ok?) do
+  defp row(p, ran?, usage?, ok?) do
     provider = String.pad_trailing(p["provider"], 9)
-    "#{provider}  provision #{chk(p["provisioned"])}  run #{chk(ran?)} (#{p["ran_terminal"]})  teardown #{chk(p["teardown_ok"])}   #{if ok?, do: "PASS", else: "FAIL"}"
+    tokens = "in=#{p["usage_input"] || 0} out=#{p["usage_output"] || 0}"
+    "#{provider}  provision #{chk(p["provisioned"])}  run #{chk(ran?)} (#{p["ran_terminal"]})  usage #{chk(usage?)} (#{tokens})  teardown #{chk(p["teardown_ok"])}   #{if ok?, do: "PASS", else: "FAIL"}"
   end
 
   defp chk(true), do: "✓"
