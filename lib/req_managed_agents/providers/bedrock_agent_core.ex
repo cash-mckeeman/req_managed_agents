@@ -36,6 +36,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     max_polls = opts[:ready_max_polls] || @ready_max_polls
 
     case create_fun.(harness_spec) do
+      # CreateHarness returns the created resource wrapped under "harness" (verified live against
+      # bedrock-agentcore-control), consistent with GetHarness — NOT a flat "harnessArn".
       {:ok, %{"harness" => %{"arn" => arn, "harnessId" => hid}}} ->
         with :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls), do: {:ok, %{harness_arn: arn, harness_id: hid}}
 

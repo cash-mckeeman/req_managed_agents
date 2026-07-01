@@ -33,7 +33,7 @@ defmodule QA.ProvisioningSmokeTest do
 
     create = fn hs ->
       Agent.update(calls, &Map.put(&1, :created, hs.name))
-      {:ok, %{"harnessArn" => "arn:aws:bedrock-agentcore:us-east-1:0:harness/smoke", "harnessId" => "h-smoke"}}
+      {:ok, %{"harness" => %{"arn" => "arn:aws:bedrock-agentcore:us-east-1:0:harness/smoke", "harnessId" => "h-smoke"}}}
     end
 
     get = fn _hid -> {:ok, %{"harness" => %{"status" => "READY"}}} end

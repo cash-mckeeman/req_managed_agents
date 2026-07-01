@@ -160,4 +160,48 @@ defmodule ReqManagedAgents.LiveSmokeTest do
                mount_path: "/data/note.txt"
              })
   end
+
+  @tag timeout: 600_000
+  @tag :live_bedrock
+  test "AgentCore Harness: provision → invoke → live usage → teardown" do
+    alias ReqManagedAgents.Providers.BedrockAgentCore
+    {:ok, _} = Application.ensure_all_started(:req_managed_agents)
+
+    role =
+      System.get_env("HARNESS_EXECUTION_ROLE_ARN") ||
+        "arn:aws:iam::819613816573:role/AgentCoreHarnessExecRole-p2b"
+
+    spec = %{
+      system_prompt: "You are a terse assistant. Reply in a few words.",
+      tools: [],
+      terminal_tool: nil,
+      model_config: %{"bedrockModelConfig" => %{"modelId" => "us.anthropic.claude-sonnet-4-5-20250929-v1:0"}}
+    }
+
+    {:ok, handle} = ReqManagedAgents.provision(BedrockAgentCore, spec, execution_role_arn: role, name_prefix: "rma_live")
+    IO.inspect(handle, label: "LIVE Bedrock provisioned handle")
+
+    try do
+      {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn} = result} =
+        ReqManagedAgents.AgentCore.invoke_to_completion(
+          harness_arn: handle.harness_arn,
+          runtime_session_id: "live-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),
+          prompt: "Reply with exactly: hello there",
+          handler: Handler,
+          timeout: 300_000
+        )
+
+      metadata_events = Enum.filter(result.events, &(is_map(&1) and Map.has_key?(&1, "metadata")))
+      IO.inspect(metadata_events, label: "LIVE Bedrock metadata/usage events", limit: :infinity, printable_limit: :infinity)
+      IO.inspect(result.usage, label: "LIVE Bedrock SessionResult.usage")
+
+      assert %ReqManagedAgents.Usage{input_tokens: i, output_tokens: o} = result.usage,
+             "expected %Usage{} on the live Bedrock result, got: #{inspect(result.usage)}"
+
+      assert i > 0 and o > 0,
+             "expected non-zero live Bedrock usage (does AgentCore emit metadata.usage?) — got #{inspect(result.usage)}"
+    after
+      IO.inspect(ReqManagedAgents.teardown(BedrockAgentCore, handle), label: "LIVE Bedrock teardown")
+    end
+  end
 end
