@@ -10,7 +10,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   """
   @behaviour ReqManagedAgents.Provider
 
-  alias ReqManagedAgents.{Client, Event, Stream, ToolUse, TurnResult}
+  alias ReqManagedAgents.{Client, Event, Stream, ToolUse, TurnResult, Usage}
 
   @impl true
   def mode, do: :streaming
@@ -164,9 +164,16 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
       text: assistant_text(events),
       custom_tool_uses: custom_tool_uses,
       server_tool_uses: server_tool_uses(events),
-      usage: nil,
+      usage: claude_usage(events),
       events: events
     }
+  end
+
+  defp claude_usage(events) do
+    case Enum.find_value(events, fn ev -> ev["usage"] end) do
+      %{} = u -> %Usage{input_tokens: u["input_tokens"] || 0, output_tokens: u["output_tokens"] || 0, raw: [u]}
+      _ -> nil
+    end
   end
 
   @doc false

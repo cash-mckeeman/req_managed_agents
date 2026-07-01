@@ -15,6 +15,14 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     do: elem(P.open([harness_arn: "arn", runtime_session_id: String.duplicate("s", 33), invoke_fun: invoke_fun], self()), 1)
 
   # ── normalize ─────────────────────────────────────────────────────────────────
+  test "normalize/1 surfaces usage from the Converse metadata frame" do
+    events = [%{"messageStop" => %{"stopReason" => "end_turn"}},
+              %{"metadata" => %{"usage" => %{"inputTokens" => 12, "outputTokens" => 7, "totalTokens" => 19}}}]
+
+    assert %ReqManagedAgents.TurnResult{usage: %ReqManagedAgents.Usage{input_tokens: 12, output_tokens: 7, raw: [%{"inputTokens" => 12}]}} =
+             P.normalize(events)
+  end
+
   test "normalize/1 maps a tool_use turn to a %TurnResult{} with %ToolUse{}" do
     events = [
       %{"contentBlockStart" => %{"contentBlockIndex" => 0, "start" => %{"toolUse" => %{"toolUseId" => "t1", "name" => "lookup"}}}},

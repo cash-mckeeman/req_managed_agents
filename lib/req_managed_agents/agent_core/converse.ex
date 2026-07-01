@@ -45,9 +45,9 @@ defmodule ReqManagedAgents.AgentCore.Converse do
   and duplicated the other, producing a duplicate-`toolUseId` resume that Bedrock
   rejected; keying by id recovers both. A genuinely-reused id collapses to one block.
   """
-  @spec parse([map()]) :: %{stop_reason: String.t() | nil, tool_uses: [map()], text: String.t()}
+  @spec parse([map()]) :: %{stop_reason: String.t() | nil, tool_uses: [map()], text: String.t(), usage: map() | nil}
   def parse(events) do
-    init = %{stop_reason: nil, blocks: %{}, active: %{}, order: [], text: ""}
+    init = %{stop_reason: nil, blocks: %{}, active: %{}, order: [], text: "", usage: nil}
 
     state = Enum.reduce(events, init, &reduce_event/2)
 
@@ -59,7 +59,7 @@ defmodule ReqManagedAgents.AgentCore.Converse do
         %{"toolUseId" => id, "name" => name, "input" => decode_input(acc)}
       end)
 
-    %{stop_reason: state.stop_reason, tool_uses: tool_uses, text: state.text}
+    %{stop_reason: state.stop_reason, tool_uses: tool_uses, text: state.text, usage: state.usage}
   end
 
   # A toolUse contentBlockStart opens (or re-opens) a block keyed by its toolUseId and
@@ -100,6 +100,8 @@ defmodule ReqManagedAgents.AgentCore.Converse do
 
   defp reduce_event(%{"messageStop" => %{"stopReason" => reason}}, s),
     do: %{s | stop_reason: reason}
+
+  defp reduce_event(%{"metadata" => %{"usage" => usage}}, state), do: %{state | usage: usage}
 
   defp reduce_event(_other, s), do: s
 

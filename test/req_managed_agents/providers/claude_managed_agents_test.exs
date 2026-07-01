@@ -48,6 +48,16 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   defp idle(reason, event_ids \\ []),
     do: %{"type" => "session.status_idle", "stop_reason" => %{"type" => reason, "event_ids" => event_ids}}
 
+  test "normalize/1 surfaces usage from a usage-bearing event" do
+    events = [
+      %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => "hi"}], "usage" => %{"input_tokens" => 10, "output_tokens" => 5}},
+      idle("end_turn")
+    ]
+
+    assert %ReqManagedAgents.TurnResult{usage: %ReqManagedAgents.Usage{input_tokens: 10, output_tokens: 5, raw: [%{"input_tokens" => 10}]}} =
+             ManagedAgents.normalize(events)
+  end
+
   test "normalize/1 emits requested custom_tool_uses in event_ids order on requires_action" do
     events = [use_event("e1", "f", %{"a" => 1}), use_event("e2", "g", %{"b" => 2}), idle("requires_action", ["e2", "e1"])]
 

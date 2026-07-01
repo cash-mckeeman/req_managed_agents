@@ -8,7 +8,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.AgentCore.{Client, Converse}
-  alias ReqManagedAgents.{ToolUse, TurnResult}
+  alias ReqManagedAgents.{ToolUse, TurnResult, Usage}
 
   @impl true
   def mode, do: :request_response
@@ -177,7 +177,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   @impl true
   def normalize(events) do
-    %{stop_reason: reason, tool_uses: tool_uses, text: text} = Converse.parse(events)
+    %{stop_reason: reason, tool_uses: tool_uses, text: text, usage: usage} = Converse.parse(events)
 
     custom =
       Enum.map(tool_uses, fn %{"toolUseId" => id, "name" => name, "input" => input} ->
@@ -190,10 +190,13 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       text: text,
       custom_tool_uses: custom,
       server_tool_uses: [],
-      usage: nil,
+      usage: to_usage(usage),
       events: events
     }
   end
+
+  defp to_usage(%{} = u), do: %Usage{input_tokens: u["inputTokens"] || 0, output_tokens: u["outputTokens"] || 0, raw: [u]}
+  defp to_usage(_), do: nil
 
   @doc false
   def terminal("end_turn"), do: :end_turn

@@ -6,12 +6,15 @@ Plan: docs/superpowers/plans/2026-07-01-rma-result-vocabulary-and-usage.md (3dd3
 
 ## Tasks
 - [x] Task 1: The five structs (TurnResult/SessionResult/Usage/ToolUse/ToolResult)
-- [ ] Task 2: Providers + behaviour + fakes speak structs (no usage yet)
+- [x] Task 2: Providers + behaviour + fakes speak structs (no usage yet)
 - [ ] Task 3: Token usage extraction (Claude events + Bedrock Converse metadata)
 - [ ] Task 4: Session assembles %SessionResult{}
 - [ ] Task 5: QA sweep (qa_checkpoint 7/7, qa_provisioning 2/2)
 
 ## Minor findings (for final review triage)
+- T2: bedrock_agent_core.ex — restore the dropped `# Harness built-in tools...` comment on server_tool_uses: [].
+- T2: bedrock tool_use test no longer asserts `input` (Converse JSON-decode coverage gap) — restore an input assertion.
 
 ## Log
 Task 1: complete (commit a01843be, review clean — Spec ✅ / Quality Approved; Provider.terminal() ⚠️ resolved: exists, clean compile). Suite 183.
+Task 2: complete (commit 871e149c, review clean — Spec ✅ / Quality Approved; 2 Minors recorded; provider_test.exs result_of tests migrated too). Suite 183.
