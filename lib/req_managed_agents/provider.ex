@@ -19,32 +19,7 @@ defmodule ReqManagedAgents.Provider do
   @typedoc "A raw, decoded provider event (string-keyed wire map)."
   @type event :: %{required(String.t()) => term()}
 
-  @typedoc "A CUSTOM (client-side / return-of-control) tool call the client executes locally."
-  @type custom_tool_use :: %{id: String.t(), name: String.t(), input: map()}
-
-  @typedoc "A locally-produced result for a custom_tool_use — what the client submits to resume."
-  @type custom_tool_result :: %{tool_use_id: String.t(), text: String.t(), is_error: boolean()}
-
-  @typedoc "A SERVER-SIDE (provider-executed) tool call — observe-only, never actionable."
-  @type server_tool_use :: %{id: String.t() | nil, name: String.t(), input: map()}
-
   @type terminal :: :end_turn | :requires_action | :terminated
-
-  @typedoc """
-  A normalized turn result. `terminal` is the UNIFORM canonical signal every provider maps to —
-  branch on it. `stop_reason` is the provider's RAW stop reason, kept in its native shape (a map
-  for Claude Managed Agents, e.g. `%{"type" => "end_turn"}`; a bare string for Bedrock AgentCore,
-  e.g. `"end_turn"`) — preserved verbatim for diagnostics, not flattened. The raw events are in
-  `events`.
-  """
-  @type turn_outcome :: %{
-          terminal: terminal(),
-          stop_reason: String.t() | map() | nil,
-          custom_tool_uses: [custom_tool_use()],
-          server_tool_uses: [server_tool_use()],
-          text: String.t(),
-          events: [event()]
-        }
 
   @typedoc "A provider-agnostic agent definition — the input to provisioning and the cache key."
   @type spec :: %{
@@ -74,11 +49,11 @@ defmodule ReqManagedAgents.Provider do
   @callback user_input(text :: String.t()) :: input()
 
   @doc "Input that resumes the loop after local tools ran (the mode's resume contract)."
-  @callback resume_input(custom_tool_uses :: [custom_tool_use()], results :: [custom_tool_result()]) ::
+  @callback resume_input(tool_uses :: [ReqManagedAgents.ToolUse.t()], results :: [ReqManagedAgents.ToolResult.t()]) ::
               input()
 
   @doc "Fold a turn's accumulated events into the canonical turn outcome (carries raw `events`)."
-  @callback normalize([event()]) :: turn_outcome()
+  @callback normalize([event()]) :: ReqManagedAgents.TurnResult.t()
 
   @doc "Create (or look up) the provider-side agent resource for `spec`; return a durable handle."
   @callback provision(spec(), opts :: keyword()) :: {:ok, handle()} | {:error, term()}
@@ -100,17 +75,17 @@ defmodule ReqManagedAgents.Provider do
   return any unanswered tool calls to re-drive locally, plus the grown `seen` set.
   """
   @callback reconnect(conn(), subscriber :: pid(), seen :: MapSet.t()) ::
-              {:ok, conn(), [custom_tool_use()], MapSet.t()} | {:error, term()}
+              {:ok, conn(), [ReqManagedAgents.ToolUse.t()], MapSet.t()} | {:error, term()}
 
   @optional_callbacks poll_turn: 2, push_input: 2, turn_boundary?: 1, reconnect: 3, teardown: 2
 
   @doc """
-  Extract a canonical `custom_tool_result` from a `Tools.run/6` wire event
+  Extract a canonical `%ToolResult{}` from a `Tools.run/6` wire event
   (`user.custom_tool_result` shape), given the tool-use id it answers.
   """
-  @spec result_of(String.t(), event()) :: custom_tool_result()
+  @spec result_of(String.t(), event()) :: ReqManagedAgents.ToolResult.t()
   def result_of(id, tool_event) when is_binary(id) and is_map(tool_event) do
     text = get_in(tool_event, ["content", Access.at(0), "text"]) || ""
-    %{tool_use_id: id, text: text, is_error: tool_event["is_error"] == true}
+    %ReqManagedAgents.ToolResult{tool_use_id: id, text: text, is_error: tool_event["is_error"] == true}
   end
 end

@@ -18,7 +18,7 @@ defmodule ReqManagedAgents.SessionReconnectTest do
       )
 
     assert_receive {:tool, "echo", %{"x" => 1}}, 2000
-    assert_receive {:managed_agents_session, :end_turn}, 2000
+    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn}}, 2000
     assert Process.alive?(pid)
   end
 

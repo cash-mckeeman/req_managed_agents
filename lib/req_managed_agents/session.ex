@@ -12,10 +12,10 @@ defmodule ReqManagedAgents.Session do
   `ReqManagedAgents.Providers.BedrockAgentCore` (request/response) — and:
 
       # synchronous run-to-completion
-      {:ok, %{terminal: t, stop_reason: r, events: raw}} =
+      {:ok, %ReqManagedAgents.SessionResult{terminal: t, stop_reason: r, events: raw}} =
         ReqManagedAgents.Session.run(provider, handler: MyTools, prompt: "Hi", ...)
 
-      # live, long-lived (stays alive after a terminal; `:notify` gets {:managed_agents_session, t})
+      # live, long-lived (stays alive after a terminal; `:notify` gets {:managed_agents_session, %ReqManagedAgents.SessionResult{}})
       {:ok, pid} = ReqManagedAgents.Session.start_link(provider, handler: MyTools, notify: self(), ...)
       ReqManagedAgents.Session.message(pid, "follow-up")
 
@@ -26,11 +26,11 @@ defmodule ReqManagedAgents.Session do
   """
   use GenServer
   require Logger
-  alias ReqManagedAgents.{Provider, Tools}
+  alias ReqManagedAgents.{Provider, Tools, Usage, SessionResult, TurnResult}
 
   @max_tool_concurrency 8
 
-  @spec run(module(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec run(module(), keyword()) :: {:ok, ReqManagedAgents.SessionResult.t()} | {:error, term()}
   def run(provider, opts) do
     # start (NOT start_link) + monitor: an open/init failure or an unexpected GenServer death
     # surfaces as a value here instead of a link exit that would kill the caller.
@@ -87,7 +87,8 @@ defmodule ReqManagedAgents.Session do
           caller: opts[:caller], notify: opts[:notify], meta: opts[:telemetry_metadata] || %{},
           ref: Map.get(conn, :ref), consumer: Map.get(conn, :consumer),
           kicked_off: false, seen: MapSet.new(), reconnect_attempts: 0,
-          events: [], turn_events: [], turns: 0, max_turns: opts[:max_turns] || 50
+          events: [], turn_events: [], turns: 0, max_turns: opts[:max_turns] || 50,
+          custom_tool_uses: [], server_tool_uses: [], usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []}
         }
         {:ok, state, {:continue, if(Map.get(conn, :resume), do: :resume, else: :maybe_kickoff)}}
 
@@ -179,9 +180,13 @@ defmodule ReqManagedAgents.Session do
   def handle_info(_other, s), do: {:noreply, s}
 
   @impl true
-  # A follow-up message starts a fresh request: reset the per-request turn counter so max_turns
-  # bounds a runaway tool loop within one request, not the session's whole lifetime.
-  def handle_cast({:message, text}, s), do: drive(%{s | turns: 0}, s.provider.user_input(text))
+  # A follow-up message starts a fresh request: reset the per-request turn counter and accumulators
+  # so max_turns bounds a runaway tool loop within one request, not the session's whole lifetime.
+  def handle_cast({:message, text}, s),
+    do: drive(reset_acc(%{s | turns: 0}), s.provider.user_input(text))
+
+  defp reset_acc(s),
+    do: %{s | events: [], custom_tool_uses: [], server_tool_uses: [], usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []}}
 
   defp kickoff(s), do: drive(%{s | kicked_off: true}, s.provider.kickoff_input(s.opts))
 
@@ -221,22 +226,34 @@ defmodule ReqManagedAgents.Session do
   # ── shared per-turn handling ──────────────────────────────────────────────────
   defp handle_turn(s, turn_events) do
     s = %{s | events: s.events ++ turn_events, turns: s.turns + 1}
-    outcome = s.provider.normalize(turn_events)
-    emit_tool_use_telemetry(s, outcome.custom_tool_uses)
+    tr = s.provider.normalize(turn_events)
+    s = accumulate(s, tr)
+    emit_tool_use_telemetry(s, tr.custom_tool_uses)
 
     cond do
       s.turns > s.max_turns ->
-        notify(s, :terminated)
+        notify(s, session_result(s, tr, :terminated))
         stop_error(s, {:max_turns_exceeded, s.max_turns})
 
-      outcome.terminal == :requires_action ->
-        results = run_tools(outcome.custom_tool_uses, s)
-        drive(s, s.provider.resume_input(outcome.custom_tool_uses, results))
+      tr.terminal == :requires_action ->
+        results = run_tools(tr.custom_tool_uses, s)
+        drive(s, s.provider.resume_input(tr.custom_tool_uses, results))
 
       true ->
-        finish(s, outcome.terminal, outcome.stop_reason)
+        finish(s, tr)
     end
   end
+
+  defp accumulate(s, %TurnResult{} = tr) do
+    %{s |
+      custom_tool_uses: s.custom_tool_uses ++ tr.custom_tool_uses,
+      server_tool_uses: s.server_tool_uses ++ tr.server_tool_uses,
+      usage: add_usage(s.usage, tr.usage)}
+  end
+
+  defp add_usage(acc, nil), do: acc
+  defp add_usage(acc, %Usage{} = u),
+    do: %Usage{input_tokens: acc.input_tokens + u.input_tokens, output_tokens: acc.output_tokens + u.output_tokens, raw: acc.raw ++ u.raw}
 
   # Per-turn observability + a MIM-52 regression sentinel: custom_tool_uses are unique by id by
   # construction, so a duplicate reaching here is a regression (a duplicate id in the resume makes
@@ -278,11 +295,20 @@ defmodule ReqManagedAgents.Session do
 
   defp backoff_ms(%{reconnect_attempts: n}), do: min(500 * Integer.pow(2, min(n, 7)), :timer.minutes(60))
 
-  defp finish(s, terminal, stop_reason) do
-    :telemetry.execute([:req_managed_agents, :session, :terminal], %{}, Map.put(s.meta, :terminal, terminal))
-    notify(s, terminal)
+  defp session_result(s, tr, terminal) do
+    %SessionResult{
+      terminal: terminal, stop_reason: tr.stop_reason, text: tr.text,
+      custom_tool_uses: s.custom_tool_uses, server_tool_uses: s.server_tool_uses,
+      usage: s.usage, turns: s.turns, events: s.events
+    }
+  end
+
+  defp finish(s, %TurnResult{} = tr) do
+    :telemetry.execute([:req_managed_agents, :session, :terminal], %{}, Map.put(s.meta, :terminal, tr.terminal))
+    result = session_result(s, tr, tr.terminal)
+    notify(s, result)
     # Real terminal reached — reset the reconnect backoff for any subsequent live activity.
-    reply(%{s | reconnect_attempts: 0}, {:ok, %{terminal: terminal, stop_reason: stop_reason, events: s.events}})
+    reply(%{s | reconnect_attempts: 0}, {:ok, result})
   end
 
   defp stop_error(s, reason), do: reply(s, {:error, reason})
@@ -304,6 +330,6 @@ defmodule ReqManagedAgents.Session do
 
   defp forward_raw(_s, _ev), do: :ok
 
-  defp notify(%{notify: pid}, terminal) when is_pid(pid), do: send(pid, {:managed_agents_session, terminal})
-  defp notify(_s, _terminal), do: :ok
+  defp notify(%{notify: pid}, payload) when is_pid(pid), do: send(pid, {:managed_agents_session, payload})
+  defp notify(_s, _payload), do: :ok
 end

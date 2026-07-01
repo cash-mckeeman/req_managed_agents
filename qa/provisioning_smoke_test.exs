@@ -33,12 +33,18 @@ defmodule QA.ProvisioningSmokeTest do
 
     create = fn hs ->
       Agent.update(calls, &Map.put(&1, :created, hs.name))
-      {:ok, %{"harnessArn" => "arn:aws:bedrock-agentcore:us-east-1:0:harness/smoke", "harnessId" => "h-smoke"}}
+      {:ok, %{"harness" => %{"arn" => "arn:aws:bedrock-agentcore:us-east-1:0:harness/smoke", "harnessId" => "h-smoke"}}}
     end
 
     get = fn _hid -> {:ok, %{"harness" => %{"status" => "READY"}}} end
     delete = fn hid -> Agent.update(calls, &Map.put(&1, :deleted, hid)); {:ok, %{}} end
-    invoke = fn _inv -> {:ok, [%{"messageStop" => %{"stopReason" => "end_turn"}}]} end
+    invoke = fn _inv ->
+      {:ok,
+       [
+         %{"messageStop" => %{"stopReason" => "end_turn"}},
+         %{"metadata" => %{"usage" => %{"inputTokens" => 42, "outputTokens" => 13, "totalTokens" => 55}}}
+       ]}
+    end
 
     {:ok, handle} =
       ReqManagedAgents.provision(BedrockAgentCore, spec(%{"bedrockModelConfig" => %{"modelId" => "anthropic.claude-sonnet-4"}}),
@@ -60,6 +66,8 @@ defmodule QA.ProvisioningSmokeTest do
       provisioned: is_binary(handle[:harness_arn]) and is_binary(handle[:harness_id]),
       resource_created: c.created,
       ran_terminal: to_string(run.terminal),
+      usage_input: run.usage.input_tokens,
+      usage_output: run.usage.output_tokens,
       teardown_ok: teardown == :ok,
       resource_deleted: c.deleted
     }
@@ -78,8 +86,14 @@ defmodule QA.ProvisioningSmokeTest do
 
     Bypass.stub(bypass, "GET", "/v1/sessions/sess-smoke/events/stream", fn conn ->
       conn = Plug.Conn.send_chunked(conn, 200)
-      ev = %{"type" => "session.status_idle", "stop_reason" => %{"type" => "end_turn"}}
-      {:ok, conn} = Plug.Conn.chunk(conn, "event: #{ev["type"]}\ndata: #{Jason.encode!(ev)}\n\n")
+
+      evs = [
+        %{"type" => "span.model_request_end", "model_usage" => %{"input_tokens" => 37, "output_tokens" => 11}},
+        %{"type" => "session.status_idle", "stop_reason" => %{"type" => "end_turn"}}
+      ]
+
+      chunk = Enum.map_join(evs, "", fn ev -> "event: #{ev["type"]}\ndata: #{Jason.encode!(ev)}\n\n" end)
+      {:ok, conn} = Plug.Conn.chunk(conn, chunk)
       conn
     end)
 
@@ -110,6 +124,8 @@ defmodule QA.ProvisioningSmokeTest do
       provisioned: is_binary(handle[:agent_id]) and is_binary(handle[:environment_id]),
       resource_created: "#{handle[:agent_id]}+#{handle[:environment_id]}",
       ran_terminal: to_string(run.terminal),
+      usage_input: run.usage.input_tokens,
+      usage_output: run.usage.output_tokens,
       teardown_ok: teardown == :ok,
       resource_deleted: Enum.sort(Agent.get(archived, & &1))
     }

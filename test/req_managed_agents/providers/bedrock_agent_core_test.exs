@@ -1,6 +1,7 @@
 defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.Providers.BedrockAgentCore, as: P
+  alias ReqManagedAgents.{TurnResult, ToolUse}
 
   defp start_block(idx, id, name),
     do: %{"contentBlockStart" => %{"contentBlockIndex" => idx, "start" => %{"toolUse" => %{"toolUseId" => id, "name" => name}}}}
@@ -14,23 +15,29 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     do: elem(P.open([harness_arn: "arn", runtime_session_id: String.duplicate("s", 33), invoke_fun: invoke_fun], self()), 1)
 
   # ── normalize ─────────────────────────────────────────────────────────────────
-  test "normalize maps a tool_use turn to canonical custom_tool_uses + :requires_action, preserving raw events" do
-    events = [start_block(0, "tu_1", "echo"), delta(0, ~s({"text":"hi"})), tool_stop()]
+  test "normalize/1 surfaces usage from the Converse metadata frame" do
+    events = [%{"messageStop" => %{"stopReason" => "end_turn"}},
+              %{"metadata" => %{"usage" => %{"inputTokens" => 12, "outputTokens" => 7, "totalTokens" => 19}}}]
 
-    assert P.normalize(events) == %{
-             terminal: :requires_action,
-             stop_reason: "tool_use",
-             custom_tool_uses: [%{id: "tu_1", name: "echo", input: %{"text" => "hi"}}],
-             server_tool_uses: [],
-             text: "",
-             events: events
-           }
+    assert %ReqManagedAgents.TurnResult{usage: %ReqManagedAgents.Usage{input_tokens: 12, output_tokens: 7, raw: [%{"inputTokens" => 12}]}} =
+             P.normalize(events)
   end
 
-  test "normalize maps a normal stop to :end_turn" do
-    events = [%{"contentBlockDelta" => %{"contentBlockIndex" => 0, "delta" => %{"text" => "done."}}},
-              %{"messageStop" => %{"stopReason" => "end_turn"}}]
-    assert %{terminal: :end_turn, stop_reason: "end_turn", custom_tool_uses: [], text: "done."} = P.normalize(events)
+  test "normalize/1 maps a tool_use turn to a %TurnResult{} with %ToolUse{}" do
+    events = [
+      %{"contentBlockStart" => %{"contentBlockIndex" => 0, "start" => %{"toolUse" => %{"toolUseId" => "t1", "name" => "lookup"}}}},
+      %{"contentBlockDelta" => %{"contentBlockIndex" => 0, "delta" => %{"toolUse" => %{"input" => "{\"text\":\"hi\"}"}}}},
+      %{"messageStop" => %{"stopReason" => "tool_use"}}
+    ]
+
+    assert %TurnResult{terminal: :requires_action, stop_reason: "tool_use",
+             custom_tool_uses: [%ToolUse{id: "t1", name: "lookup", input: %{"text" => "hi"}}],
+             server_tool_uses: []} = P.normalize(events)
+  end
+
+  test "normalize/1 maps an end_turn to a %TurnResult{}" do
+    assert %TurnResult{terminal: :end_turn, stop_reason: "end_turn", custom_tool_uses: [], text: "done."} =
+             P.normalize([%{"messageStop" => %{"stopReason" => "end_turn"}}, %{"contentBlockDelta" => %{"contentBlockIndex" => 0, "delta" => %{"text" => "done."}}}])
   end
 
   test "terminal collapses to the canonical three atoms" do

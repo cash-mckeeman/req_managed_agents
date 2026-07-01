@@ -27,14 +27,11 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
     assert function_exported?(ClaudeManagedAgents, :teardown, 2), "ClaudeManagedAgents missing teardown/2"
   end
 
-  test "both providers normalize to the same canonical turn_outcome keys" do
-    keys = [:terminal, :stop_reason, :custom_tool_uses, :server_tool_uses, :text, :events]
-
+  test "both providers normalize to a %TurnResult{}" do
     bedrock = BedrockAgentCore.normalize([%{"messageStop" => %{"stopReason" => "end_turn"}}])
     claude = ClaudeManagedAgents.normalize([%{"type" => "session.status_idle", "stop_reason" => %{"type" => "end_turn"}}])
 
-    assert Enum.sort(Map.keys(bedrock)) == Enum.sort(keys)
-    assert Enum.sort(Map.keys(claude)) == Enum.sort(keys)
-    assert bedrock.terminal == :end_turn and claude.terminal == :end_turn
+    assert %ReqManagedAgents.TurnResult{terminal: :end_turn} = bedrock
+    assert %ReqManagedAgents.TurnResult{terminal: :end_turn} = claude
   end
 end

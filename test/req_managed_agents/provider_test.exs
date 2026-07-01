@@ -1,6 +1,6 @@
 defmodule ReqManagedAgents.ProviderTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Provider
+  alias ReqManagedAgents.{Provider, ToolResult}
 
   test "declares the shared + invocation callbacks" do
     callbacks = Provider.behaviour_info(:callbacks)
@@ -20,7 +20,7 @@ defmodule ReqManagedAgents.ProviderTest do
     end
   end
 
-  test "result_of/2 extracts a canonical custom_tool_result from a Tools.run wire event" do
+  test "result_of/2 extracts a %ToolResult{} from a Tools.run wire event" do
     wire = %{
       "type" => "user.custom_tool_result",
       "custom_tool_use_id" => "tu_1",
@@ -28,12 +28,12 @@ defmodule ReqManagedAgents.ProviderTest do
       "is_error" => false
     }
 
-    assert Provider.result_of("tu_1", wire) ==
-             %{tool_use_id: "tu_1", text: "echoed: hi", is_error: false}
+    assert %ToolResult{tool_use_id: "tu_1", text: "echoed: hi", is_error: false} =
+             Provider.result_of("tu_1", wire)
   end
 
   test "result_of/2 defaults missing text to \"\" and treats is_error strictly" do
-    assert Provider.result_of("tu_2", %{"is_error" => true}) ==
-             %{tool_use_id: "tu_2", text: "", is_error: true}
+    assert %ToolResult{tool_use_id: "tu_2", text: "", is_error: true} =
+             Provider.result_of("tu_2", %{"is_error" => true})
   end
 end

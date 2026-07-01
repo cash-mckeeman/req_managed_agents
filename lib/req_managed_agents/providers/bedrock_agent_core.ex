@@ -8,6 +8,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.AgentCore.{Client, Converse}
+  alias ReqManagedAgents.{ToolUse, TurnResult, Usage}
 
   @impl true
   def mode, do: :request_response
@@ -35,6 +36,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     max_polls = opts[:ready_max_polls] || @ready_max_polls
 
     case create_fun.(harness_spec) do
+      # CreateHarness returns the created resource wrapped under "harness" (verified live against
+      # bedrock-agentcore-control), consistent with GetHarness — NOT a flat "harnessArn".
       {:ok, %{"harness" => %{"arn" => arn, "harnessId" => hid}}} ->
         with :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls), do: {:ok, %{harness_arn: arn, harness_id: hid}}
 
@@ -176,23 +179,27 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   @impl true
   def normalize(events) do
-    %{stop_reason: reason, tool_uses: tool_uses, text: text} = Converse.parse(events)
+    %{stop_reason: reason, tool_uses: tool_uses, text: text, usage: usage} = Converse.parse(events)
 
-    custom_tool_uses =
+    custom =
       Enum.map(tool_uses, fn %{"toolUseId" => id, "name" => name, "input" => input} ->
-        %{id: id, name: name, input: input}
+        %ToolUse{id: id, name: name, input: input}
       end)
 
-    %{
+    %TurnResult{
       terminal: terminal(reason),
       stop_reason: reason,
-      custom_tool_uses: custom_tool_uses,
+      text: text,
+      custom_tool_uses: custom,
       # Harness built-in tools execute in-microVM and do not surface a modelable event yet.
       server_tool_uses: [],
-      text: text,
+      usage: to_usage(usage),
       events: events
     }
   end
+
+  defp to_usage(%{} = u), do: %Usage{input_tokens: u["inputTokens"] || 0, output_tokens: u["outputTokens"] || 0, raw: [u]}
+  defp to_usage(_), do: nil
 
   @doc false
   def terminal("end_turn"), do: :end_turn

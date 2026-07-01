@@ -50,7 +50,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
         notify: self()
       )
 
-    assert_receive {:managed_agents_session, :end_turn}, 90_000
+    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn}}, 90_000
   end
 
   @tag timeout: 120_000
@@ -83,7 +83,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
         ]
       })
 
-    assert {:ok, %{terminal: :end_turn}} =
+    assert {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn} = result} =
              ReqManagedAgents.run_to_completion(
                client: client,
                agent_id: agent_id,
@@ -92,6 +92,23 @@ defmodule ReqManagedAgents.LiveSmokeTest do
                handler: Handler,
                timeout: 90_000
              )
+
+    # THE real test for usage: confirm the reconciled wire-shape against the live beta.
+    # Dump every event that could carry usage so we can eyeball the actual shape
+    # (we reconciled it as `span.model_request_end` → `model_usage`, not first-hand).
+    usage_events =
+      Enum.filter(result.events, fn e ->
+        is_map(e) and (e["type"] == "span.model_request_end" or Map.has_key?(e, "model_usage") or Map.has_key?(e, "usage"))
+      end)
+
+    IO.inspect(usage_events, label: "LIVE usage-bearing events (confirm the shape)", limit: :infinity, printable_limit: :infinity)
+    IO.inspect(result.usage, label: "LIVE SessionResult.usage")
+
+    assert %ReqManagedAgents.Usage{input_tokens: input, output_tokens: output} = result.usage,
+           "expected a %Usage{} on the live result, got: #{inspect(result.usage)}"
+
+    assert input > 0 and output > 0,
+           "expected non-zero live token usage (our Claude usage wire-shape may be wrong) — got #{inspect(result.usage)}; raw usage events: #{inspect(usage_events)}"
   end
 
   @tag timeout: 60_000
@@ -142,5 +159,49 @@ defmodule ReqManagedAgents.LiveSmokeTest do
                file_id: file_id,
                mount_path: "/data/note.txt"
              })
+  end
+
+  @tag timeout: 600_000
+  @tag :live_bedrock
+  test "AgentCore Harness: provision → invoke → live usage → teardown" do
+    alias ReqManagedAgents.Providers.BedrockAgentCore
+    {:ok, _} = Application.ensure_all_started(:req_managed_agents)
+
+    role =
+      System.get_env("HARNESS_EXECUTION_ROLE_ARN") ||
+        "arn:aws:iam::819613816573:role/AgentCoreHarnessExecRole-p2b"
+
+    spec = %{
+      system_prompt: "You are a terse assistant. Reply in a few words.",
+      tools: [],
+      terminal_tool: nil,
+      model_config: %{"bedrockModelConfig" => %{"modelId" => "us.anthropic.claude-sonnet-4-5-20250929-v1:0"}}
+    }
+
+    {:ok, handle} = ReqManagedAgents.provision(BedrockAgentCore, spec, execution_role_arn: role, name_prefix: "rma_live")
+    IO.inspect(handle, label: "LIVE Bedrock provisioned handle")
+
+    try do
+      {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn} = result} =
+        ReqManagedAgents.AgentCore.invoke_to_completion(
+          harness_arn: handle.harness_arn,
+          runtime_session_id: "live-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),
+          prompt: "Reply with exactly: hello there",
+          handler: Handler,
+          timeout: 300_000
+        )
+
+      metadata_events = Enum.filter(result.events, &(is_map(&1) and Map.has_key?(&1, "metadata")))
+      IO.inspect(metadata_events, label: "LIVE Bedrock metadata/usage events", limit: :infinity, printable_limit: :infinity)
+      IO.inspect(result.usage, label: "LIVE Bedrock SessionResult.usage")
+
+      assert %ReqManagedAgents.Usage{input_tokens: i, output_tokens: o} = result.usage,
+             "expected %Usage{} on the live Bedrock result, got: #{inspect(result.usage)}"
+
+      assert i > 0 and o > 0,
+             "expected non-zero live Bedrock usage (does AgentCore emit metadata.usage?) — got #{inspect(result.usage)}"
+    after
+      IO.inspect(ReqManagedAgents.teardown(BedrockAgentCore, handle), label: "LIVE Bedrock teardown")
+    end
   end
 end
