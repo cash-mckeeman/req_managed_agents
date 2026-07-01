@@ -10,7 +10,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   """
   @behaviour ReqManagedAgents.Provider
 
-  alias ReqManagedAgents.{Client, Event, Stream}
+  alias ReqManagedAgents.{Client, Event, Stream, ToolUse, TurnResult}
 
   @impl true
   def mode, do: :streaming
@@ -140,39 +140,39 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def normalize(events) do
-    uses_by_id =
-      for %{"type" => "agent.custom_tool_use", "id" => id} = e <- events, into: %{}, do: {id, e}
-
-    extra = %{server_tool_uses: server_tool_uses(events), text: assistant_text(events), events: events}
+    uses_by_id = for %{"type" => "agent.custom_tool_use", "id" => id} = e <- events, into: %{}, do: {id, e}
 
     case latest_status(events) do
       %{"type" => "session.status_idle", "stop_reason" => %{"type" => reason} = sr} ->
-        custom_tool_uses =
-          sr
-          |> Map.get("event_ids", [])
-          |> Enum.map(&uses_by_id[&1])
-          |> Enum.reject(&is_nil/1)
-          |> Enum.map(fn e -> %{id: e["id"], name: e["name"], input: e["input"]} end)
+        custom =
+          sr |> Map.get("event_ids", []) |> Enum.map(&uses_by_id[&1]) |> Enum.reject(&is_nil/1)
+          |> Enum.map(fn e -> %ToolUse{id: e["id"], name: e["name"], input: e["input"]} end)
 
-        # stop_reason is the provider's RAW value (the map), preserved verbatim as the old driver
-        # returned it; `terminal` is the uniform canonical signal. (AgentCore's raw value is a
-        # bare string — each provider keeps its native shape; see the Provider behaviour.)
-        outcome(terminal(reason), sr, custom_tool_uses, extra)
+        turn_result(terminal(reason), sr, custom, events)
 
-      %{"type" => "session.status_terminated"} = s -> outcome(:terminated, s["stop_reason"], [], extra)
-      %{"type" => "session.error"} = s -> outcome(:terminated, s["stop_reason"], [], extra)
-      %{"type" => "session.status_idle"} = s -> outcome(:terminated, s["stop_reason"], [], extra)
-      _ -> outcome(:terminated, nil, [], extra)
+      %{"type" => "session.status_terminated"} = s -> turn_result(:terminated, s["stop_reason"], [], events)
+      %{"type" => "session.error"} = s -> turn_result(:terminated, s["stop_reason"], [], events)
+      %{"type" => "session.status_idle"} = s -> turn_result(:terminated, s["stop_reason"], [], events)
+      _ -> turn_result(:terminated, nil, [], events)
     end
+  end
+
+  defp turn_result(terminal, stop_reason, custom_tool_uses, events) do
+    %TurnResult{
+      terminal: terminal,
+      stop_reason: stop_reason,
+      text: assistant_text(events),
+      custom_tool_uses: custom_tool_uses,
+      server_tool_uses: server_tool_uses(events),
+      usage: nil,
+      events: events
+    }
   end
 
   @doc false
   def terminal("end_turn"), do: :end_turn
   def terminal("requires_action"), do: :requires_action
   def terminal(_other), do: :terminated
-
-  defp outcome(terminal, reason, custom_tool_uses, extra),
-    do: Map.merge(%{terminal: terminal, stop_reason: reason, custom_tool_uses: custom_tool_uses}, extra)
 
   defp assistant_text(events) do
     events
@@ -189,7 +189,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   defp server_tool_uses(events) do
     for %{"type" => "agent.tool_use", "name" => name} = e <- events,
-        do: %{id: e["id"], name: name, input: e["input"] || %{}}
+        do: %ToolUse{id: e["id"], name: name, input: e["input"] || %{}}
   end
 
   defp latest_status(events) do

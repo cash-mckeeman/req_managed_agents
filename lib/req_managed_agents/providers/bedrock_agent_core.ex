@@ -8,6 +8,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.AgentCore.{Client, Converse}
+  alias ReqManagedAgents.{ToolUse, TurnResult}
 
   @impl true
   def mode, do: :request_response
@@ -178,18 +179,18 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   def normalize(events) do
     %{stop_reason: reason, tool_uses: tool_uses, text: text} = Converse.parse(events)
 
-    custom_tool_uses =
+    custom =
       Enum.map(tool_uses, fn %{"toolUseId" => id, "name" => name, "input" => input} ->
-        %{id: id, name: name, input: input}
+        %ToolUse{id: id, name: name, input: input}
       end)
 
-    %{
+    %TurnResult{
       terminal: terminal(reason),
       stop_reason: reason,
-      custom_tool_uses: custom_tool_uses,
-      # Harness built-in tools execute in-microVM and do not surface a modelable event yet.
-      server_tool_uses: [],
       text: text,
+      custom_tool_uses: custom,
+      server_tool_uses: [],
+      usage: nil,
       events: events
     }
   end

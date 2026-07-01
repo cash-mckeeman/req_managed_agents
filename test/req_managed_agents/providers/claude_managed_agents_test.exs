@@ -51,23 +51,14 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   test "normalize/1 emits requested custom_tool_uses in event_ids order on requires_action" do
     events = [use_event("e1", "f", %{"a" => 1}), use_event("e2", "g", %{"b" => 2}), idle("requires_action", ["e2", "e1"])]
 
-    assert ManagedAgents.normalize(events) == %{
-             terminal: :requires_action,
-             # stop_reason is the provider's raw map, preserved verbatim (not collapsed to a string)
+    assert %ReqManagedAgents.TurnResult{terminal: :requires_action,
              stop_reason: %{"type" => "requires_action", "event_ids" => ["e2", "e1"]},
-             custom_tool_uses: [
-               %{id: "e2", name: "g", input: %{"b" => 2}},
-               %{id: "e1", name: "f", input: %{"a" => 1}}
-             ],
-             server_tool_uses: [],
-             text: "",
-             # Raw events preserved verbatim alongside the normalized view.
-             events: events
-           }
+             custom_tool_uses: [%ReqManagedAgents.ToolUse{id: "e2", name: "g", input: %{"b" => 2}},
+                                %ReqManagedAgents.ToolUse{id: "e1", name: "f", input: %{"a" => 1}}]} = ManagedAgents.normalize(events)
   end
 
   test "normalize/1 maps an end_turn idle to :end_turn with no custom_tool_uses" do
-    assert %{terminal: :end_turn, stop_reason: %{"type" => "end_turn"}, custom_tool_uses: []} =
+    assert %ReqManagedAgents.TurnResult{terminal: :end_turn, stop_reason: %{"type" => "end_turn"}, custom_tool_uses: []} =
              ManagedAgents.normalize([idle("end_turn")])
   end
 

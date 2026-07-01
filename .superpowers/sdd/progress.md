@@ -5,7 +5,7 @@ Spec: docs/superpowers/specs/2026-07-01-rma-result-vocabulary-and-usage-design.m
 Plan: docs/superpowers/plans/2026-07-01-rma-result-vocabulary-and-usage.md (3dd3b64d)
 
 ## Tasks
-- [ ] Task 1: The five structs (TurnResult/SessionResult/Usage/ToolUse/ToolResult)
+- [x] Task 1: The five structs (TurnResult/SessionResult/Usage/ToolUse/ToolResult)
 - [ ] Task 2: Providers + behaviour + fakes speak structs (no usage yet)
 - [ ] Task 3: Token usage extraction (Claude events + Bedrock Converse metadata)
 - [ ] Task 4: Session assembles %SessionResult{}
@@ -14,3 +14,4 @@ Plan: docs/superpowers/plans/2026-07-01-rma-result-vocabulary-and-usage.md (3dd3
 ## Minor findings (for final review triage)
 
 ## Log
+Task 1: complete (commit a01843be, review clean — Spec ✅ / Quality Approved; Provider.terminal() ⚠️ resolved: exists, clean compile). Suite 183.

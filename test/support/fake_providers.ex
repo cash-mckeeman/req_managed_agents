@@ -5,9 +5,12 @@ defmodule ReqManagedAgents.FakeProviders do
   #   %{"type" => "stop", "terminal" => :requires_action | :end_turn | :terminated}
 
   defmodule Shared do
+    alias ReqManagedAgents.{TurnResult, ToolUse, Usage}
+
     def normalize(events) do
       customs =
-        for %{"type" => "tool"} = e <- events, do: %{id: e["id"], name: e["name"], input: e["input"]}
+        for %{"type" => "tool"} = e <- events,
+            do: %ToolUse{id: e["id"], name: e["name"], input: e["input"]}
 
       terminal =
         Enum.find_value(events, :terminated, fn
@@ -15,8 +18,15 @@ defmodule ReqManagedAgents.FakeProviders do
           _ -> nil
         end)
 
-      %{terminal: terminal, stop_reason: to_string(terminal), custom_tool_uses: customs,
-        server_tool_uses: [], text: "", events: events}
+      %TurnResult{
+        terminal: terminal,
+        stop_reason: to_string(terminal),
+        custom_tool_uses: customs,
+        server_tool_uses: [],
+        text: "",
+        usage: %Usage{input_tokens: 1, output_tokens: 1, raw: [%{}]},
+        events: events
+      }
     end
   end
 
