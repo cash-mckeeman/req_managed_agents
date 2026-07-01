@@ -35,4 +35,31 @@ defmodule ReqManagedAgents do
   """
   def run_to_completion(opts),
     do: ReqManagedAgents.Session.run(ReqManagedAgents.Providers.ClaudeManagedAgents, opts)
+
+  @doc """
+  Provision (create-or-reuse) a provider's agent resource for `spec`, returning a durable
+  `handle` you splat into `ReqManagedAgents.Session.run/2` opts. Cached in-process by
+  `{provider, spec}`.
+  """
+  @spec provision(module(), ReqManagedAgents.Provider.spec(), keyword()) ::
+          {:ok, ReqManagedAgents.Provider.handle()} | {:error, term()}
+  def provision(provider, spec, opts \\ []),
+    do: ReqManagedAgents.Provisioner.ensure(provider, spec, opts)
+
+  @doc "Tear down a provisioned resource and evict it from the provision cache."
+  @spec teardown(module(), ReqManagedAgents.Provider.handle(), keyword()) :: :ok | {:error, term()}
+  def teardown(provider, handle, opts \\ []) do
+    if function_exported?(provider, :teardown, 2) do
+      case provider.teardown(handle, opts) do
+        :ok ->
+          ReqManagedAgents.Provisioner.evict(handle)
+          :ok
+
+        error ->
+          error
+      end
+    else
+      {:error, :not_supported}
+    end
+  end
 end

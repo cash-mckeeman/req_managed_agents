@@ -100,4 +100,80 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       assert function_exported?(P, f, a)
     end
   end
+
+  # ── provision / teardown ──────────────────────────────────────────────────────
+
+  @spec_bedrock %{system_prompt: "be helpful", tools: [%{"name" => "t"}], terminal_tool: nil,
+                  model_config: %{"bedrockModelConfig" => %{"modelId" => "anthropic.claude-sonnet-4"}}}
+
+  defp prov_opts(create_fun, extra \\ []) do
+    [execution_role_arn: "arn:aws:iam::1:role/R", create_fun: create_fun,
+     get_fun: fn _hid -> {:ok, %{"harness" => %{"status" => "READY"}}} end] ++ extra
+  end
+
+  test "provision/2 creates a harness, polls READY, returns {harness_arn, harness_id}" do
+    create = fn harness_spec ->
+      assert harness_spec.system_prompt == "be helpful"
+      assert harness_spec.model == @spec_bedrock.model_config
+      assert harness_spec.execution_role_arn == "arn:aws:iam::1:role/R"
+      assert is_binary(harness_spec.name)
+      {:ok, %{"harnessArn" => "arn:harness/x", "harnessId" => "h1"}}
+    end
+
+    assert {:ok, %{harness_arn: "arn:harness/x", harness_id: "h1"}} =
+             P.provision(@spec_bedrock, prov_opts(create))
+  end
+
+  test "provision/2 recovers an existing harness when CreateHarness 409s" do
+    name = P.harness_name(@spec_bedrock, nil)
+    create = fn _ -> {:error, {:http_error, 409, %{}}} end
+
+    list = fn ->
+      {:ok, %{"harnesses" => [%{"harnessName" => name, "harnessId" => "h9", "arn" => "arn:harness/exist", "status" => "READY"}]}}
+    end
+
+    assert {:ok, %{harness_arn: "arn:harness/exist", harness_id: "h9"}} =
+             P.provision(@spec_bedrock, prov_opts(create, list_fun: list))
+  end
+
+  test "provision/2 returns an error (not a raise) when list_harnesses is malformed on 409" do
+    create = fn _ -> {:error, {:http_error, 409, %{}}} end
+    list = fn -> {:ok, %{}} end
+
+    assert {:error, {:unexpected_list_response, {:ok, %{}}}} =
+             P.provision(@spec_bedrock, prov_opts(create, list_fun: list))
+  end
+
+  test "teardown/2 deletes the harness by id" do
+    {:ok, deleted} = Agent.start_link(fn -> nil end)
+    delete = fn hid -> Agent.update(deleted, fn _ -> hid end); {:ok, %{}} end
+    assert :ok = P.teardown(%{harness_arn: "a", harness_id: "h1"}, delete_fun: delete)
+    assert Agent.get(deleted, & &1) == "h1"
+  end
+
+  test "provision/2 polls until READY (retry path)" do
+    {:ok, n} = Agent.start_link(fn -> 0 end)
+    get = fn _ -> i = Agent.get_and_update(n, &{&1, &1 + 1}); if i == 0, do: {:ok, %{"harness" => %{"status" => "CREATING"}}}, else: {:ok, %{"harness" => %{"status" => "READY"}}} end
+    create = fn _ -> {:ok, %{"harnessArn" => "a", "harnessId" => "h"}} end
+    assert {:ok, %{harness_arn: "a"}} = P.provision(@spec_bedrock, execution_role_arn: "r", create_fun: create, get_fun: get, ready_poll_ms: 0)
+  end
+
+  test "provision/2 surfaces a CREATE_FAILED harness" do
+    create = fn _ -> {:ok, %{"harnessArn" => "a", "harnessId" => "h"}} end
+    get = fn _ -> {:ok, %{"harness" => %{"status" => "CREATE_FAILED"}}} end
+    assert {:error, {:harness_failed, "CREATE_FAILED"}} = P.provision(@spec_bedrock, execution_role_arn: "r", create_fun: create, get_fun: get, ready_poll_ms: 0)
+  end
+
+  test "provision/2 times out if the harness never becomes READY" do
+    create = fn _ -> {:ok, %{"harnessArn" => "a", "harnessId" => "h"}} end
+    get = fn _ -> {:ok, %{"harness" => %{"status" => "CREATING"}}} end
+    assert {:error, :harness_ready_timeout} = P.provision(@spec_bedrock, execution_role_arn: "r", create_fun: create, get_fun: get, ready_poll_ms: 0, ready_max_polls: 2)
+  end
+
+  test "provision/2's handle is accepted by open/2 (harness_arn seam)" do
+    create = fn _ -> {:ok, %{"harnessArn" => "arn:h/x", "harnessId" => "h1"}} end
+    {:ok, handle} = P.provision(@spec_bedrock, prov_opts(create))
+    assert {:ok, _conn} =
+             P.open(Map.to_list(handle) ++ [runtime_session_id: String.duplicate("s", 33), invoke_fun: fn _ -> {:ok, []} end], self())
+  end
 end

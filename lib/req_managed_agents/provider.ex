@@ -46,6 +46,17 @@ defmodule ReqManagedAgents.Provider do
           events: [event()]
         }
 
+  @typedoc "A provider-agnostic agent definition — the input to provisioning and the cache key."
+  @type spec :: %{
+          system_prompt: String.t(),
+          tools: [map()],
+          terminal_tool: String.t() | nil,
+          model_config: term()
+        }
+
+  @typedoc "Provider-private handle to a provisioned, reusable server-side resource."
+  @type handle :: term()
+
   @typedoc "Provider-private connection / session handle."
   @type conn :: term()
   @typedoc "Provider-private input that drives the next turn."
@@ -69,6 +80,12 @@ defmodule ReqManagedAgents.Provider do
   @doc "Fold a turn's accumulated events into the canonical turn outcome (carries raw `events`)."
   @callback normalize([event()]) :: turn_outcome()
 
+  @doc "Create (or look up) the provider-side agent resource for `spec`; return a durable handle."
+  @callback provision(spec(), opts :: keyword()) :: {:ok, handle()} | {:error, term()}
+
+  @doc "Delete the provider-side resource named by `handle`. `opts` carries the client / test seam."
+  @callback teardown(handle(), opts :: keyword()) :: :ok | {:error, term()}
+
   @doc ":request_response only — run one turn synchronously: send `input`, return the turn's events."
   @callback poll_turn(conn(), input()) :: {:ok, [event()], conn()} | {:error, term()}
 
@@ -85,7 +102,7 @@ defmodule ReqManagedAgents.Provider do
   @callback reconnect(conn(), subscriber :: pid(), seen :: MapSet.t()) ::
               {:ok, conn(), [custom_tool_use()], MapSet.t()} | {:error, term()}
 
-  @optional_callbacks poll_turn: 2, push_input: 2, turn_boundary?: 1, reconnect: 3
+  @optional_callbacks poll_turn: 2, push_input: 2, turn_boundary?: 1, reconnect: 3, teardown: 2
 
   @doc """
   Extract a canonical `custom_tool_result` from a `Tools.run/6` wire event

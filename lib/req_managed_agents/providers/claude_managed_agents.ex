@@ -16,6 +16,47 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   def mode, do: :streaming
 
   @impl true
+  def provision(spec, opts) do
+    client = opts[:client] || Client.new()
+    name = opts[:name] || "agent_#{spec_digest(spec)}"
+
+    agent_body = %{name: name, model: spec.model_config, system: spec.system_prompt, tools: spec.tools}
+    env_body = opts[:environment] || %{name: "#{name}_env", config: %{type: "cloud", networking: %{type: "unrestricted"}}}
+
+    with {:ok, %{"id" => agent_id}} <- Client.create_agent(client, agent_body) do
+      case Client.create_environment(client, env_body) do
+        {:ok, %{"id" => env_id}} ->
+          {:ok, %{agent_id: agent_id, environment_id: env_id}}
+
+        {:error, reason} ->
+          # Roll back the orphaned agent so nothing leaks and a retry isn't blocked.
+          _ = Client.archive_agent(client, agent_id)
+          {:error, reason}
+
+        other ->
+          _ = Client.archive_agent(client, agent_id)
+          {:error, {:unexpected_create_environment_response, other}}
+      end
+    end
+  end
+
+  @impl true
+  def teardown(%{agent_id: aid, environment_id: eid}, opts) do
+    client = opts[:client] || Client.new()
+    # Attempt both archives unconditionally — a failure archiving one must not strand the other.
+    a = Client.archive_agent(client, aid)
+    e = Client.archive_environment(client, eid)
+
+    case {a, e} do
+      {{:ok, _}, {:ok, _}} -> :ok
+      _ -> {:error, {:teardown_failed, %{agent: archive_tag(a), environment: archive_tag(e)}}}
+    end
+  end
+
+  defp archive_tag({:ok, _}), do: :ok
+  defp archive_tag({:error, reason}), do: {:error, reason}
+
+  @impl true
   def open(opts, subscriber) do
     client = opts[:client] || Client.new()
 
@@ -161,4 +202,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
       _ -> false
     end)
   end
+
+  # term_to_binary is deterministic for the small (4-key) spec maps used here.
+  defp spec_digest(spec),
+    do: :crypto.hash(:sha256, :erlang.term_to_binary(spec, [:deterministic])) |> Base.encode16(case: :lower) |> binary_part(0, 8)
 end

@@ -1,6 +1,46 @@
 defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.Providers.ClaudeManagedAgents, as: ManagedAgents
+  alias ReqManagedAgents.Client
+
+  @spec_claude %{system_prompt: "sys", tools: [%{"name" => "t"}], terminal_tool: nil, model_config: "claude-opus-4-8"}
+
+  defp claude_client(name), do: Client.new(api_key: "sk-test", req_options: [plug: {Req.Test, name}])
+
+  test "provision/2 creates an agent + environment and returns both ids" do
+    client = claude_client(__MODULE__.Provision)
+
+    Req.Test.stub(__MODULE__.Provision, fn conn ->
+      case conn.request_path do
+        "/v1/agents" ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          decoded = Jason.decode!(body)
+          assert decoded["model"] == "claude-opus-4-8"
+          assert decoded["system"] == "sys"
+          Req.Test.json(conn, %{"id" => "agent_1"})
+
+        "/v1/environments" ->
+          Req.Test.json(conn, %{"id" => "env_1"})
+      end
+    end)
+
+    assert {:ok, %{agent_id: "agent_1", environment_id: "env_1"}} =
+             ManagedAgents.provision(@spec_claude, client: client)
+  end
+
+  test "teardown/2 archives the agent and the environment" do
+    client = claude_client(__MODULE__.Teardown)
+    {:ok, paths} = Agent.start_link(fn -> [] end)
+
+    Req.Test.stub(__MODULE__.Teardown, fn conn ->
+      Agent.update(paths, &[conn.request_path | &1])
+      Req.Test.json(conn, %{"ok" => true})
+    end)
+
+    assert :ok = ManagedAgents.teardown(%{agent_id: "agent_1", environment_id: "env_1"}, client: client)
+    assert Enum.sort(Agent.get(paths, & &1)) ==
+             ["/v1/agents/agent_1/archive", "/v1/environments/env_1/archive"]
+  end
 
   defp use_event(id, name, input),
     do: %{"type" => "agent.custom_tool_use", "id" => id, "name" => name, "input" => input}
@@ -198,6 +238,41 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
 
   test "mode/0 is :streaming" do
     assert ManagedAgents.mode() == :streaming
+  end
+
+  test "provision/2 rolls back the agent when environment creation fails" do
+    {:ok, calls} = Agent.start_link(fn -> [] end)
+    client = Client.new(api_key: "sk-test", req_options: [plug: {Req.Test, __MODULE__.Rollback}])
+
+    Req.Test.stub(__MODULE__.Rollback, fn conn ->
+      Agent.update(calls, &[conn.request_path | &1])
+
+      case conn.request_path do
+        "/v1/agents" -> Req.Test.json(conn, %{"id" => "agent_1"})
+        "/v1/environments" -> conn |> Plug.Conn.put_resp_content_type("application/json") |> Plug.Conn.resp(500, ~s({"error":"boom"}))
+        "/v1/agents/agent_1/archive" -> Req.Test.json(conn, %{"ok" => true})
+      end
+    end)
+
+    assert {:error, _} = ManagedAgents.provision(@spec_claude, client: client)
+    assert "/v1/agents/agent_1/archive" in Agent.get(calls, & &1)
+  end
+
+  test "teardown/2 attempts both archives even if the first fails" do
+    {:ok, calls} = Agent.start_link(fn -> [] end)
+    client = Client.new(api_key: "sk-test", req_options: [plug: {Req.Test, __MODULE__.BothArchives}])
+
+    Req.Test.stub(__MODULE__.BothArchives, fn conn ->
+      Agent.update(calls, &[conn.request_path | &1])
+      case conn.request_path do
+        "/v1/agents/agent_1/archive" -> conn |> Plug.Conn.put_resp_content_type("application/json") |> Plug.Conn.resp(500, ~s({"e":"x"}))
+        "/v1/environments/env_1/archive" -> Req.Test.json(conn, %{"ok" => true})
+      end
+    end)
+
+    assert {:error, {:teardown_failed, _}} = ManagedAgents.teardown(%{agent_id: "agent_1", environment_id: "env_1"}, client: client)
+    paths = Agent.get(calls, & &1)
+    assert "/v1/agents/agent_1/archive" in paths and "/v1/environments/env_1/archive" in paths
   end
 
   test "turn_boundary?/1 is true only for session status/terminal/error events" do
