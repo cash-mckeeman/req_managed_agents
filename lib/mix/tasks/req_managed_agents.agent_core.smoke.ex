@@ -207,7 +207,7 @@ defmodule Mix.Tasks.ReqManagedAgents.AgentCore.Smoke do
   end
 
   defp sigv4_signed_stage(%{auth_checks: checks}) do
-    if length(checks) > 0 and Enum.all?(checks, & &1) do
+    if checks != [] and Enum.all?(checks, & &1) do
       {"SigV4 signed", :pass,
        "#{length(checks)} invoke request(s) carried AWS4-HMAC-SHA256 Authorization"}
     else

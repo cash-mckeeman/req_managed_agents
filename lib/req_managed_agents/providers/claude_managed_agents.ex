@@ -20,8 +20,16 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     client = opts[:client] || Client.new()
     name = opts[:name] || "agent_#{spec_digest(spec)}"
 
-    agent_body = %{name: name, model: spec.model_config, system: spec.system_prompt, tools: spec.tools}
-    env_body = opts[:environment] || %{name: "#{name}_env", config: %{type: "cloud", networking: %{type: "unrestricted"}}}
+    agent_body = %{
+      name: name,
+      model: spec.model_config,
+      system: spec.system_prompt,
+      tools: spec.tools
+    }
+
+    env_body =
+      opts[:environment] ||
+        %{name: "#{name}_env", config: %{type: "cloud", networking: %{type: "unrestricted"}}}
 
     with {:ok, %{"id" => agent_id}} <- Client.create_agent(client, agent_body) do
       case Client.create_environment(client, env_body) do
@@ -62,7 +70,10 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
     case opts[:session_id] do
       nil ->
-        body = %{agent: Keyword.fetch!(opts, :agent_id), environment_id: Keyword.fetch!(opts, :environment_id)}
+        body = %{
+          agent: Keyword.fetch!(opts, :agent_id),
+          environment_id: Keyword.fetch!(opts, :environment_id)
+        }
 
         case Client.create_session(client, body) do
           {:ok, %{"id" => sid}} ->
@@ -70,7 +81,10 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
             {:ok, task} =
               Task.start_link(fn ->
-                Stream.stream(client, sid, subscriber, ref: ref, telemetry_metadata: opts[:telemetry_metadata] || %{})
+                Stream.stream(client, sid, subscriber,
+                  ref: ref,
+                  telemetry_metadata: opts[:telemetry_metadata] || %{}
+                )
               end)
 
             {:ok, %{client: client, session_id: sid, ref: ref, consumer: task}}
@@ -94,7 +108,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def resume_input(_custom_tool_uses, results) do
-    Enum.map(results, fn r -> Event.custom_tool_result(r.tool_use_id, r.text, is_error: r.is_error) end)
+    Enum.map(results, fn r ->
+      Event.custom_tool_result(r.tool_use_id, r.text, is_error: r.is_error)
+    end)
   end
 
   @impl true
@@ -140,20 +156,33 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def normalize(events) do
-    uses_by_id = for %{"type" => "agent.custom_tool_use", "id" => id} = e <- events, into: %{}, do: {id, e}
+    uses_by_id =
+      for %{"type" => "agent.custom_tool_use", "id" => id} = e <- events, into: %{}, do: {id, e}
 
     case latest_status(events) do
       %{"type" => "session.status_idle", "stop_reason" => %{"type" => reason} = sr} ->
         custom =
-          sr |> Map.get("event_ids", []) |> Enum.map(&uses_by_id[&1]) |> Enum.reject(&is_nil/1)
-          |> Enum.map(fn e -> %ToolUse{id: e["id"], name: e["name"], input: e["input"] || %{}} end)
+          sr
+          |> Map.get("event_ids", [])
+          |> Enum.map(&uses_by_id[&1])
+          |> Enum.reject(&is_nil/1)
+          |> Enum.map(fn e ->
+            %ToolUse{id: e["id"], name: e["name"], input: e["input"] || %{}}
+          end)
 
         turn_result(terminal(reason), sr, custom, events)
 
-      %{"type" => "session.status_terminated"} = s -> turn_result(:terminated, s["stop_reason"], [], events)
-      %{"type" => "session.error"} = s -> turn_result(:terminated, s["stop_reason"], [], events)
-      %{"type" => "session.status_idle"} = s -> turn_result(:terminated, s["stop_reason"], [], events)
-      _ -> turn_result(:terminated, nil, [], events)
+      %{"type" => "session.status_terminated"} = s ->
+        turn_result(:terminated, s["stop_reason"], [], events)
+
+      %{"type" => "session.error"} = s ->
+        turn_result(:terminated, s["stop_reason"], [], events)
+
+      %{"type" => "session.status_idle"} = s ->
+        turn_result(:terminated, s["stop_reason"], [], events)
+
+      _ ->
+        turn_result(:terminated, nil, [], events)
     end
   end
 
@@ -228,5 +257,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   # term_to_binary is deterministic for the small (4-key) spec maps used here.
   defp spec_digest(spec),
-    do: :crypto.hash(:sha256, :erlang.term_to_binary(spec, [:deterministic])) |> Base.encode16(case: :lower) |> binary_part(0, 8)
+    do:
+      :crypto.hash(:sha256, :erlang.term_to_binary(spec, [:deterministic]))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 8)
 end

@@ -50,7 +50,9 @@ defmodule ReqManagedAgents.LiveSmokeTest do
         notify: self()
       )
 
-    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn}}, 90_000
+    assert_receive {:managed_agents_session,
+                    %ReqManagedAgents.SessionResult{terminal: :end_turn}},
+                   90_000
   end
 
   @tag timeout: 120_000
@@ -98,10 +100,17 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     # (we reconciled it as `span.model_request_end` → `model_usage`, not first-hand).
     usage_events =
       Enum.filter(result.events, fn e ->
-        is_map(e) and (e["type"] == "span.model_request_end" or Map.has_key?(e, "model_usage") or Map.has_key?(e, "usage"))
+        is_map(e) and
+          (e["type"] == "span.model_request_end" or Map.has_key?(e, "model_usage") or
+             Map.has_key?(e, "usage"))
       end)
 
-    IO.inspect(usage_events, label: "LIVE usage-bearing events (confirm the shape)", limit: :infinity, printable_limit: :infinity)
+    IO.inspect(usage_events,
+      label: "LIVE usage-bearing events (confirm the shape)",
+      limit: :infinity,
+      printable_limit: :infinity
+    )
+
     IO.inspect(result.usage, label: "LIVE SessionResult.usage")
 
     assert %ReqManagedAgents.Usage{input_tokens: input, output_tokens: output} = result.usage,
@@ -175,24 +184,38 @@ defmodule ReqManagedAgents.LiveSmokeTest do
       system_prompt: "You are a terse assistant. Reply in a few words.",
       tools: [],
       terminal_tool: nil,
-      model_config: %{"bedrockModelConfig" => %{"modelId" => "us.anthropic.claude-sonnet-4-5-20250929-v1:0"}}
+      model_config: %{
+        "bedrockModelConfig" => %{"modelId" => "us.anthropic.claude-sonnet-4-5-20250929-v1:0"}
+      }
     }
 
-    {:ok, handle} = ReqManagedAgents.provision(BedrockAgentCore, spec, execution_role_arn: role, name_prefix: "rma_live")
+    {:ok, handle} =
+      ReqManagedAgents.provision(BedrockAgentCore, spec,
+        execution_role_arn: role,
+        name_prefix: "rma_live"
+      )
+
     IO.inspect(handle, label: "LIVE Bedrock provisioned handle")
 
     try do
       {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn} = result} =
         ReqManagedAgents.AgentCore.invoke_to_completion(
           harness_arn: handle.harness_arn,
-          runtime_session_id: "live-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),
+          runtime_session_id:
+            "live-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),
           prompt: "Reply with exactly: hello there",
           handler: Handler,
           timeout: 300_000
         )
 
       metadata_events = Enum.filter(result.events, &(is_map(&1) and Map.has_key?(&1, "metadata")))
-      IO.inspect(metadata_events, label: "LIVE Bedrock metadata/usage events", limit: :infinity, printable_limit: :infinity)
+
+      IO.inspect(metadata_events,
+        label: "LIVE Bedrock metadata/usage events",
+        limit: :infinity,
+        printable_limit: :infinity
+      )
+
       IO.inspect(result.usage, label: "LIVE Bedrock SessionResult.usage")
 
       assert %ReqManagedAgents.Usage{input_tokens: i, output_tokens: o} = result.usage,
@@ -201,7 +224,9 @@ defmodule ReqManagedAgents.LiveSmokeTest do
       assert i > 0 and o > 0,
              "expected non-zero live Bedrock usage (does AgentCore emit metadata.usage?) — got #{inspect(result.usage)}"
     after
-      IO.inspect(ReqManagedAgents.teardown(BedrockAgentCore, handle), label: "LIVE Bedrock teardown")
+      IO.inspect(ReqManagedAgents.teardown(BedrockAgentCore, handle),
+        label: "LIVE Bedrock teardown"
+      )
     end
   end
 end

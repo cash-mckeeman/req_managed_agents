@@ -25,7 +25,8 @@ defmodule Mix.Tasks.ReqManagedAgents.QaProvisioning do
     out = Path.join(System.tmp_dir!(), "qa_provisioning.json")
     File.rm(out)
 
-    {log, status} = System.cmd("mix", ["test", @capture], env: [{"QA_OUT", out}], stderr_to_stdout: true)
+    {log, status} =
+      System.cmd("mix", ["test", @capture], env: [{"QA_OUT", out}], stderr_to_stdout: true)
 
     if status != 0 or not File.exists?(out) do
       IO.write(log)
@@ -42,6 +43,7 @@ defmodule Mix.Tasks.ReqManagedAgents.QaProvisioning do
     healthy =
       Enum.map(providers, fn p ->
         ran? = p["ran_terminal"] == "end_turn"
+
         # A healthy run also surfaces non-zero token usage — a wrong usage wire-shape shows up here.
         usage? = (p["usage_input"] || 0) > 0 and (p["usage_output"] || 0) > 0
         ok? = p["provisioned"] and ran? and p["teardown_ok"] and usage?
@@ -62,6 +64,7 @@ defmodule Mix.Tasks.ReqManagedAgents.QaProvisioning do
   defp row(p, ran?, usage?, ok?) do
     provider = String.pad_trailing(p["provider"], 9)
     tokens = "in=#{p["usage_input"] || 0} out=#{p["usage_output"] || 0}"
+
     "#{provider}  provision #{chk(p["provisioned"])}  run #{chk(ran?)} (#{p["ran_terminal"]})  usage #{chk(usage?)} (#{tokens})  teardown #{chk(p["teardown_ok"])}   #{if ok?, do: "PASS", else: "FAIL"}"
   end
 

@@ -3,24 +3,37 @@ defmodule ReqManagedAgents.SessionLiveTest do
   alias ReqManagedAgents.Session
   alias ReqManagedAgents.FakeProviders.Streaming
 
-  @ra [%{"type" => "tool", "id" => "t1", "name" => "echo", "input" => %{"x" => 1}},
-       %{"type" => "stop", "terminal" => :requires_action}]
+  @ra [
+    %{"type" => "tool", "id" => "t1", "name" => "echo", "input" => %{"x" => 1}},
+    %{"type" => "stop", "terminal" => :requires_action}
+  ]
   @done [%{"type" => "stop", "terminal" => :end_turn}]
 
   test "start_link drives to a terminal, notifies, stays alive, and accepts a follow-up message" do
     test = self()
-    handler = fn name, input, _ctx -> send(test, {:tool, name, input}); {:ok, "r"} end
+
+    handler = fn name, input, _ctx ->
+      send(test, {:tool, name, input})
+      {:ok, "r"}
+    end
 
     # kickoff → @ra (requires_action) → resume → @done (end_turn); then message → @done.
     {:ok, pid} =
       Session.start_link(Streaming, handler: handler, notify: self(), turns: [@ra, @done, @done])
 
-    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn}}, 1000
+    assert_receive {:managed_agents_session,
+                    %ReqManagedAgents.SessionResult{terminal: :end_turn}},
+                   1000
+
     assert_received {:tool, "echo", %{"x" => 1}}
     assert Process.alive?(pid)
 
     Session.message(pid, "again")
-    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn} = msg_result}, 1000
+
+    assert_receive {:managed_agents_session,
+                    %ReqManagedAgents.SessionResult{terminal: :end_turn} = msg_result},
+                   1000
+
     # reset_acc zeros out events/tool_uses/usage for the new message — only the new turn's data
     assert msg_result.events == @done
     assert msg_result.custom_tool_uses == []

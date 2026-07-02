@@ -2,7 +2,7 @@ defmodule ReqManagedAgents.SessionSupervisor do
   @moduledoc """
   Optional `DynamicSupervisor` for running one `ReqManagedAgents.Session` per
   child. Add it to your supervision tree, then `start_child/1` with the same opts
-  you'd pass to `ReqManagedAgents.Session.start_link/1`.
+  you'd pass to `ReqManagedAgents.Session.start_link/2`.
   """
   use DynamicSupervisor
 

@@ -34,7 +34,9 @@ defmodule Mix.Tasks.ReqManagedAgents.QaCheckpoint do
 
   @impl true
   def run(argv) do
-    {opts, _, _} = OptionParser.parse(argv, strict: [base: :string, rebuild: :boolean, keep: :boolean])
+    {opts, _, _} =
+      OptionParser.parse(argv, strict: [base: :string, rebuild: :boolean, keep: :boolean])
+
     base = opts[:base] || "main@origin"
     # Sibling worktree under .claude/worktrees/ (this task runs from a worktree there).
     pr11_dir = Path.expand("../qa-checkpoint-pr11", File.cwd!())
@@ -104,7 +106,9 @@ defmodule Mix.Tasks.ReqManagedAgents.QaCheckpoint do
 
     Enum.each(c.scenarios, fn s ->
       say(row(s.name, s.fp, s.mismatches == []))
-      for {f, xv, yv} <- s.mismatches, do: say("    ✗ #{f}: PR11=#{inspect(xv)}  PR13=#{inspect(yv)}")
+
+      for {f, xv, yv} <- s.mismatches,
+          do: say("    ✗ #{f}: PR11=#{inspect(xv)}  PR13=#{inspect(yv)}")
     end)
 
     say("")
@@ -118,7 +122,10 @@ defmodule Mix.Tasks.ReqManagedAgents.QaCheckpoint do
     say("")
 
     if c.pass == c.total do
-      say("RESULT: PASS — #{c.pass}/#{c.total} scenarios behaviorally identical across both providers.")
+      say(
+        "RESULT: PASS — #{c.pass}/#{c.total} scenarios behaviorally identical across both providers."
+      )
+
       say("The Provider/Session refactor preserved all observable behavior. ∎")
     else
       say("RESULT: FAIL — #{c.total - c.pass}/#{c.total} scenarios diverged. See ✗ rows above.")

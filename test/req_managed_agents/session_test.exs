@@ -91,7 +91,9 @@ defmodule ReqManagedAgents.SessionTest do
                     }},
                    3000
 
-    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn}}, 3000
+    assert_receive {:managed_agents_session,
+                    %ReqManagedAgents.SessionResult{terminal: :end_turn}},
+                   3000
   end
 
   test "on resume, dedupes history and redrives an unanswered tool call", %{
@@ -136,7 +138,10 @@ defmodule ReqManagedAgents.SessionTest do
 
     assert_receive {:tool_called, "lookup", %{"q" => 7}}, 3000
     assert_receive {:posted, %{"events" => [%{"custom_tool_use_id" => "u1"}]}}, 3000
-    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn}}, 3000
+
+    assert_receive {:managed_agents_session,
+                    %ReqManagedAgents.SessionResult{terminal: :end_turn}},
+                   3000
   end
 
   test "resume pages full history via list_all_events before redriving", %{
@@ -188,7 +193,10 @@ defmodule ReqManagedAgents.SessionTest do
       )
 
     assert_receive {:tool_called, "lookup", %{"q" => 9}}, 3000
-    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn}}, 3000
+
+    assert_receive {:managed_agents_session,
+                    %ReqManagedAgents.SessionResult{terminal: :end_turn}},
+                   3000
   end
 
   test "a handler {:error, _} posts a tool result with is_error: true", %{
@@ -241,6 +249,8 @@ defmodule ReqManagedAgents.SessionTest do
                     }},
                    3000
 
-    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn}}, 3000
+    assert_receive {:managed_agents_session,
+                    %ReqManagedAgents.SessionResult{terminal: :end_turn}},
+                   3000
   end
 end

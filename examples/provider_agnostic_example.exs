@@ -47,7 +47,8 @@ claude_result =
 bedrock_result =
   Session.run(BedrockAgentCore,
     harness_arn: System.fetch_env!("HARNESS_ARN"),
-    runtime_session_id: "demo-session-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),
+    runtime_session_id:
+      "demo-session-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),
     model: "bedrock:anthropic.claude-sonnet-4",
     prompt: prompt,
     handler: Demo.Handler

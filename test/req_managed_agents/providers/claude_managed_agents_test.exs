@@ -3,9 +3,15 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   alias ReqManagedAgents.Providers.ClaudeManagedAgents, as: ManagedAgents
   alias ReqManagedAgents.Client
 
-  @spec_claude %{system_prompt: "sys", tools: [%{"name" => "t"}], terminal_tool: nil, model_config: "claude-opus-4-8"}
+  @spec_claude %{
+    system_prompt: "sys",
+    tools: [%{"name" => "t"}],
+    terminal_tool: nil,
+    model_config: "claude-opus-4-8"
+  }
 
-  defp claude_client(name), do: Client.new(api_key: "sk-test", req_options: [plug: {Req.Test, name}])
+  defp claude_client(name),
+    do: Client.new(api_key: "sk-test", req_options: [plug: {Req.Test, name}])
 
   test "provision/2 creates an agent + environment and returns both ids" do
     client = claude_client(__MODULE__.Provision)
@@ -37,7 +43,11 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
       Req.Test.json(conn, %{"ok" => true})
     end)
 
-    assert :ok = ManagedAgents.teardown(%{agent_id: "agent_1", environment_id: "env_1"}, client: client)
+    assert :ok =
+             ManagedAgents.teardown(%{agent_id: "agent_1", environment_id: "env_1"},
+               client: client
+             )
+
     assert Enum.sort(Agent.get(paths, & &1)) ==
              ["/v1/agents/agent_1/archive", "/v1/environments/env_1/archive"]
   end
@@ -46,12 +56,21 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     do: %{"type" => "agent.custom_tool_use", "id" => id, "name" => name, "input" => input}
 
   defp idle(reason, event_ids \\ []),
-    do: %{"type" => "session.status_idle", "stop_reason" => %{"type" => reason, "event_ids" => event_ids}}
+    do: %{
+      "type" => "session.status_idle",
+      "stop_reason" => %{"type" => reason, "event_ids" => event_ids}
+    }
 
   test "normalize/1 sums usage across span.model_request_end events (real Managed Agents shape)" do
     events = [
-      %{"type" => "span.model_request_end", "model_usage" => %{"input_tokens" => 10, "output_tokens" => 5}},
-      %{"type" => "span.model_request_end", "model_usage" => %{"input_tokens" => 3, "output_tokens" => 7}},
+      %{
+        "type" => "span.model_request_end",
+        "model_usage" => %{"input_tokens" => 10, "output_tokens" => 5}
+      },
+      %{
+        "type" => "span.model_request_end",
+        "model_usage" => %{"input_tokens" => 3, "output_tokens" => 7}
+      },
       idle("end_turn")
     ]
 
@@ -69,22 +88,39 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   end
 
   test "normalize/1 emits requested custom_tool_uses in event_ids order on requires_action" do
-    events = [use_event("e1", "f", %{"a" => 1}), use_event("e2", "g", %{"b" => 2}), idle("requires_action", ["e2", "e1"])]
+    events = [
+      use_event("e1", "f", %{"a" => 1}),
+      use_event("e2", "g", %{"b" => 2}),
+      idle("requires_action", ["e2", "e1"])
+    ]
 
-    assert %ReqManagedAgents.TurnResult{terminal: :requires_action,
+    assert %ReqManagedAgents.TurnResult{
+             terminal: :requires_action,
              stop_reason: %{"type" => "requires_action", "event_ids" => ["e2", "e1"]},
-             custom_tool_uses: [%ReqManagedAgents.ToolUse{id: "e2", name: "g", input: %{"b" => 2}},
-                                %ReqManagedAgents.ToolUse{id: "e1", name: "f", input: %{"a" => 1}}]} = ManagedAgents.normalize(events)
+             custom_tool_uses: [
+               %ReqManagedAgents.ToolUse{id: "e2", name: "g", input: %{"b" => 2}},
+               %ReqManagedAgents.ToolUse{id: "e1", name: "f", input: %{"a" => 1}}
+             ]
+           } = ManagedAgents.normalize(events)
   end
 
   test "normalize/1 maps an end_turn idle to :end_turn with no custom_tool_uses" do
-    assert %ReqManagedAgents.TurnResult{terminal: :end_turn, stop_reason: %{"type" => "end_turn"}, custom_tool_uses: []} =
+    assert %ReqManagedAgents.TurnResult{
+             terminal: :end_turn,
+             stop_reason: %{"type" => "end_turn"},
+             custom_tool_uses: []
+           } =
              ManagedAgents.normalize([idle("end_turn")])
   end
 
   test "server-side exclusion: a custom_tool_use NOT in event_ids is not surfaced" do
     # e2 is a provider-executed tool the loop ran itself; only e1 is returned to us.
-    events = [use_event("e1", "f", %{}), use_event("e2", "server_search", %{}), idle("requires_action", ["e1"])]
+    events = [
+      use_event("e1", "f", %{}),
+      use_event("e2", "server_search", %{}),
+      idle("requires_action", ["e1"])
+    ]
+
     assert [%{id: "e1"}] = ManagedAgents.normalize(events).custom_tool_uses
   end
 
@@ -108,7 +144,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   end
 
   test "normalize/1 maps a terminated/error stream to :terminated" do
-    assert %{terminal: :terminated} = ManagedAgents.normalize([%{"type" => "session.status_terminated"}])
+    assert %{terminal: :terminated} =
+             ManagedAgents.normalize([%{"type" => "session.status_terminated"}])
+
     assert %{terminal: :terminated} = ManagedAgents.normalize([%{"type" => "session.error"}])
   end
 
@@ -128,7 +166,13 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     # The spec's "non-empty iff :requires_action" is the normal case; a requires_action
     # whose event_ids reference ids we never stashed yields an empty custom_tool_uses.
     # The drivers resolve([]) → no-op continue (matching pre-refactor behavior).
-    events = [%{"type" => "session.status_idle", "stop_reason" => %{"type" => "requires_action", "event_ids" => ["ghost"]}}]
+    events = [
+      %{
+        "type" => "session.status_idle",
+        "stop_reason" => %{"type" => "requires_action", "event_ids" => ["ghost"]}
+      }
+    ]
+
     assert %{terminal: :requires_action, custom_tool_uses: []} = ManagedAgents.normalize(events)
   end
 
@@ -142,7 +186,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
       idle("end_turn")
     ]
 
-    assert %{terminal: :end_turn, text: "First line.\nSecond line."} = ManagedAgents.normalize(events)
+    assert %{terminal: :end_turn, text: "First line.\nSecond line."} =
+             ManagedAgents.normalize(events)
   end
 
   test "normalize/1 joins multiple text blocks within one agent.message and skips non-text blocks" do
@@ -164,7 +209,10 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
 
   test "normalize/1 surfaces assistant text alongside a requires_action turn" do
     events = [
-      %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => "calling a tool"}]},
+      %{
+        "type" => "agent.message",
+        "content" => [%{"type" => "text", "text" => "calling a tool"}]
+      },
       use_event("e1", "lookup", %{"q" => "hi"}),
       idle("requires_action", ["e1"])
     ]
@@ -181,7 +229,12 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   # biai-platform consumer: %{"type" => "agent.tool_use", "name" => ..., "input" => ...}.
   test "normalize/1 surfaces agent.tool_use as observe-only server_tool_uses (keeping the event id)" do
     events = [
-      %{"type" => "agent.tool_use", "id" => "st1", "name" => "web_search", "input" => %{"q" => "weather"}},
+      %{
+        "type" => "agent.tool_use",
+        "id" => "st1",
+        "name" => "web_search",
+        "input" => %{"q" => "weather"}
+      },
       idle("end_turn")
     ]
 
@@ -241,8 +294,17 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
 
   test "implements the streaming Provider callbacks" do
     Code.ensure_loaded!(ManagedAgents)
-    for {f, a} <- [{:mode, 0}, {:open, 2}, {:kickoff_input, 1}, {:user_input, 1},
-                   {:resume_input, 2}, {:normalize, 1}, {:push_input, 2}, {:turn_boundary?, 1}] do
+
+    for {f, a} <- [
+          {:mode, 0},
+          {:open, 2},
+          {:kickoff_input, 1},
+          {:user_input, 1},
+          {:resume_input, 2},
+          {:normalize, 1},
+          {:push_input, 2},
+          {:turn_boundary?, 1}
+        ] do
       assert function_exported?(ManagedAgents, f, a)
     end
   end
@@ -259,9 +321,16 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
       Agent.update(calls, &[conn.request_path | &1])
 
       case conn.request_path do
-        "/v1/agents" -> Req.Test.json(conn, %{"id" => "agent_1"})
-        "/v1/environments" -> conn |> Plug.Conn.put_resp_content_type("application/json") |> Plug.Conn.resp(500, ~s({"error":"boom"}))
-        "/v1/agents/agent_1/archive" -> Req.Test.json(conn, %{"ok" => true})
+        "/v1/agents" ->
+          Req.Test.json(conn, %{"id" => "agent_1"})
+
+        "/v1/environments" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(500, ~s({"error":"boom"}))
+
+        "/v1/agents/agent_1/archive" ->
+          Req.Test.json(conn, %{"ok" => true})
       end
     end)
 
@@ -271,23 +340,39 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
 
   test "teardown/2 attempts both archives even if the first fails" do
     {:ok, calls} = Agent.start_link(fn -> [] end)
-    client = Client.new(api_key: "sk-test", req_options: [plug: {Req.Test, __MODULE__.BothArchives}])
+
+    client =
+      Client.new(api_key: "sk-test", req_options: [plug: {Req.Test, __MODULE__.BothArchives}])
 
     Req.Test.stub(__MODULE__.BothArchives, fn conn ->
       Agent.update(calls, &[conn.request_path | &1])
+
       case conn.request_path do
-        "/v1/agents/agent_1/archive" -> conn |> Plug.Conn.put_resp_content_type("application/json") |> Plug.Conn.resp(500, ~s({"e":"x"}))
-        "/v1/environments/env_1/archive" -> Req.Test.json(conn, %{"ok" => true})
+        "/v1/agents/agent_1/archive" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(500, ~s({"e":"x"}))
+
+        "/v1/environments/env_1/archive" ->
+          Req.Test.json(conn, %{"ok" => true})
       end
     end)
 
-    assert {:error, {:teardown_failed, _}} = ManagedAgents.teardown(%{agent_id: "agent_1", environment_id: "env_1"}, client: client)
+    assert {:error, {:teardown_failed, _}} =
+             ManagedAgents.teardown(%{agent_id: "agent_1", environment_id: "env_1"},
+               client: client
+             )
+
     paths = Agent.get(calls, & &1)
     assert "/v1/agents/agent_1/archive" in paths and "/v1/environments/env_1/archive" in paths
   end
 
   test "turn_boundary?/1 is true only for session status/terminal/error events" do
-    assert ManagedAgents.turn_boundary?(%{"type" => "session.status_idle", "stop_reason" => %{"type" => "end_turn"}})
+    assert ManagedAgents.turn_boundary?(%{
+             "type" => "session.status_idle",
+             "stop_reason" => %{"type" => "end_turn"}
+           })
+
     assert ManagedAgents.turn_boundary?(%{"type" => "session.status_terminated"})
     assert ManagedAgents.turn_boundary?(%{"type" => "session.error"})
     refute ManagedAgents.turn_boundary?(%{"type" => "agent.message", "content" => []})
@@ -295,12 +380,19 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   end
 
   test "kickoff_input/1 and user_input/1 build user.message events" do
-    assert [%{"type" => "user.message", "content" => [%{"text" => "go"}]}] = ManagedAgents.kickoff_input(prompt: "go")
-    assert [%{"type" => "user.message", "content" => [%{"text" => "hi"}]}] = ManagedAgents.user_input("hi")
+    assert [%{"type" => "user.message", "content" => [%{"text" => "go"}]}] =
+             ManagedAgents.kickoff_input(prompt: "go")
+
+    assert [%{"type" => "user.message", "content" => [%{"text" => "hi"}]}] =
+             ManagedAgents.user_input("hi")
   end
 
   test "resume_input/2 builds user.custom_tool_result events (no echo)" do
-    results = [%{tool_use_id: "e1", text: "ok", is_error: false}, %{tool_use_id: "e2", text: "boom", is_error: true}]
+    results = [
+      %{tool_use_id: "e1", text: "ok", is_error: false},
+      %{tool_use_id: "e2", text: "boom", is_error: true}
+    ]
+
     assert [ok, boom] = ManagedAgents.resume_input([], results)
     assert ok["type"] == "user.custom_tool_result" and ok["custom_tool_use_id"] == "e1"
     assert get_in(ok, ["content", Access.at(0), "text"]) == "ok"

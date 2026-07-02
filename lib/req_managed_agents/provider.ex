@@ -49,7 +49,10 @@ defmodule ReqManagedAgents.Provider do
   @callback user_input(text :: String.t()) :: input()
 
   @doc "Input that resumes the loop after local tools ran (the mode's resume contract)."
-  @callback resume_input(tool_uses :: [ReqManagedAgents.ToolUse.t()], results :: [ReqManagedAgents.ToolResult.t()]) ::
+  @callback resume_input(
+              tool_uses :: [ReqManagedAgents.ToolUse.t()],
+              results :: [ReqManagedAgents.ToolResult.t()]
+            ) ::
               input()
 
   @doc "Fold a turn's accumulated events into the canonical turn outcome (carries raw `events`)."
@@ -86,6 +89,11 @@ defmodule ReqManagedAgents.Provider do
   @spec result_of(String.t(), event()) :: ReqManagedAgents.ToolResult.t()
   def result_of(id, tool_event) when is_binary(id) and is_map(tool_event) do
     text = get_in(tool_event, ["content", Access.at(0), "text"]) || ""
-    %ReqManagedAgents.ToolResult{tool_use_id: id, text: text, is_error: tool_event["is_error"] == true}
+
+    %ReqManagedAgents.ToolResult{
+      tool_use_id: id,
+      text: text,
+      is_error: tool_event["is_error"] == true
+    }
   end
 end
