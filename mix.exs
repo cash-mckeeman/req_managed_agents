@@ -16,6 +16,7 @@ defmodule ReqManagedAgents.MixProject do
         "Elixir client for Anthropic's Claude Managed Agents — Anthropic runs the loop, your tools run locally.",
       package: package(),
       docs: docs(),
+      dialyzer: dialyzer(),
       name: "ReqManagedAgents",
       source_url: @source_url
     ]
@@ -44,7 +45,20 @@ defmodule ReqManagedAgents.MixProject do
       {:bypass, "~> 2.1", only: :test},
       {:ex_aws_auth, "~> 1.4"},
       {:aws_event_stream, github: "cash-mckeeman/aws_event_stream", tag: "v0.1.0"},
-      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
+    ]
+  end
+
+  defp dialyzer do
+    [
+      # Keep PLTs under priv/plts so CI can cache them across runs.
+      plt_local_path: "priv/plts",
+      plt_core_path: "priv/plts",
+      # Mix tasks call Mix.shell/Mix.raise; Mix isn't in the core PLT.
+      plt_add_apps: [:mix],
+      ignore_warnings: ".dialyzer_ignore.exs"
     ]
   end
 
