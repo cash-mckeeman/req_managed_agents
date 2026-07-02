@@ -157,10 +157,15 @@ defmodule ReqManagedAgents.AgentCore.ConverseTest do
   test "parse/1 extracts metadata.usage" do
     events = [
       %{"messageStop" => %{"stopReason" => "end_turn"}},
-      %{"metadata" => %{"usage" => %{"inputTokens" => 12, "outputTokens" => 7, "totalTokens" => 19}}}
+      %{
+        "metadata" => %{
+          "usage" => %{"inputTokens" => 12, "outputTokens" => 7, "totalTokens" => 19}
+        }
+      }
     ]
 
-    assert %{usage: %{"inputTokens" => 12, "outputTokens" => 7}} = ReqManagedAgents.AgentCore.Converse.parse(events)
+    assert %{usage: %{"inputTokens" => 12, "outputTokens" => 7}} =
+             ReqManagedAgents.AgentCore.Converse.parse(events)
   end
 
   defp ids(tool_uses), do: Enum.map(tool_uses, & &1["toolUseId"])

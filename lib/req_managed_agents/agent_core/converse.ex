@@ -45,7 +45,12 @@ defmodule ReqManagedAgents.AgentCore.Converse do
   and duplicated the other, producing a duplicate-`toolUseId` resume that Bedrock
   rejected; keying by id recovers both. A genuinely-reused id collapses to one block.
   """
-  @spec parse([map()]) :: %{stop_reason: String.t() | nil, tool_uses: [map()], text: String.t(), usage: map() | nil}
+  @spec parse([map()]) :: %{
+          stop_reason: String.t() | nil,
+          tool_uses: [map()],
+          text: String.t(),
+          usage: map() | nil
+        }
   def parse(events) do
     init = %{stop_reason: nil, blocks: %{}, active: %{}, order: [], text: "", usage: nil}
 

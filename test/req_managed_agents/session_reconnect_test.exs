@@ -5,7 +5,11 @@ defmodule ReqManagedAgents.SessionReconnectTest do
 
   test "a live streaming session reconnects on a stream drop and re-drives unanswered tool calls" do
     test = self()
-    handler = fn name, input, _ctx -> send(test, {:tool, name, input}); {:ok, "r"} end
+
+    handler = fn name, input, _ctx ->
+      send(test, {:tool, name, input})
+      {:ok, "r"}
+    end
 
     # kickoff push is dropped → the Session reconnects → reconnect/3 surfaces the unanswered
     # tool (t1) → the Session re-runs it locally and resumes → the next turn ends the run.
@@ -18,7 +22,11 @@ defmodule ReqManagedAgents.SessionReconnectTest do
       )
 
     assert_receive {:tool, "echo", %{"x" => 1}}, 2000
-    assert_receive {:managed_agents_session, %ReqManagedAgents.SessionResult{terminal: :end_turn}}, 2000
+
+    assert_receive {:managed_agents_session,
+                    %ReqManagedAgents.SessionResult{terminal: :end_turn}},
+                   2000
+
     assert Process.alive?(pid)
   end
 

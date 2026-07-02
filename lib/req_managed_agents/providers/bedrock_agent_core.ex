@@ -29,9 +29,14 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       tools: spec.tools
     }
 
-    create_fun = opts[:create_fun] || fn s -> Client.create_harness(opts[:client] || Client.new(), s) end
+    create_fun =
+      opts[:create_fun] || fn s -> Client.create_harness(opts[:client] || Client.new(), s) end
+
     list_fun = opts[:list_fun] || fn -> Client.list_harnesses(opts[:client] || Client.new()) end
-    get_fun = opts[:get_fun] || fn hid -> Client.get_harness(opts[:client] || Client.new(), hid) end
+
+    get_fun =
+      opts[:get_fun] || fn hid -> Client.get_harness(opts[:client] || Client.new(), hid) end
+
     poll_ms = opts[:ready_poll_ms] || @ready_poll_ms
     max_polls = opts[:ready_max_polls] || @ready_max_polls
 
@@ -39,7 +44,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       # CreateHarness returns the created resource wrapped under "harness" (verified live against
       # bedrock-agentcore-control), consistent with GetHarness — NOT a flat "harnessArn".
       {:ok, %{"harness" => %{"arn" => arn, "harnessId" => hid}}} ->
-        with :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls), do: {:ok, %{harness_arn: arn, harness_id: hid}}
+        with :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls),
+             do: {:ok, %{harness_arn: arn, harness_id: hid}}
 
       {:error, {:http_error, 409, _}} ->
         recover_existing(list_fun, get_fun, name, poll_ms, max_polls)
@@ -51,7 +57,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   @impl true
   def teardown(%{harness_id: hid}, opts) do
-    delete_fun = opts[:delete_fun] || fn id -> Client.delete_harness(opts[:client] || Client.new(), id) end
+    delete_fun =
+      opts[:delete_fun] || fn id -> Client.delete_harness(opts[:client] || Client.new(), id) end
 
     case delete_fun.(hid) do
       {:ok, _} -> :ok
@@ -92,7 +99,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       {:ok, %{"harness" => %{"status" => "READY"}}} ->
         :ok
 
-      {:ok, %{"harness" => %{"status" => s}}} when s in ["CREATE_FAILED", "UPDATE_FAILED", "DELETE_FAILED"] ->
+      {:ok, %{"harness" => %{"status" => s}}}
+      when s in ["CREATE_FAILED", "UPDATE_FAILED", "DELETE_FAILED"] ->
         {:error, {:harness_failed, s}}
 
       {:ok, %{"harness" => %{"status" => _}}} when polls_left > 0 ->
@@ -151,7 +159,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   # One turn with bounded retry on a transport error or a truncated stream (stop_reason == nil).
   # A surfaced AWS exception/error frame is never retried.
   defp invoke(conn, messages, retries_left) do
-    inv = %{harness_arn: conn.harness_arn, runtime_session_id: conn.sid, messages: messages, model: conn.model}
+    inv = %{
+      harness_arn: conn.harness_arn,
+      runtime_session_id: conn.sid,
+      messages: messages,
+      model: conn.model
+    }
 
     case conn.invoke_fun.(inv) do
       {:ok, events} ->
@@ -179,7 +192,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   @impl true
   def normalize(events) do
-    %{stop_reason: reason, tool_uses: tool_uses, text: text, usage: usage} = Converse.parse(events)
+    %{stop_reason: reason, tool_uses: tool_uses, text: text, usage: usage} =
+      Converse.parse(events)
 
     custom =
       Enum.map(tool_uses, fn %{"toolUseId" => id, "name" => name, "input" => input} ->
@@ -198,7 +212,13 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     }
   end
 
-  defp to_usage(%{} = u), do: %Usage{input_tokens: u["inputTokens"] || 0, output_tokens: u["outputTokens"] || 0, raw: [u]}
+  defp to_usage(%{} = u),
+    do: %Usage{
+      input_tokens: u["inputTokens"] || 0,
+      output_tokens: u["outputTokens"] || 0,
+      raw: [u]
+    }
+
   defp to_usage(_), do: nil
 
   @doc false

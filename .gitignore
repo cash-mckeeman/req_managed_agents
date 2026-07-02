@@ -22,3 +22,6 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 req_managed_agents-*.tar
 
+
+# Dialyzer PLTs (cached in CI, not committed).
+/priv/plts/

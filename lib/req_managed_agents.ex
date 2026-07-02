@@ -47,7 +47,8 @@ defmodule ReqManagedAgents do
     do: ReqManagedAgents.Provisioner.ensure(provider, spec, opts)
 
   @doc "Tear down a provisioned resource and evict it from the provision cache."
-  @spec teardown(module(), ReqManagedAgents.Provider.handle(), keyword()) :: :ok | {:error, term()}
+  @spec teardown(module(), ReqManagedAgents.Provider.handle(), keyword()) ::
+          :ok | {:error, term()}
   def teardown(provider, handle, opts \\ []) do
     if function_exported?(provider, :teardown, 2) do
       case provider.teardown(handle, opts) do

@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  MIX_ENV: test
+
+jobs:
+  test:
+    name: test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Floor claimed by mix.exs (`elixir: "~> 1.16"`).
+          - elixir: "1.16"
+            otp: "26"
+          - elixir: "1.18"
+            otp: "27"
+          # Edge: matches local development (1.20.x / OTP 29). Lint-class
+          # steps run only here — older compilers emit warnings that can't
+          # be fixed without dropping the floor.
+          - elixir: "1.20"
+            otp: "29"
+            lint: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            mix-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-
+      - run: mix deps.get
+      - run: mix deps.unlock --check-unused
+      - run: mix compile --warnings-as-errors
+        if: ${{ matrix.lint }}
+      # :live tests are excluded in test_helper.exs — contributor PRs never
+      # need Anthropic/AWS credentials. The live-canary workflow covers them.
+      - run: mix test
+
+  quality:
+    name: quality (format, credo, docs, package)
+    runs-on: ubuntu-latest
+    env:
+      # Override the workflow-wide :test env — ex_doc is `only: :dev`, so
+      # `mix docs` doesn't exist under MIX_ENV=test.
+      MIX_ENV: dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-quality-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            mix-quality-${{ runner.os }}-
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix credo
+      # hex.audit has no ignore mechanism, and cowlib (test-only transitive
+      # dep via bypass -> plug_cowboy -> cowboy) has two advisories with NO
+      # fixed release (every version >= 2.9.0 is affected, checked 2026-07-02).
+      # Allowlist exactly those two IDs; any other package, retirement, or new
+      # advisory still fails. Drop this wrapper when cowlib ships a fix.
+      # (mix_audit was evaluated instead — its DB doesn't cover cowlib at all.)
+      - name: hex.audit (allowlisted unfixed cowlib advisories)
+        run: |
+          out=$(mix hex.audit 2>&1) && { echo "$out"; exit 0; }
+          echo "$out"
+          unexpected_ids=$(echo "$out" | grep -oE "EEF-CVE-[0-9-]+|GHSA-[a-z0-9-]+" | sort -u \
+            | grep -vE "^(EEF-CVE-2026-43966|EEF-CVE-2026-43969|GHSA-g2wm-735q-3f56)$" || true)
+          other_pkgs=$(echo "$out" | grep -E "^  [a-zA-Z0-9_]+ [0-9]" | awk '{print $1}' | sort -u \
+            | grep -v "^cowlib$" || true)
+          if [ -n "$unexpected_ids" ] || [ -n "$other_pkgs" ]; then
+            echo "::error::hex.audit found issues beyond the cowlib allowlist: ${unexpected_ids} ${other_pkgs}"
+            exit 1
+          fi
+          echo "Only the allowlisted cowlib advisories are present (no upstream fix exists yet)."
+      # Broken hexdocs references fail the build here, not after publish.
+      - run: mix docs --warnings-as-errors
+      # Advisory until aws_event_stream is published to Hex: hex.build
+      # rejects git dependencies, so this step documents the publish blocker
+      # without failing CI. Flip to enforced once the dep is `~> 0.1`.
+      - name: hex.build (advisory — git dep on aws_event_stream blocks publish)
+        run: mix hex.build
+        continue-on-error: true
+
+  dialyzer:
+    name: dialyzer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-dialyzer-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            mix-dialyzer-${{ runner.os }}-
+      # PLTs are cached separately from deps: they change on BEAM upgrades,
+      # not on every mix.lock bump.
+      - uses: actions/cache@v4
+        with:
+          path: priv/plts
+          key: plt-${{ runner.os }}-29-1.20-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            plt-${{ runner.os }}-29-1.20-
+      - run: mix deps.get
+      - run: mix dialyzer --format github

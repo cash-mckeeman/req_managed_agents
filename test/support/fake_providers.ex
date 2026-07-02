@@ -5,6 +5,7 @@ defmodule ReqManagedAgents.FakeProviders do
   #   %{"type" => "stop", "terminal" => :requires_action | :end_turn | :terminated}
 
   defmodule Shared do
+    @moduledoc false
     alias ReqManagedAgents.{TurnResult, ToolUse, Usage}
 
     def normalize(events) do
@@ -31,6 +32,7 @@ defmodule ReqManagedAgents.FakeProviders do
   end
 
   defmodule RequestResponse do
+    @moduledoc false
     @behaviour ReqManagedAgents.Provider
     @impl true
     def mode, do: :request_response
@@ -46,12 +48,16 @@ defmodule ReqManagedAgents.FakeProviders do
     def resume_input(_uses, results), do: {:resume, results}
     @impl true
     def poll_turn(%{turns: [t | rest]} = c, _input), do: {:ok, t, %{c | turns: rest}}
-    def poll_turn(%{turns: []} = c, _input), do: {:ok, [%{"type" => "stop", "terminal" => :end_turn}], c}
+
+    def poll_turn(%{turns: []} = c, _input),
+      do: {:ok, [%{"type" => "stop", "terminal" => :end_turn}], c}
+
     @impl true
     defdelegate normalize(events), to: Shared
   end
 
   defmodule Streaming do
+    @moduledoc false
     @behaviour ReqManagedAgents.Provider
     @impl true
     def mode, do: :streaming
@@ -64,6 +70,7 @@ defmodule ReqManagedAgents.FakeProviders do
       send(subscriber, {:managed_agents, ref, :connected})
       {:ok, %{agent: agent, subscriber: subscriber, ref: ref}}
     end
+
     @impl true
     def kickoff_input(_opts), do: :kickoff
     @impl true
@@ -72,13 +79,19 @@ defmodule ReqManagedAgents.FakeProviders do
     def resume_input(_uses, results), do: {:resume, results}
     @impl true
     def push_input(conn, _input) do
-      turn = Agent.get_and_update(conn.agent, fn
-        [t | rest] -> {t, rest}
-        [] -> {[%{"type" => "stop", "terminal" => :end_turn}], []}
+      turn =
+        Agent.get_and_update(conn.agent, fn
+          [t | rest] -> {t, rest}
+          [] -> {[%{"type" => "stop", "terminal" => :end_turn}], []}
+        end)
+
+      Enum.each(turn, fn ev ->
+        send(conn.subscriber, {:managed_agents, conn.ref, {:event, ev}})
       end)
-      Enum.each(turn, fn ev -> send(conn.subscriber, {:managed_agents, conn.ref, {:event, ev}}) end)
+
       :ok
     end
+
     @impl true
     def turn_boundary?(%{"type" => "stop"}), do: true
     def turn_boundary?(_), do: false
@@ -89,6 +102,7 @@ defmodule ReqManagedAgents.FakeProviders do
   # Streaming fake that drops the very first push (simulating a mid-turn stream loss), then
   # serves `opts[:turns]` normally; its `reconnect/3` returns `opts[:pending]` to re-drive.
   defmodule ReconnectingStreaming do
+    @moduledoc false
     @behaviour ReqManagedAgents.Provider
     @impl true
     def mode, do: :streaming
@@ -97,12 +111,15 @@ defmodule ReqManagedAgents.FakeProviders do
     @impl true
     def open(opts, subscriber) do
       {:ok, agent} =
-        Agent.start_link(fn -> %{turns: opts[:turns] || [], pending: opts[:pending] || [], dropped: false} end)
+        Agent.start_link(fn ->
+          %{turns: opts[:turns] || [], pending: opts[:pending] || [], dropped: false}
+        end)
 
       ref = make_ref()
       send(subscriber, {:managed_agents, ref, :connected})
       {:ok, %{agent: agent, subscriber: subscriber, ref: ref}}
     end
+
     @impl true
     def kickoff_input(_opts), do: :kickoff
     @impl true
@@ -111,7 +128,8 @@ defmodule ReqManagedAgents.FakeProviders do
     def resume_input(_uses, results), do: {:resume, results}
     @impl true
     def push_input(conn, _input) do
-      drop? = Agent.get_and_update(conn.agent, fn st -> {not st.dropped, %{st | dropped: true}} end)
+      drop? =
+        Agent.get_and_update(conn.agent, fn st -> {not st.dropped, %{st | dropped: true}} end)
 
       if drop? do
         send(conn.subscriber, {:managed_agents, conn.ref, {:error, :stream_dropped}})
@@ -122,11 +140,14 @@ defmodule ReqManagedAgents.FakeProviders do
             %{turns: []} = st -> {[%{"type" => "stop", "terminal" => :end_turn}], st}
           end)
 
-        Enum.each(turn, fn ev -> send(conn.subscriber, {:managed_agents, conn.ref, {:event, ev}}) end)
+        Enum.each(turn, fn ev ->
+          send(conn.subscriber, {:managed_agents, conn.ref, {:event, ev}})
+        end)
       end
 
       :ok
     end
+
     @impl true
     def turn_boundary?(%{"type" => "stop"}), do: true
     def turn_boundary?(_), do: false
@@ -135,12 +156,14 @@ defmodule ReqManagedAgents.FakeProviders do
       pending = Agent.get(conn.agent, & &1.pending)
       {:ok, %{conn | ref: make_ref(), subscriber: subscriber}, pending, seen}
     end
+
     @impl true
     defdelegate normalize(events), to: Shared
   end
 
   # open/2 fails — to assert the Session surfaces the provider error verbatim.
   defmodule FailingOpen do
+    @moduledoc false
     @behaviour ReqManagedAgents.Provider
     @impl true
     def mode, do: :streaming
@@ -164,6 +187,7 @@ defmodule ReqManagedAgents.FakeProviders do
 
   # poll_turn/2 RAISES — to assert the Session surfaces it as {:error, _} without killing the caller.
   defmodule CrashingPoll do
+    @moduledoc false
     @behaviour ReqManagedAgents.Provider
     @impl true
     def mode, do: :request_response

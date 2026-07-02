@@ -66,7 +66,11 @@ defmodule ReqManagedAgents.Session do
 
   @doc "Return a child_spec for a live session."
   def child_spec({provider, opts}) do
-    %{id: opts[:name] || __MODULE__, start: {__MODULE__, :start_link, [provider, opts]}, restart: :transient}
+    %{
+      id: opts[:name] || __MODULE__,
+      start: {__MODULE__, :start_link, [provider, opts]},
+      restart: :transient
+    }
   end
 
   @doc "Send a follow-up user message into a running live session."
@@ -82,14 +86,29 @@ defmodule ReqManagedAgents.Session do
     case provider.open(opts, self()) do
       {:ok, conn} ->
         state = %{
-          provider: provider, mode: provider.mode(), conn: conn, opts: opts,
-          handler: Keyword.fetch!(opts, :handler), context: opts[:context],
-          caller: opts[:caller], notify: opts[:notify], meta: opts[:telemetry_metadata] || %{},
-          ref: Map.get(conn, :ref), consumer: Map.get(conn, :consumer),
-          kicked_off: false, seen: MapSet.new(), reconnect_attempts: 0,
-          events: [], turn_events: [], turns: 0, max_turns: opts[:max_turns] || 50,
-          custom_tool_uses: [], server_tool_uses: [], usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []}
+          provider: provider,
+          mode: provider.mode(),
+          conn: conn,
+          opts: opts,
+          handler: Keyword.fetch!(opts, :handler),
+          context: opts[:context],
+          caller: opts[:caller],
+          notify: opts[:notify],
+          meta: opts[:telemetry_metadata] || %{},
+          ref: Map.get(conn, :ref),
+          consumer: Map.get(conn, :consumer),
+          kicked_off: false,
+          seen: MapSet.new(),
+          reconnect_attempts: 0,
+          events: [],
+          turn_events: [],
+          turns: 0,
+          max_turns: opts[:max_turns] || 50,
+          custom_tool_uses: [],
+          server_tool_uses: [],
+          usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []}
         }
+
         {:ok, state, {:continue, if(Map.get(conn, :resume), do: :resume, else: :maybe_kickoff)}}
 
       # Surface the provider's error verbatim (e.g. {:create_session_failed, _}) — no extra wrapping.
@@ -111,7 +130,9 @@ defmodule ReqManagedAgents.Session do
   end
 
   @impl true
-  def handle_info({:managed_agents, ref, :connected}, %{ref: ref, kicked_off: false} = s), do: kickoff(s)
+  def handle_info({:managed_agents, ref, :connected}, %{ref: ref, kicked_off: false} = s),
+    do: kickoff(s)
+
   def handle_info({:managed_agents, ref, :connected}, %{ref: ref} = s), do: {:noreply, s}
 
   def handle_info({:managed_agents, ref, {:event, ev}}, %{ref: ref} = s) do
@@ -137,14 +158,23 @@ defmodule ReqManagedAgents.Session do
     {:noreply, %{s | reconnect_attempts: s.reconnect_attempts + 1}}
   end
 
-  def handle_info({:managed_agents, ref, {:error, reason}}, %{ref: ref} = s), do: stop_error(s, reason)
+  def handle_info({:managed_agents, ref, {:error, reason}}, %{ref: ref} = s),
+    do: stop_error(s, reason)
 
   def handle_info(:reconnect, s) do
     case s.provider.reconnect(s.conn, self(), s.seen) do
       {:ok, conn, pending, seen} ->
         # reconnect_attempts is NOT reset here — only a real terminal (finish/2) resets it — so a
         # connect→drop flap actually escalates the backoff instead of hammering at 500ms.
-        s = %{s | conn: conn, ref: Map.get(conn, :ref), consumer: Map.get(conn, :consumer), seen: seen, turn_events: []}
+        s = %{
+          s
+          | conn: conn,
+            ref: Map.get(conn, :ref),
+            consumer: Map.get(conn, :consumer),
+            seen: seen,
+            turn_events: []
+        }
+
         if pending == [], do: {:noreply, s}, else: redrive(s, pending)
 
       # A sync run/2 surfaces a list/reconnect failure; a live session backs off and retries.
@@ -186,7 +216,13 @@ defmodule ReqManagedAgents.Session do
     do: drive(reset_acc(%{s | turns: 0}), s.provider.user_input(text))
 
   defp reset_acc(s),
-    do: %{s | events: [], custom_tool_uses: [], server_tool_uses: [], usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []}}
+    do: %{
+      s
+      | events: [],
+        custom_tool_uses: [],
+        server_tool_uses: [],
+        usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []}
+    }
 
   defp kickoff(s), do: drive(%{s | kicked_off: true}, s.provider.kickoff_input(s.opts))
 
@@ -245,15 +281,22 @@ defmodule ReqManagedAgents.Session do
   end
 
   defp accumulate(s, %TurnResult{} = tr) do
-    %{s |
-      custom_tool_uses: s.custom_tool_uses ++ tr.custom_tool_uses,
-      server_tool_uses: s.server_tool_uses ++ tr.server_tool_uses,
-      usage: add_usage(s.usage, tr.usage)}
+    %{
+      s
+      | custom_tool_uses: s.custom_tool_uses ++ tr.custom_tool_uses,
+        server_tool_uses: s.server_tool_uses ++ tr.server_tool_uses,
+        usage: add_usage(s.usage, tr.usage)
+    }
   end
 
   defp add_usage(acc, nil), do: acc
+
   defp add_usage(acc, %Usage{} = u),
-    do: %Usage{input_tokens: acc.input_tokens + u.input_tokens, output_tokens: acc.output_tokens + u.output_tokens, raw: acc.raw ++ u.raw}
+    do: %Usage{
+      input_tokens: acc.input_tokens + u.input_tokens,
+      output_tokens: acc.output_tokens + u.output_tokens,
+      raw: acc.raw ++ u.raw
+    }
 
   # Per-turn observability + a MIM-52 regression sentinel: custom_tool_uses are unique by id by
   # construction, so a duplicate reaching here is a regression (a duplicate id in the resume makes
@@ -268,8 +311,13 @@ defmodule ReqManagedAgents.Session do
     )
 
     case ids -- Enum.uniq(ids) do
-      [] -> :ok
-      dups -> Logger.warning("duplicate tool_use id(s) #{inspect(dups)} at turn #{s.turns} — MIM-52 regression")
+      [] ->
+        :ok
+
+      dups ->
+        Logger.warning(
+          "duplicate tool_use id(s) #{inspect(dups)} at turn #{s.turns} — MIM-52 regression"
+        )
     end
   end
 
@@ -293,18 +341,29 @@ defmodule ReqManagedAgents.Session do
     drive(s, s.provider.resume_input(pending, results))
   end
 
-  defp backoff_ms(%{reconnect_attempts: n}), do: min(500 * Integer.pow(2, min(n, 7)), :timer.minutes(60))
+  defp backoff_ms(%{reconnect_attempts: n}),
+    do: min(500 * Integer.pow(2, min(n, 7)), :timer.minutes(60))
 
   defp session_result(s, tr, terminal) do
     %SessionResult{
-      terminal: terminal, stop_reason: tr.stop_reason, text: tr.text,
-      custom_tool_uses: s.custom_tool_uses, server_tool_uses: s.server_tool_uses,
-      usage: s.usage, turns: s.turns, events: s.events
+      terminal: terminal,
+      stop_reason: tr.stop_reason,
+      text: tr.text,
+      custom_tool_uses: s.custom_tool_uses,
+      server_tool_uses: s.server_tool_uses,
+      usage: s.usage,
+      turns: s.turns,
+      events: s.events
     }
   end
 
   defp finish(s, %TurnResult{} = tr) do
-    :telemetry.execute([:req_managed_agents, :session, :terminal], %{}, Map.put(s.meta, :terminal, tr.terminal))
+    :telemetry.execute(
+      [:req_managed_agents, :session, :terminal],
+      %{},
+      Map.put(s.meta, :terminal, tr.terminal)
+    )
+
     result = session_result(s, tr, tr.terminal)
     notify(s, result)
     # Real terminal reached — reset the reconnect backoff for any subsequent live activity.
@@ -330,6 +389,8 @@ defmodule ReqManagedAgents.Session do
 
   defp forward_raw(_s, _ev), do: :ok
 
-  defp notify(%{notify: pid}, payload) when is_pid(pid), do: send(pid, {:managed_agents_session, payload})
+  defp notify(%{notify: pid}, payload) when is_pid(pid),
+    do: send(pid, {:managed_agents_session, payload})
+
   defp notify(_s, _payload), do: :ok
 end
