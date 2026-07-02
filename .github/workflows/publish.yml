@@ -1,11 +1,7 @@
 name: Publish to Hex
 
 # Tag-triggered release: push a `v*` tag matching @version in mix.exs.
-#
-# Prerequisites before the first publish:
-#   - aws_event_stream published to Hex and the mix.exs dep changed from a
-#     git ref to `{:aws_event_stream, "~> 0.1"}` — Hex rejects git deps.
-#   - HEX_API_KEY repository secret (write key scoped to the package).
+# Requires the HEX_API_KEY secret (write key scoped to the package).
 
 on:
   push:
@@ -17,8 +13,6 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    env:
-      MIX_ENV: test
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -27,8 +21,11 @@ jobs:
           otp-version: "29"
       - run: mix deps.get
       - run: mix test
+        env:
+          MIX_ENV: test
       - name: Publish
+        # No MIX_ENV override: hex.publish builds docs, and ex_doc is
+        # `only: :dev` — the docs task doesn't exist outside dev.
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
-          MIX_ENV: prod
         run: mix hex.publish --yes
