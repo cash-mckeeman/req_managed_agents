@@ -97,12 +97,9 @@ jobs:
           echo "Only the allowlisted cowlib advisories are present (no upstream fix exists yet)."
       # Broken hexdocs references fail the build here, not after publish.
       - run: mix docs --warnings-as-errors
-      # Advisory until aws_event_stream is published to Hex: hex.build
-      # rejects git dependencies, so this step documents the publish blocker
-      # without failing CI. Flip to enforced once the dep is `~> 0.1`.
-      - name: hex.build (advisory — git dep on aws_event_stream blocks publish)
-        run: mix hex.build
-        continue-on-error: true
+      # Enforced: all deps are on Hex now, so the tarball must always
+      # assemble.
+      - run: mix hex.build
 
   dialyzer:
     name: dialyzer
