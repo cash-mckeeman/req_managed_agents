@@ -1,0 +1,49 @@
+name: Live canary
+
+# Runs the :live suite against the real Claude Managed Agents and Bedrock
+# AgentCore APIs. Both are beta surfaces that change under us (see MIM-52,
+# PR #17) — this workflow exists to find that drift before users do.
+#
+# Non-blocking for PRs by design: it runs on a schedule and on demand only.
+# Required repository secrets:
+#   ANTHROPIC_API_KEY
+#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION
+#   HARNESS_EXECUTION_ROLE_ARN
+
+on:
+  schedule:
+    - cron: "0 6 * * 1,4" # Mon + Thu 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MIX_ENV: test
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-quality-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            mix-quality-${{ runner.os }}-
+      - run: mix deps.get
+      - name: Run live suite against real providers
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          HARNESS_EXECUTION_ROLE_ARN: ${{ secrets.HARNESS_EXECUTION_ROLE_ARN }}
+        run: mix test --only live
