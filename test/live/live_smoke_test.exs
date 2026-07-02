@@ -24,7 +24,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     {:ok, %{"id" => agent_id}} =
       ReqManagedAgents.Client.create_agent(client, %{
         name: "req-managed-agents-live-smoke",
-        model: "claude-opus-4-8",
+        model: System.get_env("CMA_LIVE_MODEL", "claude-haiku-4-5"),
         system: "When asked to echo, call the echo tool with the user's text.",
         tools: [
           %{
@@ -69,7 +69,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     {:ok, %{"id" => agent_id}} =
       ReqManagedAgents.Client.create_agent(client, %{
         name: "rma-v02-rtc",
-        model: "claude-opus-4-8",
+        model: System.get_env("CMA_LIVE_MODEL", "claude-haiku-4-5"),
         system: "When asked to echo, call the echo tool with the user's text.",
         tools: [
           %{
@@ -155,7 +155,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     {:ok, %{"id" => agent_id}} =
       ReqManagedAgents.Client.create_agent(client, %{
         name: "rma-v02-file",
-        model: "claude-opus-4-8",
+        model: System.get_env("CMA_LIVE_MODEL", "claude-haiku-4-5"),
         system: "x",
         tools: [%{type: "agent_toolset_20260401"}]
       })
@@ -178,14 +178,16 @@ defmodule ReqManagedAgents.LiveSmokeTest do
 
     role =
       System.get_env("HARNESS_EXECUTION_ROLE_ARN") ||
-        "arn:aws:iam::819613816573:role/AgentCoreHarnessExecRole-p2b"
+        "arn:aws:iam::819613816573:role/rma-ci-harness-exec"
 
     spec = %{
       system_prompt: "You are a terse assistant. Reply in a few words.",
       tools: [],
       terminal_tool: nil,
       model_config: %{
-        "bedrockModelConfig" => %{"modelId" => "us.anthropic.claude-sonnet-4-5-20250929-v1:0"}
+        "bedrockModelConfig" => %{
+          "modelId" => System.get_env("BEDROCK_LIVE_MODEL_ID", "nvidia.nemotron-super-3-120b")
+        }
       }
     }
 
