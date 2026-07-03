@@ -317,7 +317,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
         model: System.get_env("CMA_LIVE_MODEL", "claude-haiku-4-5"),
         system:
           "When asked to save a note, write EXACTLY the requested text to the requested " <>
-            "filename in the working directory, then stop.",
+            "absolute path, then stop.",
         tools: [%{type: "agent_toolset_20260401"}]
       })
 
@@ -326,7 +326,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
                client: client,
                agent_id: agent_id,
                environment_id: env_id,
-               prompt: "Save a note: write the text 'artifact-canary-ok' to note.txt",
+               prompt: "Save a note: write the text 'artifact-canary-ok' to /workspace/note.txt",
                handler: Handler,
                timeout: 180_000
              )
@@ -334,8 +334,36 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     assert is_binary(session_id)
     store = {ClaudeFiles, ClaudeFiles.store(client, session_id)}
 
-    {:ok, artifacts} = Artifacts.list(store)
-    IO.inspect(artifacts, label: "LIVE CMA artifacts")
+    # Sandbox-write → file-object registration timing is undocumented; the first
+    # canary run showed [] immediately after end_turn. Poll with backoff before
+    # asserting, and on exhaustion dump rich diagnostics (unscoped list + event
+    # tail) so a failure identifies WHICH assumption broke: registration timing
+    # vs registration conditions.
+    artifacts =
+      Enum.reduce_while(1..12, [], fn attempt, _acc ->
+        {:ok, artifacts} = Artifacts.list(store)
+
+        if Enum.any?(artifacts, &(&1.name == "note.txt")) do
+          {:halt, artifacts}
+        else
+          Process.sleep(5_000)
+          if attempt == 12, do: {:halt, artifacts}, else: {:cont, artifacts}
+        end
+      end)
+
+    IO.inspect(artifacts, label: "LIVE CMA artifacts (after poll)")
+
+    unless Enum.any?(artifacts, &(&1.name == "note.txt")) do
+      {:ok, unscoped} = ReqManagedAgents.Client.list_files(client)
+      IO.inspect(unscoped["data"], label: "DIAG unscoped /v1/files", limit: 30)
+
+      {:ok, events} = ReqManagedAgents.Client.list_all_events(client, session_id, %{})
+
+      events
+      |> Enum.take(-15)
+      |> IO.inspect(label: "DIAG session event tail", limit: :infinity, printable_limit: 2000)
+    end
+
     assert Enum.any?(artifacts, &(&1.name == "note.txt"))
 
     assert {:ok, bytes} = Artifacts.fetch(store, "note.txt")
