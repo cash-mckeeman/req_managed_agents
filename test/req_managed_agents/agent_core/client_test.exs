@@ -250,4 +250,56 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
 
     assert :counters.get(counter, 1) == 1
   end
+
+  test "create_harness passes environment + environmentVariables opaquely (absent when unset)",
+       %{bypass: bypass, client: client} do
+    env = %{
+      "agentCoreRuntimeEnvironment" => %{
+        "filesystemConfigurations" => [%{"sessionStorage" => %{"mountPath" => "/mnt/data"}}]
+      }
+    }
+
+    Bypass.expect_once(bypass, "POST", "/harnesses", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      decoded = Jason.decode!(body)
+      assert decoded["environment"] == env
+      assert decoded["environmentVariables"] == %{"LOG_LEVEL" => "debug"}
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(
+        200,
+        ~s({"harness":{"arn":"arn:aws:bedrock-agentcore:us-east-1:1:harness/e","harnessId":"e-1","status":"CREATING"}})
+      )
+    end)
+
+    spec = %{
+      name: "e",
+      execution_role_arn: "arn:aws:iam::123456789012:role/AgentCoreRole",
+      system_prompt: "x",
+      tools: [],
+      model: %{"bedrockModelConfig" => %{"modelId" => "m"}},
+      environment: env,
+      environment_variables: %{"LOG_LEVEL" => "debug"}
+    }
+
+    assert {:ok, _} = Client.create_harness(client, spec)
+
+    Bypass.expect_once(bypass, "POST", "/harnesses", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      decoded = Jason.decode!(body)
+      refute Map.has_key?(decoded, "environment")
+      refute Map.has_key?(decoded, "environmentVariables")
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(
+        200,
+        ~s({"harness":{"arn":"arn:aws:bedrock-agentcore:us-east-1:1:harness/e","harnessId":"e-2","status":"CREATING"}})
+      )
+    end)
+
+    bare = Map.drop(spec, [:environment, :environment_variables])
+    assert {:ok, _} = Client.create_harness(client, bare)
+  end
 end

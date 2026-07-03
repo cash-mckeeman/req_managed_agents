@@ -64,6 +64,8 @@ defmodule ReqManagedAgents.AgentCore.Client do
         "tools" => spec.tools
       }
       |> maybe_put("timeoutSeconds", Map.get(spec, :timeout_seconds))
+      |> maybe_put("environment", Map.get(spec, :environment))
+      |> maybe_put("environmentVariables", Map.get(spec, :environment_variables))
 
     span(c, :post, "/harnesses", :create_harness, fn -> post_json(c, "/harnesses", body) end)
   end
