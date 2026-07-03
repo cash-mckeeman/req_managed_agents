@@ -218,8 +218,9 @@ Declare mounts via the opaque `environment` field on the provision spec.
 > only files the agent writes under **`/mnt/session/outputs/`** become session
 > artifacts — scoped to the session, downloadable, retrievable via `ClaudeFiles`.
 > Files written elsewhere (e.g. `/workspace`) leave non-downloadable, unscoped
-> residue. Direct your agent's deliverables there in its system prompt
-> (e.g. *"write all output files under /mnt/session/outputs/"*).
+> residue. The path is exposed as `ClaudeFiles.outputs_dir/0` (+
+> `output_path/1` for a named file) — interpolate it into your agent's system
+> prompt instead of copying the string.
 
 ## Using with Jido
 

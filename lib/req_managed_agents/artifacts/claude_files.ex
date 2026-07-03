@@ -20,6 +20,23 @@ defmodule ReqManagedAgents.Artifacts.ClaudeFiles do
 
   alias ReqManagedAgents.Artifact
 
+  # The load-bearing sandbox convention (established live, 2026-07-03): only
+  # this directory's files become session artifacts. Keep it in ONE place.
+  @outputs_dir "/mnt/session/outputs"
+
+  @doc """
+  The sandbox directory whose files become session artifacts (session-scoped,
+  downloadable — what `list/2` and `fetch/3` see). Interpolate this into the
+  agent's system prompt rather than copying the string — files written
+  anywhere else in the sandbox are not retrievable:
+
+      system: "Write all output files under #{@outputs_dir}/."
+  """
+  def outputs_dir, do: @outputs_dir
+
+  @doc "Absolute sandbox path for a named deliverable: `\"#{@outputs_dir}/\" <> name`."
+  def output_path(name) when is_binary(name), do: @outputs_dir <> "/" <> name
+
   @doc "Build a store term. `client_mod` is injectable for tests (defaults to the live client)."
   def store(client, session_id, opts \\ []) do
     %{

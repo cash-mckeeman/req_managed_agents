@@ -118,4 +118,14 @@ defmodule ReqManagedAgents.Artifacts.ClaudeFilesTest do
       assert {:error, {:unexpected_response, %{}}} = Artifacts.fetch(store, "report.md")
     end
   end
+
+  describe "the outputs-dir convention constant" do
+    test "outputs_dir/0 is the single source of truth for the sandbox outputs path" do
+      assert ClaudeFiles.outputs_dir() == "/mnt/session/outputs"
+    end
+
+    test "output_path/1 builds the absolute deliverable path" do
+      assert ClaudeFiles.output_path("report.md") == "/mnt/session/outputs/report.md"
+    end
+  end
 end
