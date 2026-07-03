@@ -162,4 +162,76 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
                create_fun: fn _ -> {:error, {:http_error, 500, %{}}} end
              )
   end
+
+  describe "tags" do
+    test "tag + resolve round-trip via the registry entry" do
+      store = fresh_store()
+      # Use body.name as ID so spec1 and spec2 produce distinct environment_ids
+      # (their digest-names differ: base <> "_" <> digest8).
+      create_fun = fn body -> {:ok, %{"id" => body.name, "name" => body.name}} end
+
+      {:ok, %{digest: digest} = handle} =
+        Provisioner.ensure_environment(:c, @spec1,
+          name: "d",
+          store: store,
+          create_fun: create_fun
+        )
+
+      assert :ok = Provisioner.tag("d", "prod", handle, store: store)
+      assert {:ok, resolved} = Provisioner.resolve("d:prod", store: store)
+      assert resolved.environment_id == handle.environment_id
+
+      # Retag to another digest moves the pointer.
+      {:ok, h2} =
+        Provisioner.ensure_environment(:c, @spec2,
+          name: "d",
+          store: store,
+          create_fun: create_fun
+        )
+
+      assert :ok = Provisioner.tag("d", "prod", h2, store: store)
+      assert {:ok, r2} = Provisioner.resolve("d:prod", store: store)
+      assert r2.environment_id == h2.environment_id
+      refute r2.environment_id == handle.environment_id
+
+      # The registry holds both mappings' history? No — one tag, latest digest only.
+      assert {:error, :unknown_tag} = Provisioner.resolve("d:staging", store: store)
+      # digest is a plain 8-hex string
+      assert digest =~ ~r/^[0-9a-f]{8}$/
+    end
+
+    test "resolve of a tag whose digest lost its provision entry is :untracked_digest" do
+      store = {mod, sopts} = fresh_store()
+      create_fun = fn body -> {:ok, %{"id" => "env_x", "name" => body.name}} end
+
+      {:ok, handle} =
+        Provisioner.ensure_environment(:c, @spec1,
+          name: "d",
+          store: store,
+          create_fun: create_fun
+        )
+
+      :ok = Provisioner.tag("d", "prod", handle, store: store)
+      # Simulate a pruned/evicted provision entry with a surviving tag.
+      :ok = mod.delete_value(sopts, handle)
+
+      assert {:error, {:untracked_digest, _}} = Provisioner.resolve("d:prod", store: store)
+    end
+
+    test "resolve raises ArgumentError on a ref without a colon" do
+      store = fresh_store()
+
+      assert_raise ArgumentError, ~r/base:tag/, fn ->
+        Provisioner.resolve("nocolon", store: store)
+      end
+    end
+
+    test "tag accepts a raw digest string too" do
+      store = fresh_store()
+      assert :ok = Provisioner.tag("d", "prod", "abcd1234", store: store)
+      # No provision entry for it -> untracked on resolve.
+      assert {:error, {:untracked_digest, "abcd1234"}} =
+               Provisioner.resolve("d:prod", store: store)
+    end
+  end
 end

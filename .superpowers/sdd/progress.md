@@ -47,7 +47,8 @@ P1 QA-CHECKPOINT A: complete (QA doc, 17/17, 0 code bugs; real cross-OS-process 
 P1 PR 1 (#47): MERGED (main 9c9d95b7). Suite 248 + strict credo green on new base.
 USER DIRECTIVE: stack P3 on P2 (user away) — PR 2 opens without merge-pause; PR 3 bases on PR 2 branch; v0.4.0 tag waits for user.
 ── Phase 2 ──
-- [ ] P2 Task 3: ensure_environment
+- [x] P2 Task 3: ensure_environment
 - [ ] P2 Task 4: tags
 - [ ] P2 Task 5: prune
 - [ ] P2 QA-B + PR 2 (no pause)
+P2 Task 3: complete (commit 80a639be after two fix rounds: [1] controller caught wrong-direction deviation — 3-branch recovery taxonomy restored, brief test bug fixed test-side; [2] review Important atomize_handle totality → normalize_or_miss with rebuild-on-malformed + regression; rename Minor folded). Review Approved; digest-vs-storekey semantics verified. Suite 255, strict credo clean. Minor recorded: facade delegates around Provisioner (layering consistency) — final-review candidate.
