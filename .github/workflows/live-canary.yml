@@ -4,11 +4,16 @@ name: Live canary
 # AgentCore APIs. Both are beta surfaces that change under us (see MIM-52,
 # PR #17) — this workflow exists to find that drift before users do.
 #
-# Non-blocking for PRs by design: it runs on a schedule and on demand only.
-# Required repository secrets:
-#   ANTHROPIC_API_KEY
-#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION
-#   HARNESS_EXECUTION_ROLE_ARN
+# Cheap by default: CMA lanes run claude-haiku-4-5, the Bedrock lane runs
+# nvidia.nemotron-super-3-120b (override with CMA_LIVE_MODEL /
+# BEDROCK_LIVE_MODEL_ID).
+#
+# AWS auth is GitHub OIDC — no long-lived AWS keys. The workflow assumes
+# rma-ci-github, whose trust policy only accepts runs from this repo's main
+# branch. Setup reference: docs/aws-ci-setup.md.
+#
+# Required repository secret:  ANTHROPIC_API_KEY
+# Required repository vars:    AWS_ROLE_ARN, HARNESS_EXECUTION_ROLE_ARN
 
 on:
   schedule:
@@ -17,6 +22,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write # OIDC token for AWS role assumption
 
 env:
   MIX_ENV: test
@@ -24,6 +30,9 @@ env:
 jobs:
   live:
     runs-on: ubuntu-latest
+    # ANTHROPIC_API_KEY / HEX_API_KEY live in the `prod` environment —
+    # jobs only see environment secrets when they declare the environment.
+    environment: prod
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -38,12 +47,13 @@ jobs:
           key: mix-quality-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: |
             mix-quality-${{ runner.os }}-
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
       - run: mix deps.get
       - name: Run live suite against real providers
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          HARNESS_EXECUTION_ROLE_ARN: ${{ secrets.HARNESS_EXECUTION_ROLE_ARN }}
+          HARNESS_EXECUTION_ROLE_ARN: ${{ vars.HARNESS_EXECUTION_ROLE_ARN }}
         run: mix test --only live

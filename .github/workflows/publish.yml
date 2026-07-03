@@ -13,6 +13,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # ANTHROPIC_API_KEY / HEX_API_KEY live in the `prod` environment —
+    # jobs only see environment secrets when they declare the environment.
+    environment: prod
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
