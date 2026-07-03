@@ -314,6 +314,9 @@ Result: 206 passed, 6 excluded
 ### FINDING 1 — test_gap: `handle_event/3` streaming path not in unit suite
 
 **Classification:** `test_gap`
+**Disposition:** resolved — unit test added (`session_info_test.exs`: "streaming: 4-arity
+handle_tool_call and 3-arity handle_event receive SessionInfo per event", via the new
+`InfoStreaming` fake).
 
 `test/req_managed_agents/session_info_test.exs` exercises `FourArityHandler.handle_event/3`
 only via the `InfoRR` (request_response) fake. In request_response mode, events are batch-forwarded
@@ -326,6 +329,9 @@ this manual test (Steps 1.2 and 2 streaming variant).
 ### FINDING 2 — test_gap: reconnect with changed `session_id` not in unit suite
 
 **Classification:** `test_gap`
+**Disposition:** resolved — unit test added (`session_info_test.exs`: "reconnect: handler
+sees the NEW conn's session_id after a stream drop", via the new `ReconnectNewSid` fake;
+also asserts the notify `SessionResult.session_id` carries the post-reconnect id).
 
 `test/req_managed_agents/session_reconnect_test.exs` uses `ReconnectingStreaming` whose `reconnect/3`
 returns `%{conn | ref: make_ref(), subscriber: subscriber}` — same `session_id` (nil) throughout.
@@ -335,6 +341,8 @@ sub-case is not tested. Confirmed correct behavior in Step 5.
 ### FINDING 3 — test_gap: `Code.ensure_loaded?` reload path not in unit suite
 
 **Classification:** `test_gap`
+**Disposition:** accepted — manual coverage only (this doc, Step 3b); a runtime beam-purge
+in the unit suite was judged too fragile to be worth maintaining.
 
 `test/req_managed_agents/tools_test.exs` and `session_info_test.exs` both exercise `exports?/3`
 only when the module is already loaded (normal compile-time load). The case where `Code.ensure_loaded?`
