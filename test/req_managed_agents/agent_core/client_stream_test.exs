@@ -125,4 +125,45 @@ defmodule ReqManagedAgents.AgentCore.ClientStreamTest do
     assert {:error, {:http_error, 429, body}} = Client.invoke_harness(client, inv())
     assert body =~ "Too many requests"
   end
+
+  test "on_event fires once per decoded event, in order, before invoke returns", %{
+    bypass: bypass,
+    client: client
+  } do
+    frames = [
+      frame(~s({"messageStart":{"role":"assistant"}})),
+      frame(~s({"contentBlockDelta":{"contentBlockIndex":0,"delta":{"text":"hello"}}})),
+      frame(~s({"messageStop":{"stopReason":"end_turn"}}))
+    ]
+
+    Bypass.expect_once(bypass, "POST", "/harnesses/invoke", fn conn ->
+      chunked(conn, frames, 10)
+    end)
+
+    test_pid = self()
+
+    assert {:ok, events} =
+             Client.invoke_harness(
+               client,
+               inv(on_event: fn ev -> send(test_pid, {:ev, ev}) end)
+             )
+
+    # All on_event sends happened before invoke_harness returned -> already in our mailbox.
+    received =
+      for _ <- 1..3 do
+        assert_received {:ev, ev}
+        ev
+      end
+
+    assert received == events
+    refute_received {:ev, _}
+  end
+
+  test "on_event is optional — omitting it changes nothing", %{bypass: bypass, client: client} do
+    Bypass.expect_once(bypass, "POST", "/harnesses/invoke", fn conn ->
+      chunked(conn, [frame(~s({"messageStop":{"stopReason":"end_turn"}}))], 10)
+    end)
+
+    assert {:ok, [%{"messageStop" => _}]} = Client.invoke_harness(client, inv())
+  end
 end
