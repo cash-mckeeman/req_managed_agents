@@ -144,6 +144,7 @@ Three runnable, heavily-commented examples ship with the package:
   AgentCore wire client, Converse decoding, and Harness provisioning.
 - `ReqManagedAgents.Event` / `.Consolidate` — pure builders, classification, reconnect helpers.
 - `ReqManagedAgents.ToolSchema` — custom-tool schema construction.
+- `ReqManagedAgents.Artifacts` / `.Artifact` / `.SessionInfo` — name-keyed session-artifact verbs over provider-native stores + the runtime identity handed to handlers.
 - `ReqManagedAgents.SessionResult` / `.TurnResult` / `.Usage` / `.ToolUse` / `.ToolResult` — the
   canonical result vocabulary shared by every provider.
 
@@ -177,6 +178,41 @@ take precedence. `ReqManagedAgents.OpenTelemetry` bridges these to OTel GenAI sp
 ```
 
 The Files API uses its own beta header (`files-api-2025-04-14`); `download_file/2` returns raw bytes.
+
+## Artifacts — retrieve what your agent built
+
+An agent writes deliverables into its session sandbox; the file's **name** is the only
+identity the model ever sees. `ReqManagedAgents.Artifacts` gives one vocabulary over
+provider-native session storage — `list`, `fetch`, `put`, `delete`, name-keyed and
+session-scoped:
+
+```elixir
+alias ReqManagedAgents.Artifacts
+alias ReqManagedAgents.Artifacts.{ClaudeFiles, AgentCoreSessionStorage}
+
+# Claude Managed Agents — the Files API, scoped to one session
+store = {ClaudeFiles, ClaudeFiles.store(client, session_id)}
+{:ok, artifacts} = Artifacts.list(store)             # [%ReqManagedAgents.Artifact{name: "report.md", …}]
+{:ok, bytes}     = Artifacts.fetch(store, "report.md")
+
+# Bedrock AgentCore — a sessionStorage mount (no VPC), command-backed
+store =
+  {AgentCoreSessionStorage,
+   AgentCoreSessionStorage.store(ac_client, harness_arn, runtime_session_id, "/mnt/data")}
+{:ok, bytes} = Artifacts.fetch(store, "report.md")
+```
+
+Handlers receive a `%ReqManagedAgents.SessionInfo{}` (optional 4th argument to
+`handle_tool_call/4`) carrying the `session_id`, so a tool can build the store for its
+OWN session and fetch what the agent just wrote.
+
+The parity story, honestly: Anthropic offers a provider-hosted blob store (zero infra;
+bytes on Anthropic); AWS mounts **your** storage into the microVM (`sessionStorage`
+needs nothing; EFS/S3 mounts need VPC mode) plus direct shell access
+(`AgentCore.Client.invoke_agent_runtime_command/2` — no model loop, no token cost).
+The `sessionStorage` store handles report-scale artifacts (bytes transit the command
+stream as Base64); an S3-mount store (host side = plain S3) is designed for 0.4.
+Declare mounts via the opaque `environment` field on the provision spec.
 
 ## Using with Jido
 
