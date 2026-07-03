@@ -166,4 +166,48 @@ defmodule ReqManagedAgents.AgentCore.ClientStreamTest do
 
     assert {:ok, [%{"messageStop" => _}]} = Client.invoke_harness(client, inv())
   end
+
+  test "budget knobs serialize as timeoutSeconds/maxIterations/maxTokens", %{
+    bypass: bypass,
+    client: client
+  } do
+    test_pid = self()
+
+    Bypass.expect_once(bypass, "POST", "/harnesses/invoke", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(test_pid, {:body, Jason.decode!(body)})
+      chunked(conn, [frame(~s({"messageStop":{"stopReason":"end_turn"}}))], 10)
+    end)
+
+    assert {:ok, _} =
+             Client.invoke_harness(
+               client,
+               inv(timeout_seconds: 900, max_iterations: 40, max_tokens: 4096)
+             )
+
+    assert_received {:body, body}
+    assert body["timeoutSeconds"] == 900
+    assert body["maxIterations"] == 40
+    assert body["maxTokens"] == 4096
+  end
+
+  test "budget knobs are absent from the body by default (harness defaults rule)", %{
+    bypass: bypass,
+    client: client
+  } do
+    test_pid = self()
+
+    Bypass.expect_once(bypass, "POST", "/harnesses/invoke", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(test_pid, {:body, Jason.decode!(body)})
+      chunked(conn, [frame(~s({"messageStop":{"stopReason":"end_turn"}}))], 10)
+    end)
+
+    assert {:ok, _} = Client.invoke_harness(client, inv())
+
+    assert_received {:body, body}
+    refute Map.has_key?(body, "timeoutSeconds")
+    refute Map.has_key?(body, "maxIterations")
+    refute Map.has_key?(body, "maxTokens")
+  end
 end
