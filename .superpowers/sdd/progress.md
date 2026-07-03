@@ -19,8 +19,8 @@ Phase order: [P1] 1,2,QA-A,PR1 → [P2] 3,6,7,QA-B,PR2 → [P3] 4,5,8,9,[10 cont
 - [x] P3 Task 9: docs
 - [x] P3 Task 10: IAM (controller)
 - [x] P3 Task 11: canary legs
-- [ ] P3 QA-CHECKPOINT C
-- [ ] P3 Task 12: QA sweep + v0.3.0 + PR 3
+- [x] P3 QA-CHECKPOINT C
+- [x] P3 Task 12: QA sweep + v0.3.0 + PR 3
 
 ## Log
 P1 Task 1: complete (commit 6965d25d after controller rebase — implementer parented on main by mistake, repaired via jj rebase; review clean — Spec ✅ / Approved). Suite 203. Minor recorded (brief-level): SessionInfo JSON test does not assert provider key round-trip — candidate at PR-1 final review.
@@ -38,3 +38,6 @@ P3 Task 5: complete (commit 2b89f029, preflight PASS, review clean — Spec ✅ 
 P3 Task 8: complete (commits 0b3b4e94 + fix 25b13631; review Approved with Important [base_path misclassified as library-controlled] → fixed: store/5 raises on quotes, comment corrected, temp-race doc note, raise test; fix diff controller-verified). Suite 235, strict credo clean. Minor recorded: chunk_every char-list round-trip (allocation nit) — final-review candidate.
 P3 Task 9: complete (commit 67e7cbc7, preflight PASS, review clean — Spec ✅ / Approved, verbatim fidelity, handler moduledoc supersede judged correct; aws-ci-setup IAM line landed). Gates clean, suite 235.
 P3 Task 11: complete (commit 188e9230, preflight PASS; 3 legs, tags + after-teardowns verified by controller; alias-order deviation cosmetic). 9 live excluded, suite 235, strict credo clean. Live behavior validated post-merge by canary.
+P3 QA-CHECKPOINT C: complete (QA doc 8771d364, 25/26 + 1 finding wave; F1 code_bug [validate/1 accepted "."/".."] fixed + F2/F3/F4 test gaps closed in fc20abdf, controller-verified guard). Suite 238, strict credo clean.
+P3 Task 12: complete (release stamp v0.3.0 + full gate: format/test(238)/credo-strict/docs/dialyzer/hex.build all green, tarball 0.3.0 ships artifacts dir).
+ALL PHASE 3 TASKS COMPLETE — PR 3 open, pause for merge; then canary + tag with user coordination.
