@@ -65,7 +65,7 @@ defmodule ReqManagedAgents do
     if function_exported?(provider, :teardown, 2) do
       case provider.teardown(handle, opts) do
         :ok ->
-          ReqManagedAgents.Provisioner.evict(handle)
+          ReqManagedAgents.Provisioner.evict(handle, opts)
           :ok
 
         error ->

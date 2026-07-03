@@ -133,4 +133,19 @@ defmodule ReqManagedAgents.ProvisioningTest do
     {:ok, handle2} = ReqManagedAgents.Provisioner.ensure(FakeProvider, %{n: 1}, store: store)
     refute handle2 == handle
   end
+
+  test "facade teardown/3 forwards :store to evict — custom store gets no cache leak" do
+    table = :"facade_store_#{System.unique_integer([:positive])}"
+    store = {ReqManagedAgents.Provisioner.Store.ETS, table}
+
+    {:ok, handle} = ReqManagedAgents.provision(FakeProvider, %{n: 2}, store: store)
+    # Cached in the custom store: same handle back.
+    {:ok, ^handle} = ReqManagedAgents.provision(FakeProvider, %{n: 2}, store: store)
+
+    assert :ok = ReqManagedAgents.teardown(FakeProvider, handle, store: store)
+
+    # Evicted from the CUSTOM store: a subsequent provision re-provisions.
+    {:ok, handle2} = ReqManagedAgents.provision(FakeProvider, %{n: 2}, store: store)
+    refute handle2 == handle
+  end
 end
