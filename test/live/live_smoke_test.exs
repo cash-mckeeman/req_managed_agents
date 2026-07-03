@@ -353,43 +353,57 @@ defmodule ReqManagedAgents.LiveSmokeTest do
 
     IO.inspect(artifacts, label: "LIVE CMA artifacts (after poll)")
 
-    unless Enum.any?(artifacts, &(&1.name == "note.txt")) do
-      IO.inspect(session_id, label: "DIAG session_id passed to scope_id")
+    # DIAG round 3 — established so far: scope_id=sesn_… is the right KIND
+    # (sthr_… → 400 invalid prefix) but returns 0 while the file exists
+    # unscoped. Hypothesis under test: files associate to the session scope
+    # only once the session is archived/ended.
+    artifacts =
+      if Enum.any?(artifacts, &(&1.name == "note.txt")) do
+        artifacts
+      else
+        {:ok, unscoped} = ReqManagedAgents.Client.list_files(client)
 
-      {:ok, unscoped} = ReqManagedAgents.Client.list_files(client)
-      IO.inspect(Enum.take(unscoped["data"] || [], 3), label: "DIAG unscoped /v1/files head")
+        newest_note =
+          (unscoped["data"] || [])
+          |> Enum.filter(&(&1["filename"] == "note.txt"))
+          |> Enum.sort_by(& &1["created_at"], :desc)
+          |> List.first()
 
-      {:ok, events} = ReqManagedAgents.Client.list_all_events(client, session_id, %{})
+        if newest_note do
+          IO.inspect(
+            ReqManagedAgents.Client.download_file(client, newest_note["id"]),
+            label:
+              "DIAG download of unscoped note.txt (downloadable=#{newest_note["downloadable"]})",
+            printable_limit: 200
+          )
+        end
 
-      thread_ids =
-        events
-        |> Enum.map(& &1["session_thread_id"])
-        |> Enum.filter(&is_binary/1)
-        |> Enum.uniq()
-
-      IO.inspect(thread_ids, label: "DIAG thread ids seen in events")
-
-      for scope <- [session_id | thread_ids] do
-        {:ok, scoped} = ReqManagedAgents.Client.list_files(client, params: %{scope_id: scope})
-        IO.inspect({scope, length(scoped["data"] || [])}, label: "DIAG scoped list count")
-      end
-
-      newest_note =
-        (unscoped["data"] || [])
-        |> Enum.filter(&(&1["filename"] == "note.txt"))
-        |> Enum.sort_by(& &1["created_at"], :desc)
-        |> List.first()
-
-      if newest_note do
-        IO.inspect(
-          ReqManagedAgents.Client.download_file(client, newest_note["id"]),
-          label:
-            "DIAG download of unscoped-matched note.txt (downloadable=#{newest_note["downloadable"]})",
-          printable_limit: 200
+        IO.inspect(ReqManagedAgents.Client.get_session(client, session_id),
+          label: "DIAG get_session before archive",
+          printable_limit: 2000
         )
-      end
-    end
 
+        IO.inspect(ReqManagedAgents.Client.archive_session(client, session_id),
+          label: "DIAG archive_session"
+        )
+
+        Enum.reduce_while(1..12, [], fn attempt, _acc ->
+          {:ok, %{"data" => files}} =
+            ReqManagedAgents.Client.list_files(client, params: %{scope_id: session_id})
+
+          arts = Enum.map(files, &%ReqManagedAgents.Artifact{name: &1["filename"], raw: &1})
+
+          if Enum.any?(arts, &(&1.name == "note.txt")) do
+            IO.puts("DIAG scoped list populated AFTER ARCHIVE (attempt #{attempt})")
+            {:halt, arts}
+          else
+            Process.sleep(5_000)
+            if attempt == 12, do: {:halt, arts}, else: {:cont, arts}
+          end
+        end)
+      end
+
+    IO.inspect(artifacts, label: "LIVE CMA artifacts (final)")
     assert Enum.any?(artifacts, &(&1.name == "note.txt"))
 
     assert {:ok, bytes} = Artifacts.fetch(store, "note.txt")
