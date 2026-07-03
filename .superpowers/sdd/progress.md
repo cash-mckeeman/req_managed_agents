@@ -44,3 +44,10 @@ ALL PHASE 3 TASKS COMPLETE — PR 3 open, pause for merge; then canary + tag wit
 P1 Task 1: complete (commit cd4dd457 + facade fix 64cbb5b3; review Approved with Important [facade teardown store leak] → fixed, controller-verified; behavior freeze held, include-beats-exclude ExUnit lesson recorded). Suite 241, strict credo clean.
 P1 Task 2: complete (commit 0130ba4d, preflight PASS, review Approved after reviewer-reconnect; delete_value normalize-both-sides verified — the trap; Elixir.File disambiguation clean). Suite 246, strict credo clean. Minors recorded (brief-inherited, accepted): repeat corrupt-warning on stateless reads; tmp leak on write! raise; no fsync (documented workstation posture); Contract cross-file coupling (test/support refactor candidate); atomicity test single-reader.
 P1 QA-CHECKPOINT A: complete (QA doc, 17/17, 0 code bugs; real cross-OS-process reuse PROVEN via two mix run invocations; doc_issue [evict JSON-encodable note] → controller fix pre-PR; test_gap [cross-process invariant manual-only] ACCEPTED). Stack rebased onto main post-#45/#46 (outputs convention + @outputs_dir constant); ledger conflict resolved by controller.
+P1 PR 1 (#47): MERGED (main 9c9d95b7). Suite 248 + strict credo green on new base.
+USER DIRECTIVE: stack P3 on P2 (user away) — PR 2 opens without merge-pause; PR 3 bases on PR 2 branch; v0.4.0 tag waits for user.
+── Phase 2 ──
+- [ ] P2 Task 3: ensure_environment
+- [ ] P2 Task 4: tags
+- [ ] P2 Task 5: prune
+- [ ] P2 QA-B + PR 2 (no pause)
