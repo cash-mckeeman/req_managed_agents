@@ -234,4 +234,139 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
                Provisioner.resolve("d:prod", store: store)
     end
   end
+
+  describe "prune" do
+    defp env(name, created_at, archived \\ nil),
+      do: %{
+        "id" => "id_" <> name,
+        "name" => name,
+        "created_at" => created_at,
+        "archived_at" => archived
+      }
+
+    test "keeps newest N + tagged; archives the rest; :keep is mandatory" do
+      store = fresh_store()
+      # Tag digest "cccccccc" as prod.
+      :ok = Provisioner.tag("d", "prod", "cccccccc", store: store)
+
+      envs = [
+        env("d_aaaaaaaa", "2026-07-01T00:00:00Z"),
+        env("d_bbbbbbbb", "2026-07-02T00:00:00Z"),
+        env("d_cccccccc", "2026-07-03T00:00:00Z"),
+        env("d_dddddddd", "2026-07-04T00:00:00Z"),
+        env("other_eeeeeeee", "2026-07-04T00:00:00Z"),
+        env("d_ffffffff", "2026-06-01T00:00:00Z", "2026-06-02T00:00:00Z")
+      ]
+
+      test_pid = self()
+
+      archive_fun = fn id ->
+        send(test_pid, {:archived, id})
+        {:ok, %{"id" => id}}
+      end
+
+      list_fun = fn -> {:ok, %{"data" => envs}} end
+
+      assert {:error, :keep_required} =
+               Provisioner.prune_environments(:c, "d", store: store, list_fun: list_fun)
+
+      assert {:ok, %{archived: archived, kept: kept}} =
+               Provisioner.prune_environments(:c, "d",
+                 keep: 1,
+                 store: store,
+                 list_fun: list_fun,
+                 archive_fun: archive_fun
+               )
+
+      # newest 1 = d_dddddddd; tagged = d_cccccccc; other_* untouched; already-archived skipped.
+      assert Enum.sort(kept) == ["d_cccccccc", "d_dddddddd"]
+      assert Enum.sort(archived) == ["d_aaaaaaaa", "d_bbbbbbbb"]
+      assert_received {:archived, "id_d_aaaaaaaa"}
+      assert_received {:archived, "id_d_bbbbbbbb"}
+      refute_received {:archived, "id_other_eeeeeeee"}
+    end
+
+    test "partial failure reports progress" do
+      store = fresh_store()
+
+      envs = [
+        env("d_11111111", "2026-07-01T00:00:00Z"),
+        env("d_22222222", "2026-07-02T00:00:00Z"),
+        env("d_33333333", "2026-07-03T00:00:00Z")
+      ]
+
+      archive_fun = fn
+        "id_d_11111111" -> {:ok, %{}}
+        "id_d_22222222" -> {:error, {:http_error, 500, %{}}}
+      end
+
+      assert {:error, {:partial, ["d_11111111"], {"d_22222222", {:http_error, 500, %{}}}}} =
+               Provisioner.prune_environments(:c, "d",
+                 keep: 1,
+                 store: store,
+                 list_fun: fn -> {:ok, %{"data" => envs}} end,
+                 archive_fun: archive_fun
+               )
+    end
+
+    test "a longer base sharing the name prefix is never a candidate" do
+      store = fresh_store()
+      test_pid = self()
+
+      envs = [
+        env("data_aaaaaaaa", "2026-07-01T00:00:00Z"),
+        env("data_bbbbbbbb", "2026-07-02T00:00:00Z"),
+        env("data_analysis_abc12345", "2026-07-03T00:00:00Z")
+      ]
+
+      archive_fun = fn id ->
+        send(test_pid, {:archived, id})
+        {:ok, %{}}
+      end
+
+      assert {:ok, %{archived: archived, kept: kept}} =
+               Provisioner.prune_environments(:c, "data",
+                 keep: 1,
+                 store: store,
+                 list_fun: fn -> {:ok, %{"data" => envs}} end,
+                 archive_fun: archive_fun
+               )
+
+      refute "data_analysis_abc12345" in archived
+      refute "data_analysis_abc12345" in kept
+      assert kept == ["data_bbbbbbbb"]
+      assert archived == ["data_aaaaaaaa"]
+      refute_received {:archived, "id_data_analysis_abc12345"}
+    end
+
+    test "a name with a repeated base prefix is not a version and is untouched" do
+      store = fresh_store()
+      test_pid = self()
+
+      envs = [
+        env("d_d_aaaaaaaa", "2026-07-05T00:00:00Z"),
+        env("d_bbbbbbbb", "2026-07-02T00:00:00Z"),
+        env("d_cccccccc", "2026-07-03T00:00:00Z")
+      ]
+
+      archive_fun = fn id ->
+        send(test_pid, {:archived, id})
+        {:ok, %{}}
+      end
+
+      assert {:ok, %{archived: archived, kept: kept}} =
+               Provisioner.prune_environments(:c, "d",
+                 keep: 1,
+                 store: store,
+                 list_fun: fn -> {:ok, %{"data" => envs}} end,
+                 archive_fun: archive_fun
+               )
+
+      refute "d_d_aaaaaaaa" in archived
+      refute "d_d_aaaaaaaa" in kept
+      assert kept == ["d_cccccccc"]
+      assert archived == ["d_bbbbbbbb"]
+      refute_received {:archived, "id_d_d_aaaaaaaa"}
+    end
+  end
 end

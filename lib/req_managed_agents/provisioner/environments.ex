@@ -106,6 +106,88 @@ defmodule ReqManagedAgents.Provisioner.Environments do
     end
   end
 
+  @doc """
+  Explicit image GC: archives `<base>_*` environment versions beyond the newest
+  `keep:` (REQUIRED — there is no default for a permanent operation), never
+  touching tagged digests or already-archived versions. Returns
+  `{:ok, %{archived: names, kept: names}}` or
+  `{:error, {:partial, archived_names, {failed_name, reason}}}`.
+  """
+  def prune_environments(client, base, opts \\ []) do
+    case opts[:keep] do
+      keep when is_integer(keep) and keep > 0 -> do_prune(client, base, keep, opts)
+      _ -> {:error, :keep_required}
+    end
+  end
+
+  defp do_prune(client, base, keep, opts) do
+    {smod, sopts} = opts[:store] || @default_store
+
+    list_fun =
+      opts[:list_fun] || fn -> ReqManagedAgents.Client.list_environments(client, %{}) end
+
+    archive_fun =
+      opts[:archive_fun] || fn id -> ReqManagedAgents.Client.archive_environment(client, id) end
+
+    tagged =
+      case store_get(smod, sopts, "tags:" <> base) do
+        {:ok, reg} -> reg |> Map.values() |> MapSet.new()
+        _ -> MapSet.new()
+      end
+
+    with {:ok, %{"data" => envs}} <- list_fun.() do
+      {kept_by_count, candidates} = envs |> live_versions(base) |> Enum.split(keep)
+      {tagged_keeps, to_archive} = Enum.split_with(candidates, &tagged?(&1, tagged, base))
+      kept = Enum.map(kept_by_count ++ tagged_keeps, & &1["name"])
+      # Archive oldest-first so a partial failure preserves the newest history.
+      archive_all(Enum.reverse(to_archive), archive_fun, smod, sopts, base, kept, [])
+    end
+  end
+
+  # Live (non-archived) versions of THIS base, newest first. Membership is
+  # strict — the prefix strips and the remaining suffix is exactly a digest8 —
+  # so base "data" can never sweep in base "data_analysis"'s versions.
+  defp live_versions(envs, base) do
+    prefix = base <> "_"
+
+    envs
+    |> Enum.filter(fn e ->
+      suffix = String.replace_prefix(e["name"], prefix, "")
+
+      suffix != e["name"] and String.match?(suffix, ~r/^[0-9a-f]{8}$/) and
+        is_nil(e["archived_at"])
+    end)
+    |> Enum.sort_by(& &1["created_at"], :desc)
+  end
+
+  defp tagged?(e, tagged, base),
+    do: MapSet.member?(tagged, String.replace_prefix(e["name"], base <> "_", ""))
+
+  defp archive_all([], _fun, _smod, _sopts, _base, kept, archived),
+    do: {:ok, %{archived: Enum.reverse(archived), kept: kept}}
+
+  defp archive_all([e | rest], fun, smod, sopts, base, kept, archived) do
+    case fun.(e["id"]) do
+      {:ok, _} ->
+        digest = String.replace_prefix(e["name"], base <> "_", "")
+        smod.delete(sopts, "digest:" <> base <> ":" <> digest)
+
+        # Values may be stored JSON-normalized (Store.File) or as-written (ETS); delete both shapes.
+        smod.delete_value(sopts, %{environment_id: e["id"], name: e["name"], digest: digest})
+
+        smod.delete_value(sopts, %{
+          "environment_id" => e["id"],
+          "name" => e["name"],
+          "digest" => digest
+        })
+
+        archive_all(rest, fun, smod, sopts, base, kept, [e["name"] | archived])
+
+      {:error, reason} ->
+        {:error, {:partial, Enum.reverse(archived), {e["name"], reason}}}
+    end
+  end
+
   defp find_handle(smod, sopts, base, digest) do
     # Provision entries are keyed by full spec hash; the handle carries the
     # digest — scan is not possible via the 4-callback store, so handles are
