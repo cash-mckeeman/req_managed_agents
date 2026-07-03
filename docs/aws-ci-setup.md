@@ -10,14 +10,53 @@ exist in GitHub**.
 | Resource | Name / ARN | Purpose |
 |---|---|---|
 | OIDC provider | `arn:aws:iam::819613816573:oidc-provider/token.actions.githubusercontent.com` | Lets GitHub Actions mint short-lived AWS credentials (account-wide; shared by any future CI role) |
-| IAM role | `arn:aws:iam::819613816573:role/rma-ci-github` | Assumed by the canary workflow. Trust is scoped to `repo:cash-mckeeman/req_managed_agents:ref:refs/heads/main` — no other repo, branch, or fork can assume it |
+| IAM role | `arn:aws:iam::819613816573:role/rma-ci-github` | Assumed by the canary workflow. Trust accepts two `sub` claims: `repo:cash-mckeeman/req_managed_agents:environment:prod` (what jobs declaring `environment: prod` present) and `repo:...:ref:refs/heads/main` — no other repo, branch, or fork can assume it |
 | IAM role | `arn:aws:iam::819613816573:role/rma-ci-harness-exec` | Passed to AgentCore as the harness execution role for CI-provisioned harnesses |
 
-`rma-ci-github` permissions: the five harness lifecycle actions
-(`CreateHarness` / `GetHarness` / `ListHarnesses` / `DeleteHarness` /
-`InvokeHarness`) on `arn:aws:bedrock-agentcore:us-east-1:819613816573:*`, plus
-`iam:PassRole` of `rma-ci-harness-exec` restricted to
-`bedrock-agentcore.amazonaws.com`.
+`rma-ci-github` permissions (policy `rma-ci-harness-lifecycle`, validated
+live by canary run 9 on 2026-07-03 — see the permission ladder below):
+
+- Create/Get/Delete/Invoke in **both namings** (`*AgentRuntime*` and
+  `*Harness*` action names) + endpoint lifecycle, on `runtime/*`,
+  `runtime/*/runtime-endpoint/*`, `harness/*`, `harness/*/harness-endpoint/*`
+- `ListAgentRuntimes` / `ListHarnesses` on the account+region
+- `CreateWorkloadIdentity` / `GetWorkloadIdentity` / `DeleteWorkloadIdentity`
+  on `workload-identity-directory/default(/workload-identity/*)`
+- `CreateMemory` / `GetMemory` / `DeleteMemory` / `ListMemories` on
+  `memory/harness_rma_live*` (name-scoped)
+- `iam:PassRole` of `rma-ci-harness-exec` restricted to
+  `bedrock-agentcore.amazonaws.com`
+
+### The permission ladder (empirical, GA Harness API, 2026-07-03)
+
+A single `CreateHarness` call authorizes **five things against the caller**,
+discovered one 403 at a time (none of this was in AWS docs at the time):
+
+1. `bedrock-agentcore:CreateAgentRuntime` on `runtime/*` — the legacy action
+   name is checked first
+2. `bedrock-agentcore:CreateHarness` on `harness/*` — then the GA name
+   (dual authorization during the rename transition)
+3. `bedrock-agentcore:CreateAgentRuntimeEndpoint` — the implicit DEFAULT
+   endpoint, created async with the **caller's** identity (surfaces as
+   `CREATE_FAILED` + `failureReason`, not a synchronous 403)
+4. `bedrock-agentcore:CreateWorkloadIdentity` on
+   `workload-identity-directory/default/workload-identity/*` — same async
+   caller-identity pattern
+5. `bedrock-agentcore:CreateMemory` on `memory/harness_<name>_*` — the
+   harness's built-in memory, ditto (error cites
+   `Service: GenesisMemoryControlPlane`)
+
+Also learned:
+
+- **OIDC `sub` claim changes with environments**: a job that declares
+  `environment: prod` presents `repo:<org>/<repo>:environment:prod`, not
+  `ref:refs/heads/main`. Trust policies pinned to the branch fail with
+  "Not authorized to perform sts:AssumeRoleWithWebIdentity".
+- **Deterministic harness names collide with slow deletes**: the provisioner
+  derives the harness name from a spec hash, and `DeleteHarness` takes
+  minutes (memory teardown). A retry while the old harness is `DELETING`
+  fails with `:harness_name_conflict`. Wait for the delete to finish (or
+  teach `Provisioner.ensure` to wait on `DELETING`).
 
 `rma-ci-harness-exec` permissions: a copy of the live-proven
 `AgentCoreHarnessExecRole-p2b` policy with model invocation narrowed to
@@ -46,12 +85,13 @@ special handling is needed.
 
 ## Known coarseness / follow-ups
 
-- The harness-lifecycle statement is region+account scoped, not name-scoped:
-  AgentCore harness ARN naming wasn't confirmed at setup time. Once a CI run
-  has produced real harness ARNs (visible in CloudTrail), tighten `Resource`
-  to the observed `rma_live*` pattern.
-- `ListHarnesses` generally requires a broad resource anyway (it's a list
-  call); keep it split into its own statement if the rest gets name-scoped.
+- Runtime/harness resources are type-scoped (`runtime/*`, `harness/*`), not
+  name-scoped; memory IS name-scoped (`memory/harness_rma_live*`). Harness
+  ARNs embed the name, so `harness/rma_live*` should work if further
+  tightening is wanted.
+- `Provisioner.ensure` treats a `DELETING` harness with the same name as a
+  conflict rather than waiting — worth a Linear issue if the canary flakes
+  on back-to-back runs.
 
 ## Teardown
 
