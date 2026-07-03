@@ -37,6 +37,8 @@ defmodule Demo.Handler do
   def handle_tool_call("lookup_customer", %{"email" => email}, _ctx),
     do: {:ok, "Customer #{email}: Pro plan, active, last invoice $49.00 on 2026-05-01."}
 
+  # Fires live on BOTH backends as events stream in mid-turn (observational,
+  # at-least-once; `SessionResult.events` is the canonical record).
   @impl true
   def handle_event(_ev, _ctx), do: :ok
 end
