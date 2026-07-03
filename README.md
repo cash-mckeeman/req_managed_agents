@@ -214,6 +214,13 @@ The `sessionStorage` store handles report-scale artifacts (bytes transit the com
 stream as Base64); an S3-mount store (host side = plain S3) is designed for 0.4.
 Declare mounts via the opaque `environment` field on the provision spec.
 
+> **Known limitation (Claude Managed Agents beta, verified live 2026-07-03):** the
+> provider does not yet associate sandbox-*written* files to session scope, and marks
+> them non-downloadable — so `ClaudeFiles` `list`/`fetch` of agent-written files waits on
+> the provider, while `put` (upload + attach inputs) works today. `ClaudeFiles` is
+> wire-complete per the platform docs and lights up without a library change.
+> `AgentCoreSessionStorage` is the fully working artifacts store meanwhile.
+
 ## Using with Jido
 
 The core is Jido-free. To use Jido Actions as tools, implement `handle_tool_call/3` by delegating
