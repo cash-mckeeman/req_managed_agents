@@ -13,7 +13,7 @@ Phase order: [P1] 1,2,QA-A,PR1 → [P2] 3,6,7,QA-B,PR2 → [P3] 4,5,8,9,[10 cont
 - [x] P2 Task 6: Artifacts behaviour/facade
 - [x] P2 Task 7: ClaudeFiles store
 - [ ] P2 QA-CHECKPOINT B + PR 2 (pause for merge)
-- [ ] P3 Task 4: environment spec fields
+- [x] P3 Task 4: environment spec fields
 - [ ] P3 Task 5: CommandResult + command API
 - [ ] P3 Task 8: AgentCoreSessionStorage store
 - [ ] P3 Task 9: docs
@@ -32,3 +32,5 @@ P2 Task 6: complete (commit 1543c628, preflight PASS, review clean — Spec ✅ 
 P2 Task 7: complete (commit e69c52a6, preflight PASS, review clean — Spec ✅ / Approved; ISO-sort correctness + :not_found propagation + honest put-no-rollback verified; ⚠️ upload_file map shape resolved by controller — live canary uses same shape). Suite 219.
 P2 PR 2 (#38): MERGED (main 867d456c) — after one CI credo --strict escape (single-<- with+else → case, controller-fixed, squashed; per-task gates now include credo --strict). Workspace rebased; suite 221 + strict credo green on new base.
 ── Phase 3 ──
+P3 Task 4: complete (commit 4f27d754, preflight PASS, review clean — Spec ✅ / Approved, zero findings; opaque pass-through + hash-distinction proof verified). Suite 223, strict credo clean.
+P3 Task 10 (IAM, controller): AWS half APPLIED with user approval — inline policy rma-ci-harness-lifecycle on rma-ci-github gained InvokeAgentRuntimeCommand + InvokeHarnessCommand (verified read-back, 18 actions). docs/aws-ci-setup.md line rides Task 9.
