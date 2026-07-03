@@ -7,7 +7,7 @@ Phase order: [P1] 1,2,QA-A,PR1 → [P2] 3,6,7,QA-B,PR2 → [P3] 4,5,8,9,[10 cont
 
 ## Tasks
 - [x] P1 Task 1: SessionInfo struct + SessionResult.session_id
-- [ ] P1 Task 2: threading (Handler/Tools/Session/Bedrock conn)
+- [x] P1 Task 2: threading (Handler/Tools/Session/Bedrock conn)
 - [ ] P1 QA-CHECKPOINT A + PR 1 (pause for merge)
 - [ ] P2 Task 3: files primitives
 - [ ] P2 Task 6: Artifacts behaviour/facade
@@ -24,3 +24,4 @@ Phase order: [P1] 1,2,QA-A,PR1 → [P2] 3,6,7,QA-B,PR2 → [P3] 4,5,8,9,[10 cont
 
 ## Log
 P1 Task 1: complete (commit 6965d25d after controller rebase — implementer parented on main by mistake, repaired via jj rebase; review clean — Spec ✅ / Approved). Suite 203. Minor recorded (brief-level): SessionInfo JSON test does not assert provider key round-trip — candidate at PR-1 final review.
+P1 Task 2: complete (commit a460d088 after nil→%SessionInfo{} test fix squash; review: Needs fixes → fix verified ✅ → Approved; all 13 spec items, dispatch/reconnect/backward-compat verified). Suite 206.
