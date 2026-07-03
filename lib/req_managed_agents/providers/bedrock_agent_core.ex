@@ -3,7 +3,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   `ReqManagedAgents.Provider` for the Bedrock AgentCore backend — `:request_response` mode.
   Each turn is one `InvokeHarness` call; resume re-sends the assistant `toolUse` + user
   `toolResult` delta (the harness does not persist the uncommitted tool-use turn). Composes
-  the existing `AgentCore.{Client, Converse}` modules.
+  the existing `AgentCore.{Client, Converse}` modules. Decoded events are additionally
+  delivered live to the session as `{:provider_event, ev}` messages while a turn streams.
   """
   @behaviour ReqManagedAgents.Provider
 
@@ -119,13 +120,18 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   end
 
   @impl true
-  def open(opts, _subscriber) do
+  def open(opts, subscriber) do
     {:ok,
      %{
        harness_arn: Keyword.fetch!(opts, :harness_arn),
        sid: Keyword.fetch!(opts, :runtime_session_id),
        model: opts[:model],
        retries: opts[:invoke_retries] || 2,
+       subscriber: subscriber,
+       idle_timeout: opts[:idle_timeout],
+       timeout_seconds: opts[:timeout_seconds],
+       max_iterations: opts[:max_iterations],
+       max_tokens: opts[:max_tokens],
        # Build the real client (which reads AWS creds) ONLY when no invoke_fun is injected.
        invoke_fun: opts[:invoke_fun] || default_invoke_fun(opts)
      }}
@@ -135,6 +141,14 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     client = opts[:client] || Client.new()
     fn inv -> Client.invoke_harness(client, inv) end
   end
+
+  # Live event delivery: each decoded event is sent to the Session (the open/2
+  # subscriber) as it arrives. Ordering vs the final {:turn, result} is guaranteed
+  # because both originate in the same poll-turn task (FIFO per sender).
+  defp live_forward(subscriber) when is_pid(subscriber),
+    do: fn ev -> send(subscriber, {:provider_event, ev}) end
+
+  defp live_forward(_), do: nil
 
   @impl true
   def kickoff_input(opts),
@@ -163,7 +177,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       harness_arn: conn.harness_arn,
       runtime_session_id: conn.sid,
       messages: messages,
-      model: conn.model
+      model: conn.model,
+      idle_timeout: conn.idle_timeout,
+      timeout_seconds: conn.timeout_seconds,
+      max_iterations: conn.max_iterations,
+      max_tokens: conn.max_tokens,
+      on_event: live_forward(conn.subscriber)
     }
 
     case conn.invoke_fun.(inv) do

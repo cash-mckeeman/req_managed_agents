@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.Providers.BedrockAgentCore, as: P
-  alias ReqManagedAgents.{TurnResult, ToolUse}
+  alias ReqManagedAgents.{ToolUse, TurnResult}
 
   defp start_block(idx, id, name),
     do: %{
@@ -328,5 +328,78 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
                  ],
                self()
              )
+  end
+
+  # ── MIM-50 long-run threading ─────────────────────────────────────────────────
+
+  describe "MIM-50 long-run threading" do
+    test "open/2 captures the subscriber and threads budgets; invoke carries on_event + knobs" do
+      test_pid = self()
+
+      invoke_fun = fn inv ->
+        send(test_pid, {:inv, inv})
+        # Exercise the on_event the provider built: it must message the subscriber.
+        inv.on_event.(%{"messageStart" => %{"role" => "assistant"}})
+        {:ok, [%{"messageStop" => %{"stopReason" => "end_turn"}}]}
+      end
+
+      {:ok, conn} =
+        P.open(
+          [
+            harness_arn: "arn:aws:bedrock-agentcore:us-east-1:1:harness/ba",
+            runtime_session_id: String.duplicate("s", 33),
+            invoke_fun: invoke_fun,
+            idle_timeout: 120_000,
+            timeout_seconds: 900,
+            max_iterations: 40,
+            max_tokens: 4096
+          ],
+          self()
+        )
+
+      assert {:ok, _events, _conn} =
+               P.poll_turn(conn, [
+                 %{"role" => "user", "content" => [%{"text" => "hi"}]}
+               ])
+
+      assert_received {:inv, inv}
+      assert inv.idle_timeout == 120_000
+      assert inv.timeout_seconds == 900
+      assert inv.max_iterations == 40
+      assert inv.max_tokens == 4096
+      assert is_function(inv.on_event, 1)
+      # The on_event we invoked above delivered a live event to the subscriber (us).
+      assert_received {:provider_event, %{"messageStart" => %{"role" => "assistant"}}}
+    end
+
+    test "budgets default to nil when not provided" do
+      test_pid = self()
+
+      invoke_fun = fn inv ->
+        send(test_pid, {:inv, inv})
+        {:ok, [%{"messageStop" => %{"stopReason" => "end_turn"}}]}
+      end
+
+      {:ok, conn} =
+        P.open(
+          [
+            harness_arn: "arn:aws:bedrock-agentcore:us-east-1:1:harness/ba",
+            runtime_session_id: String.duplicate("s", 33),
+            invoke_fun: invoke_fun
+          ],
+          self()
+        )
+
+      assert {:ok, _events, _conn} =
+               P.poll_turn(conn, [
+                 %{"role" => "user", "content" => [%{"text" => "hi"}]}
+               ])
+
+      assert_received {:inv, inv}
+      assert inv.idle_timeout == nil
+      assert inv.timeout_seconds == nil
+      assert inv.max_iterations == nil
+      assert inv.max_tokens == nil
+    end
   end
 end

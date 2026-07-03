@@ -207,6 +207,12 @@ defmodule ReqManagedAgents.LiveSmokeTest do
             "live-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),
           prompt: "Reply with exactly: hello there",
           handler: Handler,
+          # MIM-50: exercise the per-invocation server budgets + a generous idle guard
+          # against a real harness — validates the overrides are accepted on the wire
+          # and that the 300s idle floor holds during server-side tool execution.
+          idle_timeout: 300_000,
+          timeout_seconds: 900,
+          max_iterations: 40,
           timeout: 300_000
         )
 

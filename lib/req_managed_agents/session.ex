@@ -21,12 +21,18 @@ defmodule ReqManagedAgents.Session do
 
   Required opts: `:handler` (a `ReqManagedAgents.Handler` module or a 3-arity fn). Optional:
   `:context`, `:prompt`, `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`.
+  For long AgentCore runs set `:timeout` (the end-to-end run budget, default 600_000 ms)
+  at or above the server-side budget — a `run/2` timeout returns `{:error, :timeout}` but does
+  NOT cancel the in-flight invoke; the harness keeps executing (and billing) server-side up to
+  its own `timeoutSeconds`. Transport liveness is guarded per turn by `:idle_timeout` and total
+  cost by the `:timeout_seconds`/`:max_iterations`/`:max_tokens` per-invocation overrides
+  (Bedrock AgentCore only).
   Provider-specific opts (e.g. `:agent_id`/`:environment_id`, `:harness_arn`/`:runtime_session_id`,
   `:session_id` to resume) are forwarded to the provider's `open/2`.
   """
   use GenServer
   require Logger
-  alias ReqManagedAgents.{Provider, Tools, Usage, SessionResult, TurnResult}
+  alias ReqManagedAgents.{Provider, SessionResult, Tools, TurnResult, Usage}
 
   @max_tool_concurrency 8
 
@@ -102,6 +108,7 @@ defmodule ReqManagedAgents.Session do
           reconnect_attempts: 0,
           events: [],
           turn_events: [],
+          live_forwarded: 0,
           turns: 0,
           max_turns: opts[:max_turns] || 50,
           custom_tool_uses: [],
@@ -188,9 +195,28 @@ defmodule ReqManagedAgents.Session do
     end
   end
 
+  # Live event from a request_response provider mid-turn (e.g. BedrockAgentCore
+  # streaming): forward to the handler and telemetry NOW; the {:turn, …} that
+  # follows (FIFO from the same poll-turn task) then skips batch forwarding.
+  # Handler delivery is at-least-once across retried attempts — the canonical
+  # exactly-once record is TurnResult/SessionResult.events.
+  def handle_info({:provider_event, ev}, s) do
+    forward_raw(s, ev)
+
+    :telemetry.execute(
+      [:req_managed_agents, :stream, :event],
+      %{},
+      Map.merge(s.meta, %{type: envelope_type(ev)})
+    )
+
+    {:noreply, %{s | live_forwarded: s.live_forwarded + 1}}
+  end
+
   def handle_info({:turn, {:ok, events, conn}}, s) do
-    Enum.each(events, &forward_raw(s, &1))
-    handle_turn(%{s | conn: conn}, events)
+    # Batch forwarding only when nothing was live-forwarded this turn (a live
+    # provider already delivered each event as it arrived).
+    if s.live_forwarded == 0, do: Enum.each(events, &forward_raw(s, &1))
+    handle_turn(%{s | conn: conn, live_forwarded: 0}, events)
   end
 
   def handle_info({:turn, {:error, reason}}, s), do: stop_error(s, reason)
@@ -381,6 +407,10 @@ defmodule ReqManagedAgents.Session do
 
   defp reply(s, {:error, _}), do: {:stop, :normal, s}
   defp reply(s, {:ok, _}), do: {:noreply, s}
+
+  # A Converse-envelope event is a single-key map (%{"messageStop" => …}).
+  defp envelope_type(%{} = ev), do: ev |> Map.keys() |> List.first()
+  defp envelope_type(_), do: nil
 
   defp forward_raw(%{handler: h, context: ctx}, ev) when is_atom(h) and h != nil do
     if function_exported?(h, :handle_event, 2), do: h.handle_event(ev, ctx)

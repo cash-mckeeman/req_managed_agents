@@ -8,8 +8,13 @@ defmodule ReqManagedAgents.AgentCore.Client do
   Infra-agnostic: it knows AgentCore's model-config surface, nothing about what
   sits behind a `liteLlmModelConfig.apiBase`. Build with `new/1`; pass as the
   first arg to every call. Transport is injectable via `:req_options` for tests.
+
+  The invoke data plane streams incrementally: `receive_timeout` on this struct governs
+  control-plane calls only, while `invoke_harness/2` uses the per-invoke `:idle_timeout`
+  (default 300_000 ms) as an inter-chunk liveness guard — a healthy turn may run
+  arbitrarily long; only silence fails it.
   """
-  alias ReqManagedAgents.AgentCore.{SigV4, EventStream}
+  alias ReqManagedAgents.AgentCore.{EventStream, SigV4}
 
   # AgentCore has two endpoints that BOTH sign with service name "bedrock-agentcore":
   #   - control plane (CreateHarness/GetHarness/DeleteHarness, credential providers)
@@ -19,6 +24,8 @@ defmodule ReqManagedAgents.AgentCore.Client do
   @default_control_base "https://bedrock-agentcore-control.us-east-1.amazonaws.com"
   @max_retries 2
   @default_receive_timeout 600_000
+  # Inter-chunk idle timeout for the streaming data plane (spec: MIM-50 design §3).
+  @default_idle_timeout 300_000
 
   # credentials (secret key + session token) must never appear in inspect
   # output — see the equivalent guard on ReqManagedAgents.Client.
@@ -108,6 +115,9 @@ defmodule ReqManagedAgents.AgentCore.Client do
         %{"messages" => messages}
         |> maybe_put("model", inv[:model])
         |> maybe_put("systemPrompt", system_prompt_blocks(inv[:system_prompt]))
+        |> maybe_put("timeoutSeconds", inv[:timeout_seconds])
+        |> maybe_put("maxIterations", inv[:max_iterations])
+        |> maybe_put("maxTokens", inv[:max_tokens])
 
       qs_params =
         [{"harnessArn", arn}] ++
@@ -133,13 +143,15 @@ defmodule ReqManagedAgents.AgentCore.Client do
           headers: base_headers
         )
 
-      case request(c, :post, url, headers, json, decode_body: false) do
-        {:ok, %{status: s, body: raw}} when s in 200..299 ->
-          {events, _rest} = EventStream.decode(raw)
-          {:ok, events}
+      case request(c, :post, url, headers, json,
+             receive_timeout: inv[:idle_timeout] || @default_idle_timeout,
+             into: stream_reducer(inv[:on_event])
+           ) do
+        {:ok, %{status: s} = resp} when s in 200..299 ->
+          {:ok, streamed_events(resp)}
 
-        {:ok, %{status: s, body: body}} ->
-          {:error, {:http_error, s, body}}
+        {:ok, %{status: s} = resp} ->
+          {:error, {:http_error, s, streamed_body(resp)}}
 
         {:error, reason} ->
           {:error, reason}
@@ -196,6 +208,9 @@ defmodule ReqManagedAgents.AgentCore.Client do
     ]
     |> Keyword.merge(extra)
     |> Req.new()
+    # req_options merges last and therefore overrides per-call options (including the
+    # invoke path's receive_timeout-as-idle-timeout). It is the test-injection seam
+    # and wins on conflict by design.
     |> Req.merge(c.req_options)
     |> Req.request(method: method, body: body)
   end
@@ -212,6 +227,64 @@ defmodule ReqManagedAgents.AgentCore.Client do
   defp status_for({:ok, _}), do: 200
   defp status_for({:error, {:http_error, s, _}}), do: s
   defp status_for(_), do: nil
+
+  # Streaming reducer for the invoke data plane: 2xx chunks decode incrementally
+  # (firing on_event per decoded event, in order); non-2xx chunks accumulate raw
+  # so the error tuple carries the body. With `into:` streaming, Finch applies
+  # :receive_timeout per await — it is the inter-chunk idle guard, not a body cap.
+  defp stream_reducer(on_event) do
+    fn {:data, chunk}, {req, resp} ->
+      resp =
+        if resp.status in 200..299 do
+          accumulate_ok_chunk(resp, chunk, on_event)
+        else
+          Req.Response.put_private(
+            resp,
+            :rma_error_body,
+            Map.get(resp.private, :rma_error_body, "") <> chunk
+          )
+        end
+
+      {:cont, {req, resp}}
+    end
+  end
+
+  defp accumulate_ok_chunk(resp, chunk, on_event) do
+    buffer = Map.get(resp.private, :rma_buffer, "") <> chunk
+    {events, rest} = EventStream.decode(buffer)
+    # Fire on_event in stream order (events is already ordered within the chunk).
+    if on_event, do: Enum.each(events, on_event)
+
+    # Prepend rather than append to keep accumulation O(n); streamed_events/1
+    # reverses once before returning to restore stream order.
+    acc = Enum.reverse(events, Map.get(resp.private, :rma_events, []))
+
+    resp
+    |> Req.Response.put_private(:rma_events, acc)
+    |> Req.Response.put_private(:rma_buffer, rest)
+  end
+
+  # Compat: an injected adapter/plug that buffers (never invoking the reducer)
+  # leaves resp.body as the raw binary — decode it the old way.
+  defp streamed_events(resp) do
+    case Map.get(resp.private, :rma_events) do
+      nil when is_binary(resp.body) and resp.body != "" ->
+        {events, _rest} = EventStream.decode(resp.body)
+        events
+
+      nil ->
+        []
+
+      events ->
+        # The accumulator is stored in reverse (prepend-for-O(n)); restore stream order here.
+        Enum.reverse(events)
+    end
+  end
+
+  defp streamed_body(resp) do
+    Map.get(resp.private, :rma_error_body) ||
+      if(is_binary(resp.body), do: resp.body, else: "")
+  end
 
   defp handle({:ok, %{status: s, body: body}}) when s in 200..299, do: {:ok, body}
   defp handle({:ok, %{status: s, body: body}}), do: {:error, {:http_error, s, body}}

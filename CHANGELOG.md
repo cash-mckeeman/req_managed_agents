@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Bedrock AgentCore `InvokeHarness` now streams incrementally: turns are guarded by an
+  inter-chunk `idle_timeout` (default 300s) instead of a 10-minute whole-body wall clock,
+  so long-running turns complete while dead connections fail fast.
+- `Handler.handle_event/2` fires live during AgentCore turns (previously only after the
+  turn completed) and is documented as at-least-once across retried attempts.
+- `Client.new`'s `receive_timeout` now governs control-plane calls only; the invoke data
+  plane is guarded by the per-invoke `idle_timeout` instead (callers who used
+  `receive_timeout` to cap invokes should now pass `idle_timeout`/`timeout_seconds`).
+
+### Added
+- Per-invocation AgentCore server budgets on `Session.run/2` opts: `timeout_seconds`,
+  `max_iterations`, `max_tokens` (wire: `timeoutSeconds`/`maxIterations`/`maxTokens`).
+- `idle_timeout` opt on the AgentCore invoke path.
+- `[:req_managed_agents, :stream, :event]` telemetry now also fires for AgentCore turns.
+
 ## v0.1.0 (2026-07-03)
 
 First public release. Provider-agnostic client for **managed agent runtimes**:
