@@ -27,6 +27,7 @@ defmodule ReqManagedAgents.AgentCore.SigV4 do
   """
   @spec sign_request(atom(), String.t(), iodata(), keyword()) :: [{String.t(), String.t()}]
   def sign_request(method, url, body, opts \\ []) do
+    ReqManagedAgents.AgentCore.Deps.ensure!()
     service = opts[:service] || "bedrock-agentcore"
     creds = opts[:credentials] || from_env()
     base_headers = opts[:headers] || [{"content-type", "application/json"}]

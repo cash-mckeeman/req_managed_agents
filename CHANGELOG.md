@@ -1,0 +1,56 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## v0.1.0 (2026-07-03)
+
+First public release. Provider-agnostic client for **managed agent runtimes**:
+the provider runs the agent loop; your custom tools execute locally on your
+node. The provider only ever sees each tool's name, description, input schema,
+and the text result you return.
+
+### Providers
+
+- `ReqManagedAgents.Providers.ClaudeManagedAgents` — Anthropic Claude Managed
+  Agents (public beta, `managed-agents-2026-04-01`). `:streaming` transport
+  over long-lived SSE.
+- `ReqManagedAgents.Providers.BedrockAgentCore` — AWS Bedrock AgentCore
+  Harness (GA) via ConverseStream. `:request_response` transport over
+  `application/vnd.amazon.eventstream` (decoded by
+  [`aws_event_stream`](https://hex.pm/packages/aws_event_stream)).
+  The AWS dependencies (`ex_aws_auth`, `aws_event_stream`) are **optional** —
+  Anthropic-only consumers don't pull them; AgentCore raises an actionable
+  error at first use if they're missing.
+
+### Core
+
+- `ReqManagedAgents.Provider` behaviour — one canonical turn vocabulary
+  across backends: `custom_tool_use` / `custom_tool_result` (client-executed,
+  return-of-control tools only), a three-atom terminal
+  (`:end_turn | :requires_action | :terminated`), and `%TurnResult{}` /
+  `%SessionResult{}` with per-turn token usage.
+- Two drivers over the same vocabulary: `ReqManagedAgents.run_to_completion/1` (synchronous) and `ReqManagedAgents.Session` (supervised GenServer;
+  reconnect with event consolidation/deduplication, concurrent tool
+  execution, full-history paging).
+- `ReqManagedAgents.Handler` behaviour for local tool execution;
+  `ReqManagedAgents.Provisioner` for idempotent provider-side agent/harness
+  provisioning and teardown.
+- Anthropic control plane: agents, environments, sessions, events, Files API
+  (upload / attach / download).
+- Telemetry event tree (`[:req_managed_agents, …]` — request, stream, tool,
+  session) with caller metadata injection, plus an optional OpenTelemetry
+  bridge emitting `gen_ai.*` spans.
+
+### Hardening (validated against live provider APIs)
+
+- AgentCore ConverseStream tool blocks keyed by `toolUseId` (robust to
+  index-reuse in live streams); resume turns carry both the assistant
+  `toolUse` and user `toolResult` messages, as the harness requires.
+- Exception/error stream frames surface as distinct errors rather than
+  silent terminals; bounded per-turn invoke retry on transport errors and
+  truncated streams.
+- SigV4 signing is session-token aware (works with STS/OIDC temporary
+  credentials).

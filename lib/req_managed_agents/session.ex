@@ -298,7 +298,7 @@ defmodule ReqManagedAgents.Session do
       raw: acc.raw ++ u.raw
     }
 
-  # Per-turn observability + a MIM-52 regression sentinel: custom_tool_uses are unique by id by
+  # Per-turn observability + a duplicate-id regression sentinel: custom_tool_uses are unique by id by
   # construction, so a duplicate reaching here is a regression (a duplicate id in the resume makes
   # a provider reject the next turn).
   defp emit_tool_use_telemetry(s, custom_tool_uses) do
@@ -316,7 +316,7 @@ defmodule ReqManagedAgents.Session do
 
       dups ->
         Logger.warning(
-          "duplicate tool_use id(s) #{inspect(dups)} at turn #{s.turns} — MIM-52 regression"
+          "duplicate tool_use id(s) #{inspect(dups)} at turn #{s.turns} — providers reject resumes carrying duplicates"
         )
     end
   end

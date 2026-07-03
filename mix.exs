@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.1.0"
   @source_url "https://github.com/cash-mckeeman/req_managed_agents"
 
   def project do
@@ -13,7 +13,9 @@ defmodule ReqManagedAgents.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description:
-        "Elixir client for Anthropic's Claude Managed Agents — Anthropic runs the loop, your tools run locally.",
+        "Provider-agnostic Elixir client for managed agent runtimes (Anthropic Claude " <>
+          "Managed Agents, AWS Bedrock AgentCore) — the provider runs the loop, your tools " <>
+          "run locally.",
       package: package(),
       docs: docs(),
       dialyzer: dialyzer(),
@@ -43,8 +45,11 @@ defmodule ReqManagedAgents.MixProject do
       {:plug, "~> 1.0", only: :test},
       # Bypass runs a real chunked HTTP server for the SSE Stream/Session tests.
       {:bypass, "~> 2.1", only: :test},
-      {:ex_aws_auth, "~> 1.4"},
-      {:aws_event_stream, "~> 0.1"},
+      # AWS deps are optional: only the Bedrock AgentCore provider needs them.
+      # Anthropic-only consumers skip them; AgentCore raises a clear error at
+      # first use if they're missing (ReqManagedAgents.AgentCore.Deps).
+      {:ex_aws_auth, "~> 1.4", optional: true},
+      {:aws_event_stream, "~> 0.1", optional: true},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
@@ -66,11 +71,19 @@ defmodule ReqManagedAgents.MixProject do
     [
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url},
-      maintainers: ["bizinsights"]
+      maintainers: ["cash-mckeeman"],
+      # lib/mix is excluded on purpose: the QA/smoke mix tasks are internal
+      # runbooks, not consumer surface.
+      files: ~w(lib/req_managed_agents lib/req_managed_agents.ex mix.exs README.md
+                LICENSE CHANGELOG.md)
     ]
   end
 
   defp docs do
-    [main: "readme", extras: ["README.md"]]
+    [
+      main: "readme",
+      extras: ["README.md", "CHANGELOG.md"],
+      source_ref: "v#{@version}"
+    ]
   end
 end
