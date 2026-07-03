@@ -8,13 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## v0.3.0 (2026-07-03)
 
 ### Known limitations
-- **Claude Managed Agents (beta): sandbox-written files are not yet retrievable by the
-  host.** The session-scoped Files listing (`scope_id`) does not associate files the agent
-  writes in its sandbox, and such file objects are not downloadable (verified live,
-  2026-07-03). `Artifacts.ClaudeFiles` is wire-complete per the platform docs and works
-  the moment the provider enables the flow; until then,
-  `Artifacts.AgentCoreSessionStorage` (Bedrock) is the working artifacts store, and
-  `ClaudeFiles.put` (upload + attach inputs) works today.
+- ~~Claude Managed Agents: sandbox-written files not retrievable~~ **RESOLVED same day
+  (post-release probe): it's the outputs-dir convention.** Only files the agent writes
+  under `/mnt/session/outputs/` become session artifacts (session-scoped, downloadable);
+  files written elsewhere are non-downloadable residue. `Artifacts.ClaudeFiles` works
+  as shipped — direct your agent's deliverables to `/mnt/session/outputs/` in its
+  system prompt.
 
 ### Added
 - `ReqManagedAgents.Artifacts` — one vocabulary (`list`/`fetch`/`put`/`delete`,

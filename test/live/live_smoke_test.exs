@@ -296,19 +296,13 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     end
   end
 
-  # PROVIDER-GATED (verified 2026-07-03 over three live probe rounds): today's
-  # Managed Agents beta does not associate sandbox-written files to session
-  # scope (scoped list stays empty before AND after archive; sthr_ ids are
-  # invalid scopes) and marks such file objects non-downloadable. Our wire
-  # calls are correct per the platform docs; the provider flow isn't live yet
-  # (the outcomes/deliverables path may be the intended route). `live: false`
-  # The scheduled canary excludes it via `--exclude cma_artifacts_probe`
-  # (an ExUnit `--only live` matches tag PRESENCE, so a `live: false` override
-  # would not deselect it). Probe manually with
-  #   mix test test/live/live_smoke_test.exs --only cma_artifacts_probe
-  # and drop the probe tag the day it passes.
+  # THE OUTPUTS-DIR CONVENTION (established live, 2026-07-03, four probe
+  # rounds): only files written under /mnt/session/outputs/ become session
+  # artifacts — scoped to the session (`scope_id`), `downloadable: true`, and
+  # carrying a `scope` object. Files written elsewhere (e.g. /workspace) leave
+  # non-downloadable, unscoped residue. Prompts/system prompts must direct
+  # deliverables to /mnt/session/outputs/.
   @tag timeout: 240_000
-  @tag :cma_artifacts_probe
   test "CMA artifacts: agent writes a file → Artifacts list/fetch/delete round-trip" do
     alias ReqManagedAgents.Artifacts
     alias ReqManagedAgents.Artifacts.ClaudeFiles
@@ -337,7 +331,8 @@ defmodule ReqManagedAgents.LiveSmokeTest do
                client: client,
                agent_id: agent_id,
                environment_id: env_id,
-               prompt: "Save a note: write the text 'artifact-canary-ok' to /workspace/note.txt",
+               prompt:
+                 "Save a note: write the text 'artifact-canary-ok' to /mnt/session/outputs/note.txt",
                handler: Handler,
                timeout: 180_000
              )
@@ -345,11 +340,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     assert is_binary(session_id)
     store = {ClaudeFiles, ClaudeFiles.store(client, session_id)}
 
-    # Sandbox-write → file-object registration timing is undocumented; the first
-    # canary run showed [] immediately after end_turn. Poll with backoff before
-    # asserting, and on exhaustion dump rich diagnostics (unscoped list + event
-    # tail) so a failure identifies WHICH assumption broke: registration timing
-    # vs registration conditions.
+    # Registration into the scoped list can lag the write briefly — poll.
     artifacts =
       Enum.reduce_while(1..12, [], fn attempt, _acc ->
         {:ok, artifacts} = Artifacts.list(store)
@@ -362,59 +353,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
         end
       end)
 
-    IO.inspect(artifacts, label: "LIVE CMA artifacts (after poll)")
-
-    # DIAG round 3 — established so far: scope_id=sesn_… is the right KIND
-    # (sthr_… → 400 invalid prefix) but returns 0 while the file exists
-    # unscoped. Hypothesis under test: files associate to the session scope
-    # only once the session is archived/ended.
-    artifacts =
-      if Enum.any?(artifacts, &(&1.name == "note.txt")) do
-        artifacts
-      else
-        {:ok, unscoped} = ReqManagedAgents.Client.list_files(client)
-
-        newest_note =
-          (unscoped["data"] || [])
-          |> Enum.filter(&(&1["filename"] == "note.txt"))
-          |> Enum.sort_by(& &1["created_at"], :desc)
-          |> List.first()
-
-        if newest_note do
-          IO.inspect(
-            ReqManagedAgents.Client.download_file(client, newest_note["id"]),
-            label:
-              "DIAG download of unscoped note.txt (downloadable=#{newest_note["downloadable"]})",
-            printable_limit: 200
-          )
-        end
-
-        IO.inspect(ReqManagedAgents.Client.get_session(client, session_id),
-          label: "DIAG get_session before archive",
-          printable_limit: 2000
-        )
-
-        IO.inspect(ReqManagedAgents.Client.archive_session(client, session_id),
-          label: "DIAG archive_session"
-        )
-
-        Enum.reduce_while(1..12, [], fn attempt, _acc ->
-          {:ok, %{"data" => files}} =
-            ReqManagedAgents.Client.list_files(client, params: %{scope_id: session_id})
-
-          arts = Enum.map(files, &%ReqManagedAgents.Artifact{name: &1["filename"], raw: &1})
-
-          if Enum.any?(arts, &(&1.name == "note.txt")) do
-            IO.puts("DIAG scoped list populated AFTER ARCHIVE (attempt #{attempt})")
-            {:halt, arts}
-          else
-            Process.sleep(5_000)
-            if attempt == 12, do: {:halt, arts}, else: {:cont, arts}
-          end
-        end)
-      end
-
-    IO.inspect(artifacts, label: "LIVE CMA artifacts (final)")
+    IO.inspect(artifacts, label: "LIVE CMA artifacts")
     assert Enum.any?(artifacts, &(&1.name == "note.txt"))
 
     assert {:ok, bytes} = Artifacts.fetch(store, "note.txt")
