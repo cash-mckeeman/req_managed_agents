@@ -19,6 +19,8 @@ defmodule ReqManagedAgents.AgentCore.Client do
   @default_control_base "https://bedrock-agentcore-control.us-east-1.amazonaws.com"
   @max_retries 2
   @default_receive_timeout 600_000
+  # Inter-chunk idle timeout for the streaming data plane (spec: MIM-50 design §3).
+  @default_idle_timeout 300_000
 
   # credentials (secret key + session token) must never appear in inspect
   # output — see the equivalent guard on ReqManagedAgents.Client.
@@ -108,6 +110,9 @@ defmodule ReqManagedAgents.AgentCore.Client do
         %{"messages" => messages}
         |> maybe_put("model", inv[:model])
         |> maybe_put("systemPrompt", system_prompt_blocks(inv[:system_prompt]))
+        |> maybe_put("timeoutSeconds", inv[:timeout_seconds])
+        |> maybe_put("maxIterations", inv[:max_iterations])
+        |> maybe_put("maxTokens", inv[:max_tokens])
 
       qs_params =
         [{"harnessArn", arn}] ++
@@ -133,13 +138,15 @@ defmodule ReqManagedAgents.AgentCore.Client do
           headers: base_headers
         )
 
-      case request(c, :post, url, headers, json, decode_body: false) do
-        {:ok, %{status: s, body: raw}} when s in 200..299 ->
-          {events, _rest} = EventStream.decode(raw)
-          {:ok, events}
+      case request(c, :post, url, headers, json,
+             receive_timeout: inv[:idle_timeout] || @default_idle_timeout,
+             into: stream_reducer(inv[:on_event])
+           ) do
+        {:ok, %{status: s} = resp} when s in 200..299 ->
+          {:ok, streamed_events(resp)}
 
-        {:ok, %{status: s, body: body}} ->
-          {:error, {:http_error, s, body}}
+        {:ok, %{status: s} = resp} ->
+          {:error, {:http_error, s, streamed_body(resp)}}
 
         {:error, reason} ->
           {:error, reason}
@@ -212,6 +219,57 @@ defmodule ReqManagedAgents.AgentCore.Client do
   defp status_for({:ok, _}), do: 200
   defp status_for({:error, {:http_error, s, _}}), do: s
   defp status_for(_), do: nil
+
+  # Streaming reducer for the invoke data plane: 2xx chunks decode incrementally
+  # (firing on_event per decoded event, in order); non-2xx chunks accumulate raw
+  # so the error tuple carries the body. With `into:` streaming, Finch applies
+  # :receive_timeout per await — it is the inter-chunk idle guard, not a body cap.
+  defp stream_reducer(on_event) do
+    fn {:data, chunk}, {req, resp} ->
+      resp =
+        if resp.status in 200..299 do
+          buffer = Map.get(resp.private, :rma_buffer, "") <> chunk
+          {events, rest} = EventStream.decode(buffer)
+          if on_event, do: Enum.each(events, on_event)
+
+          resp
+          |> Req.Response.put_private(
+            :rma_events,
+            Map.get(resp.private, :rma_events, []) ++ events
+          )
+          |> Req.Response.put_private(:rma_buffer, rest)
+        else
+          Req.Response.put_private(
+            resp,
+            :rma_error_body,
+            Map.get(resp.private, :rma_error_body, "") <> chunk
+          )
+        end
+
+      {:cont, {req, resp}}
+    end
+  end
+
+  # Compat: an injected adapter/plug that buffers (never invoking the reducer)
+  # leaves resp.body as the raw binary — decode it the old way.
+  defp streamed_events(resp) do
+    case Map.get(resp.private, :rma_events) do
+      nil when is_binary(resp.body) and resp.body != "" ->
+        {events, _rest} = EventStream.decode(resp.body)
+        events
+
+      nil ->
+        []
+
+      events ->
+        events
+    end
+  end
+
+  defp streamed_body(resp) do
+    Map.get(resp.private, :rma_error_body) ||
+      if(is_binary(resp.body), do: resp.body, else: "")
+  end
 
   defp handle({:ok, %{status: s, body: body}}) when s in 200..299, do: {:ok, body}
   defp handle({:ok, %{status: s, body: body}}), do: {:error, {:http_error, s, body}}
