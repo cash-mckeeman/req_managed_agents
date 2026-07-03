@@ -34,7 +34,11 @@ defmodule ReqManagedAgents.Provisioner do
     end
   end
 
-  @doc "Drop any cache entry whose value is `handle` (called after teardown)."
+  @doc """
+  Drop any cache entry whose value is `handle` (called after teardown). With a
+  persistent store (e.g. `Store.File`) the handle must be JSON-encodable —
+  same constraint as `ensure/3`'s store writes; non-encodable values raise.
+  """
   @spec evict(Provider.handle(), keyword()) :: :ok
   def evict(handle, opts \\ []) do
     {mod, sopts} = opts[:store] || @default_store
