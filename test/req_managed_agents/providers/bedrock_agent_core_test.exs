@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.Providers.BedrockAgentCore, as: P
-  alias ReqManagedAgents.{TurnResult, ToolUse}
+  alias ReqManagedAgents.{ToolUse, TurnResult}
 
   defp start_block(idx, id, name),
     do: %{

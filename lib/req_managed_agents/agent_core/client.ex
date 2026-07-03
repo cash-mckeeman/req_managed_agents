@@ -14,7 +14,7 @@ defmodule ReqManagedAgents.AgentCore.Client do
   (default 300_000 ms) as an inter-chunk liveness guard — a healthy turn may run
   arbitrarily long; only silence fails it.
   """
-  alias ReqManagedAgents.AgentCore.{SigV4, EventStream}
+  alias ReqManagedAgents.AgentCore.{EventStream, SigV4}
 
   # AgentCore has two endpoints that BOTH sign with service name "bedrock-agentcore":
   #   - control plane (CreateHarness/GetHarness/DeleteHarness, credential providers)
@@ -233,16 +233,7 @@ defmodule ReqManagedAgents.AgentCore.Client do
     fn {:data, chunk}, {req, resp} ->
       resp =
         if resp.status in 200..299 do
-          buffer = Map.get(resp.private, :rma_buffer, "") <> chunk
-          {events, rest} = EventStream.decode(buffer)
-          if on_event, do: Enum.each(events, on_event)
-
-          resp
-          |> Req.Response.put_private(
-            :rma_events,
-            Map.get(resp.private, :rma_events, []) ++ events
-          )
-          |> Req.Response.put_private(:rma_buffer, rest)
+          accumulate_ok_chunk(resp, chunk, on_event)
         else
           Req.Response.put_private(
             resp,
@@ -253,6 +244,16 @@ defmodule ReqManagedAgents.AgentCore.Client do
 
       {:cont, {req, resp}}
     end
+  end
+
+  defp accumulate_ok_chunk(resp, chunk, on_event) do
+    buffer = Map.get(resp.private, :rma_buffer, "") <> chunk
+    {events, rest} = EventStream.decode(buffer)
+    if on_event, do: Enum.each(events, on_event)
+
+    resp
+    |> Req.Response.put_private(:rma_events, Map.get(resp.private, :rma_events, []) ++ events)
+    |> Req.Response.put_private(:rma_buffer, rest)
   end
 
   # Compat: an injected adapter/plug that buffers (never invoking the reducer)

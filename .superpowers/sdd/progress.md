@@ -10,7 +10,7 @@ Plan: docs/superpowers/plans/2026-07-02-agentcore-long-run-posture.md
 - [x] Task 3: budget knobs on the wire
 - [x] Task 4: provider threading
 - [x] Task 5: Session live delivery + skip-batch
-- [ ] Task 6: docs + CHANGELOG
+- [x] Task 6: docs + CHANGELOG
 - [ ] Task 7: QA sweep + canary extension
 
 ## Log
@@ -19,3 +19,4 @@ Task 2: complete (commit f0efb82d, review clean — Spec ✅ / Approved, verbati
 Task 3: complete (commit 7f3f086a, review clean — Spec ✅ / Approved, verbatim tests, no lib changes). Suite 195. (Reviewers note the ledger updates lag one commit — administrative artifact of controller bookkeeping, expected.)
 Task 4: complete (commit 5111c81d, review clean — Spec ✅ / Approved). Suite 197. Minor recorded (brief-level): second test name "…and on_event still targets the subscriber" overstates its body (only budgets-nil is asserted there) — candidate rename at final review.
 Task 5: complete (commit f3a45ec6 after alias-trim squash, review clean — Spec ✅ / Approved; FIFO exactly-once verified, clause order checked). Suite 200. Minor recorded: envelope_type/1 silent on empty/multi-key maps (unreachable today) — candidate comment note at final review.
+Task 6: complete (commit 6df4aec0, review clean — Spec ✅ / Approved; ⚠️ Task-4 moduledoc line resolved by controller from Task 4 review). Docs gate clean, suite 200. Minors recorded: Session moduledoc "total cost" phrasing; :idle_timeout default not restated in Session moduledoc — candidates at final review.

@@ -30,7 +30,7 @@ defmodule ReqManagedAgents.Session do
   """
   use GenServer
   require Logger
-  alias ReqManagedAgents.{Provider, Tools, Usage, SessionResult, TurnResult}
+  alias ReqManagedAgents.{Provider, SessionResult, Tools, TurnResult, Usage}
 
   @max_tool_concurrency 8
 
