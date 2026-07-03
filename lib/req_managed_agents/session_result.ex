@@ -3,6 +3,7 @@ defmodule ReqManagedAgents.SessionResult do
   @derive Jason.Encoder
   defstruct terminal: :terminated,
             stop_reason: nil,
+            session_id: nil,
             text: "",
             custom_tool_uses: [],
             server_tool_uses: [],
@@ -13,6 +14,7 @@ defmodule ReqManagedAgents.SessionResult do
   @type t :: %__MODULE__{
           terminal: ReqManagedAgents.Provider.terminal(),
           stop_reason: String.t() | map() | nil,
+          session_id: String.t() | nil,
           text: String.t(),
           custom_tool_uses: [ReqManagedAgents.ToolUse.t()],
           server_tool_uses: [ReqManagedAgents.ToolUse.t()],
