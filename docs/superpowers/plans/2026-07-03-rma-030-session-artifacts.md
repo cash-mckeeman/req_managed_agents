@@ -4,7 +4,7 @@
 
 **Goal:** Ship the session-artifacts release — `SessionInfo` threading to handlers, CMA files primitives, AgentCore `environment` pass-through + `InvokeAgentRuntimeCommand`, and the `Artifacts` behaviour with `ClaudeFiles` and `AgentCoreSessionStorage` stores — as v0.3.0.
 
-**Architecture:** Strict one-way layering: Client primitives (CMA files endpoints; AgentCore command endpoint) → `Artifacts` behaviour impls compose the primitives → handlers receive `%SessionInfo{}` and may call `Artifacts` from inside a tool. `Session`'s loop is unchanged except info threading. All additions are backward-compatible (optional callbacks, additive struct fields, optional spec fields).
+**Architecture:** Delivered as THREE stacked PRs, each closed by a QA-CHECKPOINT (a qa-tester subagent authors and executes a manual test doc under docs/qa/, findings triaged before the PR opens). Strict one-way layering: Client primitives (CMA files endpoints; AgentCore command endpoint) → `Artifacts` behaviour impls compose the primitives → handlers receive `%SessionInfo{}` and may call `Artifacts` from inside a tool. `Session`'s loop is unchanged except info threading. All additions are backward-compatible (optional callbacks, additive struct fields, optional spec fields).
 
 **Tech Stack:** Elixir, ExUnit, Req 0.6 (`into:` streaming), Bypass (AgentCore event streams), Req.Test (CMA client), `aws_event_stream` via `EventStream.decode/1`.
 
@@ -20,6 +20,21 @@
 - **No MIM-refs in lib/ moduledocs** (hexdocs-shipped). Tests/commits may reference MIM/GH issues.
 - **Quality gates per task:** `mix format`, full `mix test` (0 failures), and the suite must stay warning-free; `mix credo --strict` is the CI gate.
 - **Wire names (verified 2026-07-03):** CreateHarness body fields `"environment"` / `"environmentVariables"`; command endpoint `POST /runtimes/{agentRuntimeArn}/commands` (+ optional `qualifier` query param), header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`, body `{"command", "timeout"}` (timeout: server-side seconds, service default 300, max 3600), response events `chunk` → `contentStart` / `contentDelta{stdout,stderr}` / `contentStop{exitCode,status}`.
+
+---
+
+## PR Phases (execution order; pause for user merge between PRs)
+
+| PR | Scope | Tasks | Closes |
+|---|---|---|---|
+| **PR 1 — SessionInfo** | MIM-67 | 1, 2, QA-CHECKPOINT A | `Closes MIM-67` (Linear) + `Closes #30` (GitHub) |
+| **PR 2 — CMA artifacts** | MIM-66 + Artifacts foundation | 3, 6, 7, QA-CHECKPOINT B | `Closes MIM-66` + `Closes #29` |
+| **PR 3 — AgentCore artifacts + release** | MIM-65, docs, canary, v0.3.0 | 4, 5, 8, 9, [10 controller], 11, QA-CHECKPOINT C, 12 | `Closes MIM-65` |
+
+Each PR branches from the previous phase's merged main (rebase the workspace between
+phases). The CHANGELOG's whole v0.3.0 section lands in Task 9 (PR 3) — PR 1/2 need no
+CHANGELOG edits. Task numbering below is unchanged; execute in the phase order above
+(note 6 and 7 run BEFORE 4 and 5).
 
 ---
 
@@ -431,6 +446,29 @@ jj describe -m 'feat(session): thread SessionInfo to handlers — optional handl
 ```
 
 ---
+
+### QA-CHECKPOINT A (closes PR 1) — SessionInfo end-to-end
+
+**Coordinator dispatches a qa-tester subagent** (not the implementer) to author
+`docs/qa/2026-07-03-session-info-manual-test.md` and execute it in the workspace.
+Scenarios the doc must cover (offline, fake providers):
+
+1. 4-arity module handler receives `%SessionInfo{}` with the conn's session id on BOTH a
+   request_response fake and a streaming fake (streaming: `handle_event/3` fires per event).
+2. 3-arity module handler + 2-arity handle_event: byte-identical behavior to pre-branch
+   (run one pre-existing session test file and diff expectations).
+3. Handler exporting ONLY the 4-arity form (no /3): tool call routes to /4 (the
+   `Code.ensure_loaded?` path).
+4. Fn handlers at both arities.
+5. Reconnect: after a simulated stream drop + reconnect, `SessionInfo.session_id`
+   reflects the NEW conn's id.
+6. `SessionResult.session_id` populated on run and on live-session `message/2` results.
+
+Execute every step, record pass/fail in the doc, triage findings (code bug → fix +
+re-run; doc bug → correct the doc), commit the QA doc with jj. Gate: all pass.
+Then push bookmark `ryan/mim-67-session-info`, open PR 1 (title
+`MIM-67: feat(session): SessionInfo to handlers at call time`, body ends `Closes #30`
++ plain last line `Closes MIM-67`). PAUSE for user merge.
 
 ### Task 3: CMA files primitives — `Client.list_files/2` + `Client.delete_file/2`
 
@@ -1365,6 +1403,28 @@ jj describe -m 'feat(artifacts): ClaudeFiles store — session-scoped list/fetch
 
 ---
 
+### QA-CHECKPOINT B (closes PR 2) — CMA artifacts workflow
+
+**Coordinator dispatches a qa-tester subagent** to author
+`docs/qa/2026-07-03-cma-artifacts-manual-test.md` and execute it (offline; Req.Test
+stub playing the Files API with realistic fixtures). Scenarios:
+
+1. The composed release story: a 4-arity handler uses its `%SessionInfo{}` to build a
+   `ClaudeFiles` store and `Artifacts.fetch` a file "the agent wrote" (stubbed list +
+   download) — the in-tool fetch-output workflow from GH #29/#30, end to end through a
+   real `Session.run/2`.
+2. `list_files`/`delete_file` header + param contract against the stub (both betas,
+   scope_id).
+3. Duplicate-name semantics: list returns all; fetch/delete take newest `created_at`.
+4. `put` → upload + attach with default and custom `mount_path`.
+5. Error paths: `:not_found`; a `{:error, {:http_error, 429, _}}` from the stub passes
+   through untouched.
+
+Execute, record, triage, commit the QA doc. Gate: all pass. Then push bookmark
+`ryan/mim-66-cma-artifacts`, open PR 2 (title
+`MIM-66: feat(artifacts): Artifacts vocabulary + ClaudeFiles store + files primitives`,
+body ends `Closes #29` + plain last line `Closes MIM-66`). PAUSE for user merge.
+
 ### Task 8: `Artifacts.AgentCoreSessionStorage`
 
 **Files:**
@@ -1981,13 +2041,43 @@ jj describe -m 'release: v0.3.0 — session artifacts' && jj new
 
 ---
 
+---
+
+### QA-CHECKPOINT C (closes PR 3) — AgentCore artifacts + release gate
+
+**Coordinator dispatches a qa-tester subagent** to author
+`docs/qa/2026-07-03-agentcore-artifacts-manual-test.md` and execute it (offline; Bypass
+event-stream fixtures). Scenarios:
+
+1. Command API full matrix: chunk-wrapped + bare events, stdout/stderr interleave,
+   `on_output` ordering, non-zero exit as result, idle-timeout stall, exception frame,
+   `timeout_seconds` serialization.
+2. SessionStorage store round-trip against a scripted command fun: put (multi-chunk,
+   >64KB contents) → list → fetch (binary-exact) → delete; not_found on every verb;
+   command_failed carries stderr; invalid names rejected before any command.
+3. Environment pass-through: spec with mounts serializes; spec-hash distinguishes;
+   absent by default.
+4. Release gate: `mix format --check-formatted && mix test && mix credo --strict &&
+   MIX_ENV=dev mix docs --warnings-as-errors && mix dialyzer && mix hex.build`
+   (expect `req_managed_agents-0.3.0.tar`).
+
+Execute, record, triage, commit the QA doc. Gate: all pass. Then push bookmark
+`ryan/mim-65-agentcore-artifacts`, open PR 3 (title
+`MIM-65: feat(agent_core): environment + command API + SessionStorage artifacts — v0.3.0`,
+body's plain last line `Closes MIM-65`). PAUSE for user merge; then IAM (Task 10, if not
+already applied), canary dispatch, tag v0.3.0 per the established release flow.
+
 ## Execution notes for the coordinator
 
 - Workspace: `.claude/worktrees/rma-030-artifacts/` (jj), spec + plan committed on main.
-- Task order is the dependency order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → [10 controller] → 11 → 12.
-- Task 10 is controller-executed (AWS CLI, account creds) — do not dispatch a subagent for it.
-- After Task 12: push bookmark `ryan/rma-030-session-artifacts`, PR titled
-  `MIM-65: feat: RMA 0.3.0 — session artifacts (Artifacts vocabulary, SessionInfo, files + environment + command APIs)`,
-  body ends with `Closes #29`, `Closes #30` (GitHub, own lines) and the plain-text last line
-  `Closes MIM-65, MIM-66 and MIM-67` (Linear).
-- After merge: dispatch the canary (validates the three live legs + the ARN-in-path signing risk from Task 5), then tag `v0.3.0` per the established release flow — coordinate with the user before canary/tag (AWS spend + publish).
+- Execute in PHASE order (see PR Phases table): 1, 2, QA-A, [PR 1, pause] → 3, 6, 7,
+  QA-B, [PR 2, pause] → 4, 5, 8, 9, [10 controller], 11, QA-C, 12, [PR 3, pause].
+- Between phases: `jj git fetch && jj new 'main@origin'` (verify the merge landed via
+  `gh api .../branches/main` — jj's view can lag after gh merges; see memory).
+- Task 10 is controller-executed (AWS CLI). Run it during PR 3's phase, before the
+  post-merge canary dispatch.
+- QA-CHECKPOINT findings: code bugs are fixed in-phase (implementer/fixer subagent) and
+  re-verified before the PR opens; the QA doc commits ride the phase's PR.
+- After PR 3 merges: canary dispatch (validates the three live legs + the Task-5
+  ARN-in-path signing risk), then tag `v0.3.0` — coordinate with the user before
+  canary/tag (AWS spend + publish).

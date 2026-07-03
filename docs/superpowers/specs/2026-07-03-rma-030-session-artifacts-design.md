@@ -41,9 +41,12 @@ mechanics underneath. MIM-68 (outcomes/user-event kickoffs) is explicitly the ne
 
 ## Decisions (from the brainstorm)
 
-- **D1 — Scope:** all of MIM-65 (both `environment` pass-through and the command API),
-  MIM-66 (primitives + convenience), MIM-67. One branch, one plan, dependency-ordered
-  (67 → 66 → 65 → Artifacts → docs/canary/release); one PR closing all three + GH #29/#30.
+- **D1 — Scope & delivery:** all of MIM-65 (both `environment` pass-through and the
+  command API), MIM-66 (primitives + convenience), MIM-67. One plan, dependency-ordered
+  (67 → 66 → 65 → Artifacts → docs/canary/release), delivered as **three stacked PRs**
+  (PR 1: MIM-67 + GH #30; PR 2: MIM-66 + Artifacts foundation + GH #29; PR 3: MIM-65 +
+  release), each closed by a **QA-CHECKPOINT** — a qa-tester authors and executes a
+  manual test doc under `docs/qa/` before the PR opens.
 - **D2 — Vocabulary is structs:** `SessionInfo`, `Artifact`, `AgentCore.CommandResult` are
   typed structs like the existing result vocabulary. No bare info maps on public seams.
 - **D3 — MIM-67 shape:** optional higher-arity callbacks (`handle_tool_call/4`,
