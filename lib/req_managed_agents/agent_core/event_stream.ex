@@ -14,7 +14,7 @@ defmodule ReqManagedAgents.AgentCore.EventStream do
       `{:error, code, message}`        -> `%{"__stream_error__" => %{"type" => …,
       "message" => …}}`, so a server-side close (e.g. a ConverseStream
       ValidationException) surfaces as a distinct error rather than a silent
-      terminal (MIM-50/MIM-52). `ReqManagedAgents.AgentCore`'s `stream_error/1`
+      terminal. `ReqManagedAgents.AgentCore`'s `stream_error/1`
       reads this shape.
     * malformed frames / payloads      -> dropped (the prior recovery posture).
 
@@ -25,6 +25,7 @@ defmodule ReqManagedAgents.AgentCore.EventStream do
 
   @spec decode(binary()) :: {[map()], binary()}
   def decode(buffer) when is_binary(buffer) do
+    ReqManagedAgents.AgentCore.Deps.ensure!()
     {classified, remainder} = AWSEventStream.JSON.decode(buffer)
     {Enum.flat_map(classified, &to_envelope/1), remainder}
   end

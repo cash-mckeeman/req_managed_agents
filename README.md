@@ -16,7 +16,20 @@ One loop, two backends behind a single `Provider` behaviour:
 
 ```elixir
 def deps do
-  [{:req_managed_agents, "~> 0.2"}]
+  [{:req_managed_agents, "~> 0.1"}]
+end
+```
+
+Using the Bedrock AgentCore provider? Add the optional AWS deps (Anthropic-only
+users can skip these):
+
+```elixir
+def deps do
+  [
+    {:req_managed_agents, "~> 0.1"},
+    {:ex_aws_auth, "~> 1.4"},
+    {:aws_event_stream, "~> 0.1"}
+  ]
 end
 ```
 
