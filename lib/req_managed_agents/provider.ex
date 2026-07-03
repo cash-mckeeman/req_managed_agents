@@ -83,7 +83,7 @@ defmodule ReqManagedAgents.Provider do
   @optional_callbacks poll_turn: 2, push_input: 2, turn_boundary?: 1, reconnect: 3, teardown: 2
 
   @doc """
-  Extract a canonical `%ToolResult{}` from a `Tools.run/6` wire event
+  Extract a canonical `%ToolResult{}` from a `Tools.run/7` wire event
   (`user.custom_tool_result` shape), given the tool-use id it answers.
   """
   @spec result_of(String.t(), event()) :: ReqManagedAgents.ToolResult.t()

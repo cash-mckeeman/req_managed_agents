@@ -29,4 +29,24 @@ defmodule ReqManagedAgents.VocabularyTest do
       assert is_binary(json)
     end
   end
+
+  test "SessionInfo constructs with nil defaults and encodes to JSON" do
+    info = %ReqManagedAgents.SessionInfo{}
+    assert info.session_id == nil
+    assert info.provider == nil
+
+    full = %ReqManagedAgents.SessionInfo{
+      session_id: "sess_1",
+      provider: ReqManagedAgents.Providers.ClaudeManagedAgents
+    }
+
+    assert %{"session_id" => "sess_1"} = Jason.decode!(Jason.encode!(full))
+  end
+
+  test "SessionResult carries session_id (default nil)" do
+    assert %ReqManagedAgents.SessionResult{}.session_id == nil
+
+    r = %ReqManagedAgents.SessionResult{session_id: "sess_2"}
+    assert %{"session_id" => "sess_2"} = Jason.decode!(Jason.encode!(r))
+  end
 end

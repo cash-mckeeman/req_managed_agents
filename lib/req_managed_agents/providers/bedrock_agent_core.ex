@@ -125,6 +125,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
      %{
        harness_arn: Keyword.fetch!(opts, :harness_arn),
        sid: Keyword.fetch!(opts, :runtime_session_id),
+       session_id: Keyword.fetch!(opts, :runtime_session_id),
        model: opts[:model],
        retries: opts[:invoke_retries] || 2,
        subscriber: subscriber,

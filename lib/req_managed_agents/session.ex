@@ -32,7 +32,7 @@ defmodule ReqManagedAgents.Session do
   """
   use GenServer
   require Logger
-  alias ReqManagedAgents.{Provider, SessionResult, Tools, TurnResult, Usage}
+  alias ReqManagedAgents.{Provider, SessionInfo, SessionResult, Tools, TurnResult, Usage}
 
   @max_tool_concurrency 8
 
@@ -95,6 +95,7 @@ defmodule ReqManagedAgents.Session do
           provider: provider,
           mode: provider.mode(),
           conn: conn,
+          info: build_info(provider, conn),
           opts: opts,
           handler: Keyword.fetch!(opts, :handler),
           context: opts[:context],
@@ -176,6 +177,7 @@ defmodule ReqManagedAgents.Session do
         s = %{
           s
           | conn: conn,
+            info: build_info(s.provider, conn),
             ref: Map.get(conn, :ref),
             consumer: Map.get(conn, :consumer),
             seen: seen,
@@ -351,7 +353,7 @@ defmodule ReqManagedAgents.Session do
     custom_tool_uses
     |> Task.async_stream(
       fn %{id: id, name: name, input: input} ->
-        wire = Tools.run(s.handler, id, name, input, s.context, s.meta)
+        wire = Tools.run(s.handler, id, name, input, s.context, s.info, s.meta)
         Provider.result_of(id, wire)
       end,
       max_concurrency: @max_tool_concurrency,
@@ -374,6 +376,7 @@ defmodule ReqManagedAgents.Session do
     %SessionResult{
       terminal: terminal,
       stop_reason: tr.stop_reason,
+      session_id: s.info.session_id,
       text: tr.text,
       custom_tool_uses: s.custom_tool_uses,
       server_tool_uses: s.server_tool_uses,
@@ -412,12 +415,27 @@ defmodule ReqManagedAgents.Session do
   defp envelope_type(%{} = ev), do: ev |> Map.keys() |> List.first()
   defp envelope_type(_), do: nil
 
-  defp forward_raw(%{handler: h, context: ctx}, ev) when is_atom(h) and h != nil do
-    if function_exported?(h, :handle_event, 2), do: h.handle_event(ev, ctx)
+  defp forward_raw(%{handler: h, context: ctx, info: info}, ev) when is_atom(h) and h != nil do
+    cond do
+      Code.ensure_loaded?(h) and function_exported?(h, :handle_event, 3) ->
+        h.handle_event(ev, ctx, info)
+
+      function_exported?(h, :handle_event, 2) ->
+        h.handle_event(ev, ctx)
+
+      true ->
+        :ok
+    end
+
     :ok
   end
 
   defp forward_raw(_s, _ev), do: :ok
+
+  # Session identity for handler callbacks: providers standardize a :session_id
+  # conn key (Claude mints it at open; Bedrock echoes the caller-supplied id).
+  defp build_info(provider, conn),
+    do: %SessionInfo{session_id: Map.get(conn, :session_id), provider: provider}
 
   defp notify(%{notify: pid}, payload) when is_pid(pid),
     do: send(pid, {:managed_agents_session, payload})
