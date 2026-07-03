@@ -56,4 +56,4 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           HARNESS_EXECUTION_ROLE_ARN: ${{ vars.HARNESS_EXECUTION_ROLE_ARN }}
-        run: mix test --only live --exclude cma_artifacts_probe
+        run: mix test --only live

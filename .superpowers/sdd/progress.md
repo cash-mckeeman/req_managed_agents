@@ -41,3 +41,4 @@ P3 Task 11: complete (commit 188e9230, preflight PASS; 3 legs, tags + after-tear
 P3 QA-CHECKPOINT C: complete (QA doc 8771d364, 25/26 + 1 finding wave; F1 code_bug [validate/1 accepted "."/".."] fixed + F2/F3/F4 test gaps closed in fc20abdf, controller-verified guard). Suite 238, strict credo clean.
 P3 Task 12: complete (release stamp v0.3.0 + full gate: format/test(238)/credo-strict/docs/dialyzer/hex.build all green, tarball 0.3.0 ships artifacts dir).
 ALL PHASE 3 TASKS COMPLETE — PR 3 open, pause for merge; then canary + tag with user coordination.
+P1 Task 1: complete (commit cd4dd457 + facade fix 64cbb5b3; review Approved with Important [facade teardown store leak] → fixed, controller-verified; behavior freeze held, include-beats-exclude ExUnit lesson recorded). Suite 241, strict credo clean.

@@ -9,6 +9,12 @@ defmodule ReqManagedAgents.Artifacts.ClaudeFiles do
   The default mount path is built as `"/data/" <> name` with no sanitization —
   callers passing untrusted names must validate them (path traversal, e.g.
   `"../x"`, is forwarded verbatim).
+
+  **The outputs-dir convention:** only files the agent writes under
+  `/mnt/session/outputs/` become session artifacts (session-scoped and
+  downloadable — what `list`/`fetch` see). Direct the agent's deliverables
+  there in its system prompt; files written elsewhere in the sandbox are not
+  retrievable.
   """
   @behaviour ReqManagedAgents.Artifacts
 
