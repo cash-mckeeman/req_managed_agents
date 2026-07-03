@@ -170,6 +170,64 @@ defmodule ReqManagedAgents.LiveSmokeTest do
              })
   end
 
+  @tag timeout: 180_000
+  @tag :live_cma_provision
+  test "Claude Managed Agents: provision → run → teardown (provider-agnostic seam, live)" do
+    alias ReqManagedAgents.Providers.ClaudeManagedAgents
+    {:ok, _} = Application.ensure_all_started(:req_managed_agents)
+    client = ReqManagedAgents.new()
+
+    # Mirrors the Bedrock leg below on the SAME canonical spec shape —
+    # `model_config` is the opaque provider-native blob (for Claude: the model
+    # id string that lands on the agent's `model` field). This is the live
+    # proof for `ClaudeManagedAgents.provision/2` + `teardown/2`, which the
+    # unit suite covers only against stubs.
+    spec = %{
+      system_prompt: "When asked to echo, call the echo tool with the user's text.",
+      terminal_tool: nil,
+      model_config: System.get_env("CMA_LIVE_MODEL", "claude-haiku-4-5"),
+      tools: [
+        %{
+          type: "custom",
+          name: "echo",
+          description: "Echo the user's text back. Always use this to echo.",
+          input_schema: %{
+            "type" => "object",
+            "properties" => %{"text" => %{"type" => "string"}},
+            "required" => ["text"]
+          }
+        }
+      ]
+    }
+
+    {:ok, handle} =
+      ReqManagedAgents.provision(ClaudeManagedAgents, spec,
+        client: client,
+        name: "rma-live-cma-provision"
+      )
+
+    IO.inspect(handle, label: "LIVE CMA provisioned handle")
+    assert %{agent_id: _, environment_id: _} = handle
+
+    try do
+      assert {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn} = result} =
+               ReqManagedAgents.Session.run(ClaudeManagedAgents,
+                 client: client,
+                 agent_id: handle.agent_id,
+                 environment_id: handle.environment_id,
+                 prompt: "Please echo: hello-provisioned",
+                 handler: Handler,
+                 timeout: 120_000
+               )
+
+      IO.inspect(result.usage, label: "LIVE CMA provisioned-run usage")
+    after
+      # Claude archives are synchronous (and permanent), so unlike the async
+      # Bedrock delete below we can assert teardown/2 live.
+      assert :ok = ReqManagedAgents.teardown(ClaudeManagedAgents, handle, client: client)
+    end
+  end
+
   @tag timeout: 600_000
   @tag :live_bedrock
   test "AgentCore Harness: provision → invoke → live usage → teardown" do
