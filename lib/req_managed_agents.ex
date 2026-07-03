@@ -1,14 +1,26 @@
 defmodule ReqManagedAgents do
   @moduledoc """
-  Elixir client for Anthropic's Claude Managed Agents (public beta).
+  Provider-agnostic Elixir client for managed agent runtimes.
 
-  Claude runs the agent loop server-side; your custom tools execute locally, so
-  your data and code never leave your node. Anthropic only ever sees each tool's
-  name, description, input schema, and the text result you return.
+  The provider runs the agent loop server-side; your custom tools execute
+  locally, so your data and code never leave your node. The provider only ever
+  sees each tool's name, description, input schema, and the text result you
+  return.
 
-  See `ReqManagedAgents.Client` for the control plane, `ReqManagedAgents.Session`
-  for the optional batteries-included loop, and the README for the headline
-  example.
+  Two backends ship behind the same `ReqManagedAgents.Provider` behaviour:
+
+    * `ReqManagedAgents.Providers.ClaudeManagedAgents` — Anthropic Claude
+      Managed Agents (public beta), `:streaming` over long-lived SSE
+    * `ReqManagedAgents.Providers.BedrockAgentCore` — AWS Bedrock AgentCore
+      Harness, `:request_response` over signed invokes (requires the optional
+      `:ex_aws_auth` and `:aws_event_stream` deps)
+
+  Whichever backend, `ReqManagedAgents.Session.run/2` returns the same
+  `ReqManagedAgents.SessionResult` — terminal, text, tool uses, token usage.
+
+  See `ReqManagedAgents.Client` for the Anthropic control plane,
+  `ReqManagedAgents.Session` for the batteries-included loop, and the README
+  and `examples/` for runnable, commented walkthroughs.
   """
 
   @doc "Build a control-plane client. See `ReqManagedAgents.Client.new/1`."
@@ -20,8 +32,8 @@ defmodule ReqManagedAgents do
 
   @doc """
   Run a managed-agent session synchronously to completion, returning
-  `{:ok, %{terminal:, stop_reason:, events:}}` or `{:error, reason}` (incl.
-  `{:error, :timeout}`).
+  `{:ok, %ReqManagedAgents.SessionResult{}}` (terminal, stop_reason, text,
+  tool uses, usage, events) or `{:error, reason}` (incl. `{:error, :timeout}`).
 
   Runs synchronously and **blocks** until a terminal event or the `:timeout`. The
   session is started unlinked and monitored, and it traps exits, so an open failure
