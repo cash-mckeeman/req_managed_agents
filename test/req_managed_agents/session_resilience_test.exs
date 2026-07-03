@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.SessionResilienceTest do
   use ExUnit.Case, async: true
+  alias ReqManagedAgents.FakeProviders.{CrashingPoll, FailingOpen, RequestResponse}
   alias ReqManagedAgents.Session
-  alias ReqManagedAgents.FakeProviders.{FailingOpen, CrashingPoll, RequestResponse}
 
   test "open failure surfaces verbatim (no extra {:open_failed, _} wrapping)" do
     assert {:error, {:create_session_failed, :boom}} =

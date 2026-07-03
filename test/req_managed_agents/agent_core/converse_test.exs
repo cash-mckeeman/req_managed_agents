@@ -164,8 +164,7 @@ defmodule ReqManagedAgents.AgentCore.ConverseTest do
       }
     ]
 
-    assert %{usage: %{"inputTokens" => 12, "outputTokens" => 7}} =
-             ReqManagedAgents.AgentCore.Converse.parse(events)
+    assert %{usage: %{"inputTokens" => 12, "outputTokens" => 7}} = Converse.parse(events)
   end
 
   defp ids(tool_uses), do: Enum.map(tool_uses, & &1["toolUseId"])

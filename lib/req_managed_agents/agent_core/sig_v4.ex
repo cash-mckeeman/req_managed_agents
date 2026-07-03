@@ -9,6 +9,8 @@ defmodule ReqManagedAgents.AgentCore.SigV4 do
   about any particular endpoint behind the URL.
   """
 
+  alias ReqManagedAgents.AgentCore.Deps
+
   @type creds :: %{
           access_key_id: String.t(),
           secret_access_key: String.t(),
@@ -27,7 +29,7 @@ defmodule ReqManagedAgents.AgentCore.SigV4 do
   """
   @spec sign_request(atom(), String.t(), iodata(), keyword()) :: [{String.t(), String.t()}]
   def sign_request(method, url, body, opts \\ []) do
-    ReqManagedAgents.AgentCore.Deps.ensure!()
+    Deps.ensure!()
     service = opts[:service] || "bedrock-agentcore"
     creds = opts[:credentials] || from_env()
     base_headers = opts[:headers] || [{"content-type", "application/json"}]

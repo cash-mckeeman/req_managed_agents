@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.SessionLiveTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Session
   alias ReqManagedAgents.FakeProviders.Streaming
+  alias ReqManagedAgents.Session
 
   @ra [
     %{"type" => "tool", "id" => "t1", "name" => "echo", "input" => %{"x" => 1}},

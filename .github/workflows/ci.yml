@@ -75,7 +75,7 @@ jobs:
             mix-quality-${{ runner.os }}-
       - run: mix deps.get
       - run: mix format --check-formatted
-      - run: mix credo
+      - run: mix credo --strict
       # hex.audit has no ignore mechanism, and cowlib (test-only transitive
       # dep via bypass -> plug_cowboy -> cowboy) has two advisories with NO
       # fixed release (every version >= 2.9.0 is affected, checked 2026-07-02).

@@ -23,9 +23,11 @@ defmodule ReqManagedAgents.AgentCore.EventStream do
   incremental, buffering an incomplete trailing frame as `remainder`.
   """
 
+  alias ReqManagedAgents.AgentCore.Deps
+
   @spec decode(binary()) :: {[map()], binary()}
   def decode(buffer) when is_binary(buffer) do
-    ReqManagedAgents.AgentCore.Deps.ensure!()
+    Deps.ensure!()
     {classified, remainder} = AWSEventStream.JSON.decode(buffer)
     {Enum.flat_map(classified, &to_envelope/1), remainder}
   end

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.2.1 (2026-07-03)
+
+### Changed
+- Internal code hygiene only — the codebase now passes `mix credo --strict`
+  (alias ordering/aliasing, implicit `try`), and CI gates on `--strict` so it
+  stays that way. No user-facing changes.
+
 ## v0.2.0 (2026-07-03)
 
 ### Changed

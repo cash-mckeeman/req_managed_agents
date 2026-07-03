@@ -1,6 +1,6 @@
 defmodule ReqManagedAgents.VocabularyTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.{Usage, ToolUse, ToolResult, TurnResult, SessionResult}
+  alias ReqManagedAgents.{SessionResult, ToolResult, ToolUse, TurnResult, Usage}
 
   test "structs construct with the documented defaults and encode to JSON" do
     assert %Usage{input_tokens: 0, output_tokens: 0, raw: []} = %Usage{}

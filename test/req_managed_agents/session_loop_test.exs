@@ -1,8 +1,8 @@
 defmodule ReqManagedAgents.SessionLoopTest do
   use ExUnit.Case, async: true
+  alias ReqManagedAgents.FakeProviders.{RequestResponse, Streaming}
   alias ReqManagedAgents.Session
   alias ReqManagedAgents.{SessionResult, ToolUse, Usage}
-  alias ReqManagedAgents.FakeProviders.{RequestResponse, Streaming}
 
   @turn1 [
     %{"type" => "tool", "id" => "t1", "name" => "echo", "input" => %{"x" => 1}},
