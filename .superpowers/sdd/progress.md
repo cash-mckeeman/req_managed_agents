@@ -14,7 +14,7 @@ Phase order: [P1] 1,2,QA-A,PR1 → [P2] 3,6,7,QA-B,PR2 → [P3] 4,5,8,9,[10 cont
 - [x] P2 Task 7: ClaudeFiles store
 - [ ] P2 QA-CHECKPOINT B + PR 2 (pause for merge)
 - [x] P3 Task 4: environment spec fields
-- [ ] P3 Task 5: CommandResult + command API
+- [x] P3 Task 5: CommandResult + command API
 - [ ] P3 Task 8: AgentCoreSessionStorage store
 - [ ] P3 Task 9: docs
 - [ ] P3 Task 10: IAM (controller)
@@ -34,3 +34,4 @@ P2 PR 2 (#38): MERGED (main 867d456c) — after one CI credo --strict escape (si
 ── Phase 3 ──
 P3 Task 4: complete (commit 4f27d754, preflight PASS, review clean — Spec ✅ / Approved, zero findings; opaque pass-through + hash-distinction proof verified). Suite 223, strict credo clean.
 P3 Task 10 (IAM, controller): AWS half APPLIED with user approval — inline policy rma-ci-harness-lifecycle on rma-ci-github gained InvokeAgentRuntimeCommand + InvokeHarnessCommand (verified read-back, 18 actions). docs/aws-ci-setup.md line rides Task 9.
+P3 Task 5: complete (commit 2b89f029, preflight PASS, review clean — Spec ✅ / Approved; two credo-driven extractions verified semantics-identical; brief JSON-escape typo fixed by implementer, validated by reviewer). Suite 228, strict credo clean. ARN-in-path SigV4 validation deferred to live canary (documented risk).
