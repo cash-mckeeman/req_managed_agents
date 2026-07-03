@@ -354,14 +354,40 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     IO.inspect(artifacts, label: "LIVE CMA artifacts (after poll)")
 
     unless Enum.any?(artifacts, &(&1.name == "note.txt")) do
+      IO.inspect(session_id, label: "DIAG session_id passed to scope_id")
+
       {:ok, unscoped} = ReqManagedAgents.Client.list_files(client)
-      IO.inspect(unscoped["data"], label: "DIAG unscoped /v1/files", limit: 30)
+      IO.inspect(Enum.take(unscoped["data"] || [], 3), label: "DIAG unscoped /v1/files head")
 
       {:ok, events} = ReqManagedAgents.Client.list_all_events(client, session_id, %{})
 
-      events
-      |> Enum.take(-15)
-      |> IO.inspect(label: "DIAG session event tail", limit: :infinity, printable_limit: 2000)
+      thread_ids =
+        events
+        |> Enum.map(& &1["session_thread_id"])
+        |> Enum.filter(&is_binary/1)
+        |> Enum.uniq()
+
+      IO.inspect(thread_ids, label: "DIAG thread ids seen in events")
+
+      for scope <- [session_id | thread_ids] do
+        {:ok, scoped} = ReqManagedAgents.Client.list_files(client, params: %{scope_id: scope})
+        IO.inspect({scope, length(scoped["data"] || [])}, label: "DIAG scoped list count")
+      end
+
+      newest_note =
+        (unscoped["data"] || [])
+        |> Enum.filter(&(&1["filename"] == "note.txt"))
+        |> Enum.sort_by(& &1["created_at"], :desc)
+        |> List.first()
+
+      if newest_note do
+        IO.inspect(
+          ReqManagedAgents.Client.download_file(client, newest_note["id"]),
+          label:
+            "DIAG download of unscoped-matched note.txt (downloadable=#{newest_note["downloadable"]})",
+          printable_limit: 200
+        )
+      end
     end
 
     assert Enum.any?(artifacts, &(&1.name == "note.txt"))
