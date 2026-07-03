@@ -180,6 +180,10 @@ defmodule ReqManagedAgents.Artifacts.AgentCoreSessionStorage do
 
   defp path(store, name), do: store.base <> "/" <> name
 
+  # "." and ".." are charset-legal but resolve to directories (traversal), so
+  # they are rejected explicitly before the regex.
+  defp validate(name) when name in [".", ".."], do: {:error, {:invalid_name, name}}
+
   defp validate(name) do
     if Regex.match?(@name_re, name), do: :ok, else: {:error, {:invalid_name, name}}
   end

@@ -67,9 +67,16 @@ defmodule ReqManagedAgents.Artifacts.AgentCoreSessionStorageTest do
     assert :ok = Artifacts.put(store(fun), "big.bin", contents)
 
     assert :counters.get(counter, 1) == 4
-    assert_received {:cmd, 1, c1}
-    assert String.length(c1) <= 65_536
-    assert_received {:cmd, 4, c4}
+
+    cmds =
+      for n <- 1..4 do
+        assert_received {:cmd, ^n, cmd}
+        cmd
+      end
+
+    Enum.each(cmds, &assert(String.length(&1) <= 65_536))
+
+    c4 = List.last(cmds)
     assert c4 =~ "base64" or c4 =~ "b64decode"
   end
 
@@ -93,6 +100,13 @@ defmodule ReqManagedAgents.Artifacts.AgentCoreSessionStorageTest do
              Artifacts.fetch(store(fun), "../etc/passwd")
 
     assert {:error, {:invalid_name, "a'b"}} = Artifacts.delete(store(fun), "a'b")
+  end
+
+  test ~s(charset-legal traversal names "." and ".." are rejected before any command runs) do
+    fun = fn _ -> flunk("no command should run") end
+
+    assert {:error, {:invalid_name, ".."}} = Artifacts.put(store(fun), "..", "x")
+    assert {:error, {:invalid_name, "."}} = Artifacts.fetch(store(fun), ".")
   end
 
   test "store/5 raises on a base_path containing a single quote" do

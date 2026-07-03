@@ -601,6 +601,9 @@ regex match.
 not end-users), but the behaviour contradicts the stated no-traversal contract in
 `@moduledoc`.
 
+**Status: resolved** — `validate/1` rejects `"."` and `".."` explicitly (guard clause
+before the regex), with regression tests asserting no command executes for either.
+
 ---
 
 ### F2 — test_gap: unit suite does not cover `qualifier` for `invoke_agent_runtime_command`
@@ -609,6 +612,8 @@ not end-users), but the behaviour contradicts the stated no-traversal contract i
 
 **Description:** `timeout_seconds` is tested (line 87) but `qualifier` serialization
 to the query string is not. Probe S1d confirmed the implementation is correct.
+
+**Status: resolved** — unit test added (`qualifier=prod` in query string; absent when unset).
 
 ### F3 — test_gap: unit suite only checks first command length in chunked `put`
 
@@ -619,9 +624,15 @@ command. Probe S2f verified all commands are within bounds, but the test coverag
 gap means a regression (e.g. a larger chunk size) would only fail on the first
 command.
 
+**Status: resolved** — unit test strengthened to assert the 65_536-char cap on every
+captured command.
+
 ### F4 — test_gap: mixed environment/environment_variables case not in unit suite
 
 **Location:** `test/req_managed_agents/agent_core/client_test.exs`.
 
 **Description:** Only both-set and both-absent are tested; the mixed case (one field
 set) is untested. Implementation is correct (`maybe_put` handles nil). Low risk.
+
+**Status: resolved** — unit test added (spec with `environment` only: body has
+`"environment"`, lacks `"environmentVariables"`).

@@ -115,6 +115,29 @@ defmodule ReqManagedAgents.AgentCore.CommandTest do
     assert_received {:out, :stderr, "b"}
   end
 
+  test "qualifier serializes into the query string; absent when unset", %{
+    bypass: bypass,
+    client: client
+  } do
+    Bypass.expect_once(bypass, fn conn ->
+      assert conn.query_string =~ "qualifier=prod"
+
+      chunked(conn, [frame(~s({"chunk":{"contentStop":{"exitCode":0,"status":"completed"}}}))])
+    end)
+
+    assert {:ok, %CommandResult{exit_code: 0}} =
+             Client.invoke_agent_runtime_command(client, inv(qualifier: "prod"))
+
+    Bypass.expect_once(bypass, fn conn ->
+      refute conn.query_string =~ "qualifier"
+
+      chunked(conn, [frame(~s({"chunk":{"contentStop":{"exitCode":0,"status":"completed"}}}))])
+    end)
+
+    assert {:ok, %CommandResult{exit_code: 0}} =
+             Client.invoke_agent_runtime_command(client, inv())
+  end
+
   test "a stalled stream fails with a transport timeout at idle_timeout", %{
     bypass: bypass,
     client: client

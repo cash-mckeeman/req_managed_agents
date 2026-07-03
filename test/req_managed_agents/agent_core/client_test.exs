@@ -302,4 +302,38 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
     bare = Map.drop(spec, [:environment, :environment_variables])
     assert {:ok, _} = Client.create_harness(client, bare)
   end
+
+  test "create_harness mixed case: environment set without environment_variables",
+       %{bypass: bypass, client: client} do
+    env = %{
+      "agentCoreRuntimeEnvironment" => %{
+        "filesystemConfigurations" => [%{"sessionStorage" => %{"mountPath" => "/mnt/data"}}]
+      }
+    }
+
+    Bypass.expect_once(bypass, "POST", "/harnesses", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      decoded = Jason.decode!(body)
+      assert decoded["environment"] == env
+      refute Map.has_key?(decoded, "environmentVariables")
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(
+        200,
+        ~s({"harness":{"arn":"arn:aws:bedrock-agentcore:us-east-1:1:harness/e","harnessId":"e-3","status":"CREATING"}})
+      )
+    end)
+
+    spec = %{
+      name: "e",
+      execution_role_arn: "arn:aws:iam::123456789012:role/AgentCoreRole",
+      system_prompt: "x",
+      tools: [],
+      model: %{"bedrockModelConfig" => %{"modelId" => "m"}},
+      environment: env
+    }
+
+    assert {:ok, _} = Client.create_harness(client, spec)
+  end
 end
