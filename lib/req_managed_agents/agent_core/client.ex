@@ -20,6 +20,9 @@ defmodule ReqManagedAgents.AgentCore.Client do
   @max_retries 2
   @default_receive_timeout 600_000
 
+  # credentials (secret key + session token) must never appear in inspect
+  # output — see the equivalent guard on ReqManagedAgents.Client.
+  @derive {Inspect, except: [:credentials]}
   defstruct [
     :credentials,
     base_url: @default_base,

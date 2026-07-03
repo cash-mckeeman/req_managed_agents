@@ -14,6 +14,10 @@ defmodule ReqManagedAgents.Client do
   @files_beta "files-api-2025-04-14"
   @anthropic_version "2023-06-01"
 
+  # api_key must never appear in inspect output: a KeyError from missing
+  # Session opts prints the whole opts list (client included), as do crash
+  # reports.
+  @derive {Inspect, except: [:api_key]}
   defstruct [
     :api_key,
     base_url: @base_url,
