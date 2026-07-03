@@ -40,7 +40,7 @@ defmodule ReqManagedAgents.AgentCore.Converse do
   `contentBlockIndex` (tracked per index).
 
   Keying by id rather than `contentBlockIndex` makes parsing robust to a stream that
-  **reuses an index** across two distinct ids (MIM-52: the live Arm-3 vector emitted
+  **reuses an index** across two distinct ids (observed live: a stream emitted
   `[{0, A}, {0, B}, {1, C}]` — index 0 reused). An index-keyed fold dropped one tool
   and duplicated the other, producing a duplicate-`toolUseId` resume that Bedrock
   rejected; keying by id recovers both. A genuinely-reused id collapses to one block.
@@ -135,7 +135,7 @@ defmodule ReqManagedAgents.AgentCore.Converse do
   supplying the `tool_use_id` returned by that call). Bedrock rejects a turn whose
   assistant message carries duplicate `toolUseId`s ("duplicate Ids at
   messages.N.content"); `parse/1` guarantees unique ids by keying tool blocks on
-  `toolUseId`, so a well-formed `tool_uses` never trips this (MIM-52).
+  `toolUseId`, so a well-formed `tool_uses` never trips this.
   """
   @spec resume_messages([map()], [tool_result()]) :: [map()]
   def resume_messages(tool_uses, results) do
