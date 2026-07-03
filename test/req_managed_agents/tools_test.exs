@@ -10,27 +10,28 @@ defmodule ReqManagedAgents.ToolsTest do
     def handle_tool_call("boom", _i, _c), do: raise("kaboom")
   end
 
-  test "run/5 builds a success result" do
+  test "run/7 builds a success result" do
     assert %{
              "type" => "user.custom_tool_result",
              "custom_tool_use_id" => "u1",
              "is_error" => false
            } =
-             Tools.run(H, "u1", "ok", %{}, nil)
+             Tools.run(H, "u1", "ok", %{}, nil, %ReqManagedAgents.SessionInfo{})
   end
 
-  test "run/5 marks {:error, _} as is_error" do
-    assert %{"is_error" => true} = Tools.run(H, "u1", "err", %{}, nil)
+  test "run/7 marks {:error, _} as is_error" do
+    assert %{"is_error" => true} =
+             Tools.run(H, "u1", "err", %{}, nil, %ReqManagedAgents.SessionInfo{})
   end
 
-  test "run/5 catches a raising handler into an is_error result" do
-    ev = Tools.run(H, "u1", "boom", %{}, nil)
+  test "run/7 catches a raising handler into an is_error result" do
+    ev = Tools.run(H, "u1", "boom", %{}, nil, %ReqManagedAgents.SessionInfo{})
     assert ev["is_error"] == true
   end
 
-  test "run/5 accepts a bare 3-arity fn handler (not only a module)" do
+  test "run/7 accepts a bare 3-arity fn handler (not only a module)" do
     fun = fn name, input, _ctx -> {:ok, "ran:#{name}:#{inspect(input)}"} end
-    ev = Tools.run(fun, "u1", "echo", %{"x" => 1}, nil)
+    ev = Tools.run(fun, "u1", "echo", %{"x" => 1}, nil, %ReqManagedAgents.SessionInfo{})
     assert ev["type"] == "user.custom_tool_result"
     assert ev["custom_tool_use_id"] == "u1"
     assert ev["is_error"] == false
@@ -38,9 +39,9 @@ defmodule ReqManagedAgents.ToolsTest do
     assert text =~ "ran:echo"
   end
 
-  test "run/5 fn handler returning {:error, _} produces is_error result" do
+  test "run/7 fn handler returning {:error, _} produces is_error result" do
     fun = fn _name, _input, _ctx -> {:error, "fn-error"} end
-    ev = Tools.run(fun, "u2", "tool", %{}, nil)
+    ev = Tools.run(fun, "u2", "tool", %{}, nil, %ReqManagedAgents.SessionInfo{})
     assert ev["is_error"] == true
     text = ev["content"] |> List.first() |> Map.get("text")
     assert text == "fn-error"
