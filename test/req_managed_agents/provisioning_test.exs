@@ -3,7 +3,13 @@ defmodule ReqManagedAgents.ProvisioningTest do
   alias ReqManagedAgents.Provisioner
 
   defmodule FakeProvider do
-    def provision(spec, opts), do: opts[:create_fun].(spec)
+    def provision(spec, opts) do
+      if create_fun = opts[:create_fun] do
+        create_fun.(spec)
+      else
+        {:ok, %{id: "fake-#{:erlang.unique_integer([:positive])}"}}
+      end
+    end
 
     def teardown(handle, opts) do
       case (opts[:delete_fun] || fn _ -> {:ok, %{}} end).(handle) do
@@ -110,5 +116,21 @@ defmodule ReqManagedAgents.ProvisioningTest do
     # still cached: ensure/3 serves the cached handle, create_fun NOT called again
     assert {:ok, %{id: "h"}} = Provisioner.ensure(FakeProvider, @spec_a, create_fun: create)
     assert Agent.get(c, & &1) == 1
+  end
+
+  test "ensure/3 honors a custom :store and evict/1 clears it" do
+    table = :"custom_store_#{System.unique_integer([:positive])}"
+    store = {ReqManagedAgents.Provisioner.Store.ETS, table}
+
+    # First ensure provisions and records in the CUSTOM store...
+    {:ok, handle} = ReqManagedAgents.Provisioner.ensure(FakeProvider, %{n: 1}, store: store)
+    # ...second ensure hits the custom store (fake provider would raise/return a
+    # DIFFERENT handle on a second real provision — assert same handle back).
+    {:ok, ^handle} = ReqManagedAgents.Provisioner.ensure(FakeProvider, %{n: 1}, store: store)
+
+    :ok = ReqManagedAgents.Provisioner.evict(handle, store: store)
+    # After evict, ensure must provision again (fake yields a fresh handle).
+    {:ok, handle2} = ReqManagedAgents.Provisioner.ensure(FakeProvider, %{n: 1}, store: store)
+    refute handle2 == handle
   end
 end
