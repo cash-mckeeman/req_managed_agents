@@ -5,7 +5,10 @@ defmodule ReqManagedAgents.Handler do
   managed loop runs on Anthropic's side and calls back into `handle_tool_call/3`
   on your node.
 
-  Implement either arity of `handle_tool_call`; the 4-arity form wins when both exist.
+  Both callbacks have optional richer forms — `handle_tool_call/4` and
+  `handle_event/3` — that additionally receive the `ReqManagedAgents.SessionInfo`
+  (session id, provider module) for the running session. Export the higher arity
+  and it is preferred; otherwise the classic form is called.
 
   `handle_event/2` is observational and **at-least-once**: on reconnect (Claude) or a
   retried turn (Bedrock AgentCore), events from an aborted attempt may be delivered

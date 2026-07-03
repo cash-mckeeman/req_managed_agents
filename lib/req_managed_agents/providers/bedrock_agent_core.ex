@@ -5,6 +5,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   `toolResult` delta (the harness does not persist the uncommitted tool-use turn). Composes
   the existing `AgentCore.{Client, Converse}` modules. Decoded events are additionally
   delivered live to the session as `{:provider_event, ev}` messages while a turn streams.
+  The provision spec may carry opaque `environment`/`environment_variables` maps that pass
+  through to CreateHarness verbatim (filesystem mounts, custom containers, env vars — never
+  interpreted by this library).
   """
   @behaviour ReqManagedAgents.Provider
 
@@ -27,7 +30,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       execution_role_arn: Keyword.fetch!(opts, :execution_role_arn),
       system_prompt: spec.system_prompt,
       model: spec.model_config,
-      tools: spec.tools
+      tools: spec.tools,
+      environment: Map.get(spec, :environment),
+      environment_variables: Map.get(spec, :environment_variables)
     }
 
     create_fun =

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.3.0 (2026-07-03)
+
+### Added
+- `ReqManagedAgents.Artifacts` — one vocabulary (`list`/`fetch`/`put`/`delete`,
+  name-keyed, session-scoped) over provider-native session storage, with two stores:
+  `Artifacts.ClaudeFiles` (Anthropic Files API) and `Artifacts.AgentCoreSessionStorage`
+  (AgentCore `sessionStorage` mount, command-backed, report-scale). `%Artifact{}` struct.
+- `%SessionInfo{}` handed to handlers via optional `Handler.handle_tool_call/4` and
+  `handle_event/3` (existing 3-/2-arity handlers work unchanged);
+  `SessionResult.session_id`.
+- CMA Files API completion: `Client.list_files/2` (session-scoped via `scope_id`) and
+  `Client.delete_file/2`, on `Client.Behaviour` too.
+- AgentCore: opaque `environment`/`environment_variables` provision-spec fields
+  (filesystem mounts, custom containers, env vars — pass-through, spec-hash covered) and
+  `Client.invoke_agent_runtime_command/2` (direct microVM shell; streamed
+  stdout/stderr via optional `on_output`; `%AgentCore.CommandResult{}`).
+
 ## v0.2.1 (2026-07-03)
 
 ### Changed

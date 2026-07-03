@@ -64,6 +64,8 @@ defmodule ReqManagedAgents.AgentCore.Client do
         "tools" => spec.tools
       }
       |> maybe_put("timeoutSeconds", Map.get(spec, :timeout_seconds))
+      |> maybe_put("environment", Map.get(spec, :environment))
+      |> maybe_put("environmentVariables", Map.get(spec, :environment_variables))
 
     span(c, :post, "/harnesses", :create_harness, fn -> post_json(c, "/harnesses", body) end)
   end
@@ -156,6 +158,121 @@ defmodule ReqManagedAgents.AgentCore.Client do
         {:error, reason} ->
           {:error, reason}
       end
+    end)
+  end
+
+  @doc """
+  Data-plane `InvokeAgentRuntimeCommand` — run a shell command inside the session's
+  microVM (no model loop, no token cost) and collect its streamed output.
+
+  `inv` requires `:agent_runtime_arn` (the harness/runtime ARN — it rides the URI
+  path), `:runtime_session_id`, and `:command`. Optional: `:timeout_seconds`
+  (server-side cap, service default 300, max 3600), `:idle_timeout` (inter-chunk
+  liveness guard, default 300_000 ms), `:on_output` (fn `(:stdout | :stderr, chunk)`
+  called per delta, in order), `:qualifier` (endpoint name).
+
+  Returns `{:ok, %ReqManagedAgents.AgentCore.CommandResult{}}` — a non-zero
+  `exit_code` is a RESULT, not an error. Transport/stream failures return
+  `{:error, term()}`.
+  """
+  @spec invoke_agent_runtime_command(t(), map()) ::
+          {:ok, ReqManagedAgents.AgentCore.CommandResult.t()} | {:error, term()}
+  def invoke_agent_runtime_command(
+        c,
+        %{agent_runtime_arn: arn, runtime_session_id: sid, command: command} = inv
+      ) do
+    path = "/runtimes/#{URI.encode_www_form(arn)}/commands"
+
+    span(c, :post, "/runtimes/{arn}/commands", :invoke_agent_runtime_command, fn ->
+      body =
+        %{"command" => command}
+        |> maybe_put("timeout", inv[:timeout_seconds])
+
+      qs =
+        if inv[:qualifier],
+          do: "?" <> URI.encode_query([{"qualifier", inv[:qualifier]}]),
+          else: ""
+
+      url = c.base_url <> path <> qs
+      json = Jason.encode!(body)
+
+      headers =
+        SigV4.sign_request(:post, url, json,
+          service: c.service,
+          credentials: c.credentials,
+          headers: [
+            {"content-type", "application/json"},
+            {"X-Amzn-Bedrock-AgentCore-Runtime-Session-Id", sid}
+          ]
+        )
+
+      case request(c, :post, url, headers, json,
+             receive_timeout: inv[:idle_timeout] || @default_idle_timeout,
+             into: stream_reducer(command_on_event(inv[:on_output]))
+           ) do
+        {:ok, %{status: s} = resp} when s in 200..299 ->
+          command_result_from_events(streamed_events(resp))
+
+        {:ok, %{status: s} = resp} ->
+          {:error, {:http_error, s, streamed_body(resp)}}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end)
+  end
+
+  # Bridge decoded command events to the caller's on_output callback (per delta, in order).
+  defp command_on_event(nil), do: nil
+
+  defp command_on_event(on_output) when is_function(on_output, 2) do
+    fn ev ->
+      case unwrap_chunk(ev) do
+        %{"contentDelta" => d} -> fire_delta_output(on_output, d)
+        _ -> :ok
+      end
+    end
+  end
+
+  defp fire_delta_output(on_output, d) do
+    if is_binary(d["stdout"]) and d["stdout"] != "", do: on_output.(:stdout, d["stdout"])
+    if is_binary(d["stderr"]) and d["stderr"] != "", do: on_output.(:stderr, d["stderr"])
+  end
+
+  defp command_result(events) do
+    Enum.reduce(events, %ReqManagedAgents.AgentCore.CommandResult{}, fn ev, acc ->
+      case unwrap_chunk(ev) do
+        %{"contentDelta" => d} ->
+          %{
+            acc
+            | stdout: acc.stdout <> (d["stdout"] || ""),
+              stderr: acc.stderr <> (d["stderr"] || "")
+          }
+
+        %{"contentStop" => stop} ->
+          %{acc | exit_code: stop["exitCode"]}
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  # The wire wraps command events in a "chunk" envelope; tolerate bare events too.
+  defp unwrap_chunk(%{"chunk" => inner}) when is_map(inner), do: inner
+  defp unwrap_chunk(ev), do: ev
+
+  defp command_result_from_events(events) do
+    case command_stream_error(events) do
+      {type, message} -> {:error, {:command_stream_error, type, message}}
+      nil -> {:ok, command_result(events)}
+    end
+  end
+
+  defp command_stream_error(events) do
+    Enum.find_value(events, fn
+      %{"__stream_error__" => %{"type" => t, "message" => m}} -> {t, m}
+      _ -> nil
     end)
   end
 

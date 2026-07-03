@@ -295,4 +295,167 @@ defmodule ReqManagedAgents.LiveSmokeTest do
       )
     end
   end
+
+  @tag timeout: 240_000
+  @tag :live_cma_artifacts
+  test "CMA artifacts: agent writes a file → Artifacts list/fetch/delete round-trip" do
+    alias ReqManagedAgents.Artifacts
+    alias ReqManagedAgents.Artifacts.ClaudeFiles
+    {:ok, _} = Application.ensure_all_started(:req_managed_agents)
+    client = ReqManagedAgents.new()
+
+    {:ok, %{"id" => env_id}} =
+      ReqManagedAgents.Client.create_environment(client, %{
+        name: "rma-v03-artifacts",
+        config: %{type: "cloud", networking: %{type: "unrestricted"}}
+      })
+
+    # The built-in toolset provides the `write` tool the agent needs.
+    {:ok, %{"id" => agent_id}} =
+      ReqManagedAgents.Client.create_agent(client, %{
+        name: "rma-v03-artifacts",
+        model: System.get_env("CMA_LIVE_MODEL", "claude-haiku-4-5"),
+        system:
+          "When asked to save a note, write EXACTLY the requested text to the requested " <>
+            "filename in the working directory, then stop.",
+        tools: [%{type: "agent_toolset_20260401"}]
+      })
+
+    assert {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn, session_id: session_id}} =
+             ReqManagedAgents.run_to_completion(
+               client: client,
+               agent_id: agent_id,
+               environment_id: env_id,
+               prompt: "Save a note: write the text 'artifact-canary-ok' to note.txt",
+               handler: Handler,
+               timeout: 180_000
+             )
+
+    assert is_binary(session_id)
+    store = {ClaudeFiles, ClaudeFiles.store(client, session_id)}
+
+    {:ok, artifacts} = Artifacts.list(store)
+    IO.inspect(artifacts, label: "LIVE CMA artifacts")
+    assert Enum.any?(artifacts, &(&1.name == "note.txt"))
+
+    assert {:ok, bytes} = Artifacts.fetch(store, "note.txt")
+    assert bytes =~ "artifact-canary-ok"
+
+    assert :ok = Artifacts.delete(store, "note.txt")
+  end
+
+  @tag timeout: 600_000
+  @tag :live_bedrock_command
+  test "AgentCore command: exec into the session microVM — stdout, stderr, exit codes" do
+    alias ReqManagedAgents.AgentCore.{Client, CommandResult}
+    alias ReqManagedAgents.Providers.BedrockAgentCore
+    {:ok, _} = Application.ensure_all_started(:req_managed_agents)
+
+    role =
+      System.get_env("HARNESS_EXECUTION_ROLE_ARN") ||
+        "arn:aws:iam::819613816573:role/rma-ci-harness-exec"
+
+    spec = %{
+      system_prompt: "You are a terse assistant.",
+      tools: [],
+      terminal_tool: nil,
+      model_config: %{
+        "bedrockModelConfig" => %{
+          "modelId" => System.get_env("BEDROCK_LIVE_MODEL_ID", "nvidia.nemotron-super-3-120b")
+        }
+      }
+    }
+
+    {:ok, handle} =
+      ReqManagedAgents.provision(BedrockAgentCore, spec,
+        execution_role_arn: role,
+        name_prefix: "rma_live"
+      )
+
+    try do
+      client = Client.new()
+      sid = "live-cmd-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
+
+      assert {:ok, %CommandResult{exit_code: 0} = ok} =
+               Client.invoke_agent_runtime_command(client, %{
+                 agent_runtime_arn: handle.harness_arn,
+                 runtime_session_id: sid,
+                 command: "echo canary-stdout && echo canary-stderr 1>&2"
+               })
+
+      IO.inspect(ok, label: "LIVE command result")
+      assert ok.stdout =~ "canary-stdout"
+      assert ok.stderr =~ "canary-stderr"
+
+      assert {:ok, %CommandResult{exit_code: 7}} =
+               Client.invoke_agent_runtime_command(client, %{
+                 agent_runtime_arn: handle.harness_arn,
+                 runtime_session_id: sid,
+                 command: "exit 7"
+               })
+    after
+      IO.inspect(ReqManagedAgents.teardown(BedrockAgentCore, handle),
+        label: "LIVE command-leg teardown"
+      )
+    end
+  end
+
+  @tag timeout: 600_000
+  @tag :live_bedrock_mount
+  test "AgentCore sessionStorage mount: environment pass-through + Artifacts put/fetch round-trip" do
+    alias ReqManagedAgents.Artifacts
+    alias ReqManagedAgents.Artifacts.AgentCoreSessionStorage
+    alias ReqManagedAgents.Providers.BedrockAgentCore
+    {:ok, _} = Application.ensure_all_started(:req_managed_agents)
+
+    role =
+      System.get_env("HARNESS_EXECUTION_ROLE_ARN") ||
+        "arn:aws:iam::819613816573:role/rma-ci-harness-exec"
+
+    spec = %{
+      system_prompt: "You are a terse assistant.",
+      tools: [],
+      terminal_tool: nil,
+      model_config: %{
+        "bedrockModelConfig" => %{
+          "modelId" => System.get_env("BEDROCK_LIVE_MODEL_ID", "nvidia.nemotron-super-3-120b")
+        }
+      },
+      # MIM-65: the opaque environment pass-through, sessionStorage = the no-VPC mount.
+      environment: %{
+        "agentCoreRuntimeEnvironment" => %{
+          "filesystemConfigurations" => [%{"sessionStorage" => %{"mountPath" => "/mnt/data"}}]
+        }
+      }
+    }
+
+    {:ok, handle} =
+      ReqManagedAgents.provision(BedrockAgentCore, spec,
+        execution_role_arn: role,
+        name_prefix: "rma_live"
+      )
+
+    try do
+      client = ReqManagedAgents.AgentCore.Client.new()
+      sid = "live-mnt-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
+
+      store =
+        {AgentCoreSessionStorage,
+         AgentCoreSessionStorage.store(client, handle.harness_arn, sid, "/mnt/data")}
+
+      contents = "mount-canary " <> Base.encode64(:crypto.strong_rand_bytes(64))
+      assert :ok = Artifacts.put(store, "canary.txt", contents)
+
+      {:ok, listed} = Artifacts.list(store)
+      IO.inspect(listed, label: "LIVE mount artifacts")
+      assert Enum.any?(listed, &(&1.name == "canary.txt"))
+
+      assert {:ok, ^contents} = Artifacts.fetch(store, "canary.txt")
+      assert :ok = Artifacts.delete(store, "canary.txt")
+    after
+      IO.inspect(ReqManagedAgents.teardown(BedrockAgentCore, handle),
+        label: "LIVE mount-leg teardown"
+      )
+    end
+  end
 end

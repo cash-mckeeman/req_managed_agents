@@ -402,4 +402,49 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       assert inv.max_tokens == nil
     end
   end
+
+  test "provision threads environment fields into the harness spec, and the spec-hash covers them" do
+    base = %{system_prompt: "x", tools: [], model_config: %{"m" => 1}}
+
+    with_env =
+      Map.merge(base, %{
+        environment: %{
+          "agentCoreRuntimeEnvironment" => %{
+            "filesystemConfigurations" => [%{"sessionStorage" => %{"mountPath" => "/mnt/data"}}]
+          }
+        },
+        environment_variables: %{"A" => "1"}
+      })
+
+    # Differently-mounted specs must provision under different deterministic names —
+    # otherwise they'd collide in the Provisioner cache.
+    refute P.harness_name(base, "t") == P.harness_name(with_env, "t")
+
+    test_pid = self()
+
+    create_fun = fn harness_spec ->
+      send(test_pid, {:harness_spec, harness_spec})
+
+      {:ok,
+       %{
+         "harness" => %{
+           "arn" => "arn:aws:bedrock-agentcore:us-east-1:1:harness/x",
+           "harnessId" => "x"
+         }
+       }}
+    end
+
+    get_fun = fn _ -> {:ok, %{"harness" => %{"status" => "READY"}}} end
+
+    assert {:ok, _} =
+             P.provision(with_env,
+               execution_role_arn: "arn:aws:iam::1:role/r",
+               create_fun: create_fun,
+               get_fun: get_fun
+             )
+
+    assert_received {:harness_spec, hs}
+    assert hs.environment == with_env.environment
+    assert hs.environment_variables == %{"A" => "1"}
+  end
 end

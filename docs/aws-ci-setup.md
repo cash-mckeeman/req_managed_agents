@@ -19,6 +19,8 @@ live by canary run 9 on 2026-07-03 — see the permission ladder below):
 - Create/Get/Delete/Invoke in **both namings** (`*AgentRuntime*` and
   `*Harness*` action names) + endpoint lifecycle, on `runtime/*`,
   `runtime/*/runtime-endpoint/*`, `harness/*`, `harness/*/harness-endpoint/*`
+- `InvokeAgentRuntimeCommand` / `InvokeHarnessCommand` (dual-naming, command API /
+  SessionStorage artifacts store; applied 2026-07-03)
 - `ListAgentRuntimes` / `ListHarnesses` on the account+region
 - `CreateWorkloadIdentity` / `GetWorkloadIdentity` / `DeleteWorkloadIdentity`
   on `workload-identity-directory/default(/workload-identity/*)`
