@@ -196,8 +196,9 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
 
     assert {:ok, _} = Client.get_harness(client, "h2")
 
-    assert_receive {:telemetry_stop, meta}
-    assert meta.operation == :get_harness
+    # Selective receive: the handler is global, so concurrent async tests'
+    # request events also land in this mailbox — match only ours.
+    assert_receive {:telemetry_stop, %{operation: :get_harness} = meta}
     assert meta.service == "bedrock-agentcore"
     assert meta.method == :get
   end
