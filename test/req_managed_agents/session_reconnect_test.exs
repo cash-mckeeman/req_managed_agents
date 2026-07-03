@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.SessionReconnectTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Session
   alias ReqManagedAgents.FakeProviders.ReconnectingStreaming
+  alias ReqManagedAgents.Session
 
   test "a live streaming session reconnects on a stream drop and re-drives unanswered tool calls" do
     test = self()

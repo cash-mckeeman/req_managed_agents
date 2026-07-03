@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Providers.ClaudeManagedAgents, as: ManagedAgents
   alias ReqManagedAgents.Client
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents, as: ManagedAgents
 
   @spec_claude %{
     system_prompt: "sys",

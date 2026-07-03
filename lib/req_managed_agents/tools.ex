@@ -15,20 +15,18 @@ defmodule ReqManagedAgents.Tools do
   end
 
   defp do_run(handler, id, name, input, context) do
-    try do
-      result =
-        cond do
-          is_function(handler, 3) -> handler.(name, input, context)
-          is_atom(handler) -> handler.handle_tool_call(name, input, context)
-        end
-
-      case result do
-        {:ok, text} -> Event.custom_tool_result(id, to_string(text))
-        {:error, text} -> Event.custom_tool_result(id, to_string(text), is_error: true)
+    result =
+      cond do
+        is_function(handler, 3) -> handler.(name, input, context)
+        is_atom(handler) -> handler.handle_tool_call(name, input, context)
       end
-    catch
-      kind, reason ->
-        Event.custom_tool_result(id, "tool #{kind}: #{inspect(reason)}", is_error: true)
+
+    case result do
+      {:ok, text} -> Event.custom_tool_result(id, to_string(text))
+      {:error, text} -> Event.custom_tool_result(id, to_string(text), is_error: true)
     end
+  catch
+    kind, reason ->
+      Event.custom_tool_result(id, "tool #{kind}: #{inspect(reason)}", is_error: true)
   end
 end

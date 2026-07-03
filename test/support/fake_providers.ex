@@ -6,7 +6,7 @@ defmodule ReqManagedAgents.FakeProviders do
 
   defmodule Shared do
     @moduledoc false
-    alias ReqManagedAgents.{TurnResult, ToolUse, Usage}
+    alias ReqManagedAgents.{ToolUse, TurnResult, Usage}
 
     def normalize(events) do
       customs =
