@@ -9,6 +9,9 @@ defmodule ReqManagedAgents.Artifacts.AgentCoreSessionStorage do
   to `[A-Za-z0-9._-]` (no separators, no traversal). A verb that exits non-zero
   unexpectedly returns `{:error, {:command_failed, %CommandResult{}}}` — stderr
   is never swallowed.
+
+  Concurrent `put`s of the SAME name in the same store race on a fixed
+  `.rma_b64_part` temp path — callers must serialize same-name writes.
   """
   @behaviour ReqManagedAgents.Artifacts
 
@@ -25,8 +28,16 @@ defmodule ReqManagedAgents.Artifacts.AgentCoreSessionStorage do
   Build a store term. `base_path` is the harness's `sessionStorage` mountPath
   (e.g. `"/mnt/data"`). `command_fun` is injectable for tests; defaults to
   `ReqManagedAgents.AgentCore.Client.invoke_agent_runtime_command/2` on `client`.
+
+  Raises `ArgumentError` if `base_path` contains a single quote: paths are
+  single-quoted into shell commands, and `base_path` is operator-controlled
+  config, so a bad value is a construction-time programmer error.
   """
   def store(client, agent_runtime_arn, runtime_session_id, base_path, opts \\ []) do
+    if String.contains?(base_path, "'") do
+      raise ArgumentError, "base_path must not contain single quotes: #{inspect(base_path)}"
+    end
+
     %{
       arn: agent_runtime_arn,
       sid: runtime_session_id,
@@ -156,8 +167,10 @@ defmodule ReqManagedAgents.Artifacts.AgentCoreSessionStorage do
     end
   end
 
-  # POSIX single-quote escaping: close, escaped quote, reopen. argv values are
-  # library-controlled (validated names, base_path, base64) — this guards the
+  # POSIX single-quote escaping: close, escaped quote, reopen. argv values
+  # cannot break out of their quoting: names are charset-validated (no quotes),
+  # Base64's alphabet excludes quotes, and base_path is OPERATOR-controlled and
+  # guarded at store/5 construction (raises on single quotes). This guards the
   # python SOURCE, which contains no single quotes by construction, defensively.
   defp escape_single_quotes(s), do: String.replace(s, "'", "'\\''")
 

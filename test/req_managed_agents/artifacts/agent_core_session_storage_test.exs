@@ -95,6 +95,17 @@ defmodule ReqManagedAgents.Artifacts.AgentCoreSessionStorageTest do
     assert {:error, {:invalid_name, "a'b"}} = Artifacts.delete(store(fun), "a'b")
   end
 
+  test "store/5 raises on a base_path containing a single quote" do
+    assert_raise ArgumentError, ~r/base_path must not contain single quotes/, fn ->
+      Storage.store(
+        :c,
+        "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x",
+        String.duplicate("s", 33),
+        "/mnt/user's-data"
+      )
+    end
+  end
+
   test "transport errors pass through" do
     fun = fn _ -> {:error, :timeout} end
     assert {:error, :timeout} = Artifacts.list(store(fun))
