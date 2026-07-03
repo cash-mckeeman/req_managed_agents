@@ -16,8 +16,8 @@ Phase order: [P1] 1,2,QA-A,PR1 → [P2] 3,6,7,QA-B,PR2 → [P3] 4,5,8,9,[10 cont
 - [x] P3 Task 4: environment spec fields
 - [x] P3 Task 5: CommandResult + command API
 - [x] P3 Task 8: AgentCoreSessionStorage store
-- [ ] P3 Task 9: docs
-- [ ] P3 Task 10: IAM (controller)
+- [x] P3 Task 9: docs
+- [x] P3 Task 10: IAM (controller)
 - [ ] P3 Task 11: canary legs
 - [ ] P3 QA-CHECKPOINT C
 - [ ] P3 Task 12: QA sweep + v0.3.0 + PR 3
@@ -36,3 +36,4 @@ P3 Task 4: complete (commit 4f27d754, preflight PASS, review clean — Spec ✅ 
 P3 Task 10 (IAM, controller): AWS half APPLIED with user approval — inline policy rma-ci-harness-lifecycle on rma-ci-github gained InvokeAgentRuntimeCommand + InvokeHarnessCommand (verified read-back, 18 actions). docs/aws-ci-setup.md line rides Task 9.
 P3 Task 5: complete (commit 2b89f029, preflight PASS, review clean — Spec ✅ / Approved; two credo-driven extractions verified semantics-identical; brief JSON-escape typo fixed by implementer, validated by reviewer). Suite 228, strict credo clean. ARN-in-path SigV4 validation deferred to live canary (documented risk).
 P3 Task 8: complete (commits 0b3b4e94 + fix 25b13631; review Approved with Important [base_path misclassified as library-controlled] → fixed: store/5 raises on quotes, comment corrected, temp-race doc note, raise test; fix diff controller-verified). Suite 235, strict credo clean. Minor recorded: chunk_every char-list round-trip (allocation nit) — final-review candidate.
+P3 Task 9: complete (commit 67e7cbc7, preflight PASS, review clean — Spec ✅ / Approved, verbatim fidelity, handler moduledoc supersede judged correct; aws-ci-setup IAM line landed). Gates clean, suite 235.
