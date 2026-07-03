@@ -160,7 +160,11 @@ Three runnable, heavily-commented examples ship with the package:
 | `[:req_managed_agents, :session, :tool_uses]` | `tool_use_count` | `turn`, `tool_use_ids` |
 | `[:req_managed_agents, :session, :terminal]` | — | `terminal` |
 
-Both providers run through `Session`, so the `:session` events fire regardless of backend. Pass
+Both providers run through `Session`, so the `:session` events fire regardless of backend.
+`:stream` `:event` also fires for **both** providers as events arrive mid-turn — on Claude,
+`type` is the SSE event type and `session_id`/`usage` are set; on Bedrock AgentCore, `type` is
+the Converse envelope key (e.g. `"contentBlockDelta"`) and there is no `session_id`. The other
+`:stream` events (`:connected`/`:done`/`:error`) are Claude-only. Pass
 `telemetry_metadata: %{…}` to merge custom tags (e.g. tenant) into every event; library-set keys
 take precedence. `ReqManagedAgents.OpenTelemetry` bridges these to OTel GenAI spans.
 

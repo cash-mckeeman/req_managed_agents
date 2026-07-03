@@ -33,6 +33,9 @@ defmodule Demo.Handler do
   def handle_tool_call("lookup_customer", %{"email" => email}, _ctx),
     do: {:ok, "Customer #{email}: Pro plan, active, last invoice $49.00 on 2026-05-01."}
 
+  # Fires LIVE while the turn streams — one call per Converse event as it
+  # arrives (observational; at-least-once across retried attempts). The
+  # canonical exactly-once record is `SessionResult.events`.
   @impl true
   def handle_event(_ev, _ctx), do: :ok
 end
@@ -90,13 +93,27 @@ IO.puts("provisioned harness #{handle.harness_id}")
 # ── 2. Run a session — the provider-agnostic entrypoint ─────────────────────
 #
 # Note the AgentCore session-id contract: 33–100 chars, [a-zA-Z0-9-_].
+#
+# Long-run posture: the turn streams incrementally with NO client wall clock —
+# only silence fails it (`idle_timeout`, default 300_000 ms between chunks).
+# Total cost is bounded SERVER-side; the budgets below override the harness
+# defaults (timeoutSeconds 3600, maxIterations 75) for this invocation only.
+# Two things to know for long runs:
+#   * `Session.run/2`'s own `:timeout` (default 600_000 ms) must be ≥ your
+#     server budget — a client timeout returns {:error, :timeout} but does NOT
+#     cancel the in-flight turn; the harness keeps executing (and billing)
+#     server-side up to its `timeoutSeconds`.
+#   * Events reach `handle_event/2` live as the turn runs — you can watch a
+#     multi-minute turn progress instead of waiting for it to finish.
 {:ok, result} =
   ReqManagedAgents.Session.run(BedrockAgentCore,
     harness_arn: handle.harness_arn,
     runtime_session_id:
       "example-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),
     prompt: "What plan is jane@acme.com on, and when was she last billed?",
-    handler: Demo.Handler
+    handler: Demo.Handler,
+    timeout_seconds: 900,
+    max_iterations: 40
   )
 
 IO.puts("""

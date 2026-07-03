@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/cash-mckeeman/req_managed_agents"
 
   def project do
