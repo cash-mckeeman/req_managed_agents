@@ -3,7 +3,7 @@ defmodule ReqManagedAgents.Provisioner.StoreFileTest do
 
   import ExUnit.CaptureLog
   alias ReqManagedAgents.Provisioner.Store
-  alias ReqManagedAgents.Provisioner.StoreContractTest.Contract
+  alias ReqManagedAgents.StoreContract
 
   setup do
     dir = System.tmp_dir!() |> Path.join("rma_store_#{System.unique_integer([:positive])}")
@@ -13,7 +13,7 @@ defmodule ReqManagedAgents.Provisioner.StoreFileTest do
   end
 
   test "satisfies the store contract", %{path: path} do
-    Contract.run(Store.File, path: path)
+    StoreContract.run(Store.File, path: path)
   end
 
   test "persists across store instances (fresh-OS-process simulation)", %{path: path} do

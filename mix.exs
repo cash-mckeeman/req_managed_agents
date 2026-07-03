@@ -62,7 +62,9 @@ defmodule ReqManagedAgents.MixProject do
       plt_local_path: "priv/plts",
       plt_core_path: "priv/plts",
       # Mix tasks call Mix.shell/Mix.raise; Mix isn't in the core PLT.
-      plt_add_apps: [:mix],
+      # :ex_unit — test/support modules (StoreContract) import ExUnit.Assertions
+      # and CI dialyzes under MIX_ENV=test.
+      plt_add_apps: [:mix, :ex_unit],
       ignore_warnings: ".dialyzer_ignore.exs"
     ]
   end
