@@ -21,6 +21,10 @@ defmodule ReqManagedAgents.Session do
 
   Required opts: `:handler` (a `ReqManagedAgents.Handler` module or a 3-arity fn). Optional:
   `:context`, `:prompt`, `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`.
+  For long AgentCore runs set `:timeout` (the end-to-end run budget, default 600_000 ms)
+  at or above the server-side budget; transport liveness is guarded per turn by
+  `:idle_timeout` and total cost by the `:timeout_seconds`/`:max_iterations`/`:max_tokens`
+  per-invocation overrides (Bedrock AgentCore only).
   Provider-specific opts (e.g. `:agent_id`/`:environment_id`, `:harness_arn`/`:runtime_session_id`,
   `:session_id` to resume) are forwarded to the provider's `open/2`.
   """

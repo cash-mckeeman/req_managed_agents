@@ -8,6 +8,11 @@ defmodule ReqManagedAgents.AgentCore.Client do
   Infra-agnostic: it knows AgentCore's model-config surface, nothing about what
   sits behind a `liteLlmModelConfig.apiBase`. Build with `new/1`; pass as the
   first arg to every call. Transport is injectable via `:req_options` for tests.
+
+  The invoke data plane streams incrementally: `receive_timeout` on this struct governs
+  control-plane calls only, while `invoke_harness/2` uses the per-invoke `:idle_timeout`
+  (default 300_000 ms) as an inter-chunk liveness guard — a healthy turn may run
+  arbitrarily long; only silence fails it.
   """
   alias ReqManagedAgents.AgentCore.{SigV4, EventStream}
 

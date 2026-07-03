@@ -126,6 +126,10 @@ Three runnable, heavily-commented examples ship with the package:
 2. `Session.run(BedrockAgentCore, harness_arn: …, runtime_session_id: …, …)`. Each turn is one
    synchronous signed invoke; resume re-sends the assistant `toolUse` + your `toolResult` delta.
    (`runtimeSessionId` must be ≥33 chars.)
+   Long runs: pass `idle_timeout:` (inter-chunk liveness guard, default 300s — the turn
+   itself has **no client wall clock**) and the server budgets `timeout_seconds:`,
+   `max_iterations:`, `max_tokens:` (per-invocation overrides of the harness defaults).
+   Events stream to your `Handler.handle_event/2` live as the turn runs.
 
 ## Layers
 

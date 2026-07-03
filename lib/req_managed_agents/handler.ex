@@ -4,6 +4,11 @@ defmodule ReqManagedAgents.Handler do
   into `ReqManagedAgents.Session`. This is the "tools stay local" seam: the
   managed loop runs on Anthropic's side and calls back into `handle_tool_call/3`
   on your node.
+
+  `handle_event/2` is observational and **at-least-once**: on reconnect (Claude) or a
+  retried turn (Bedrock AgentCore), events from an aborted attempt may be delivered
+  before the successful attempt's. The canonical exactly-once record is
+  `ReqManagedAgents.SessionResult.events`.
   """
 
   @doc """
