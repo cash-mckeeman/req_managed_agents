@@ -7,7 +7,10 @@ defmodule ReqManagedAgents.Handler do
 
   `handle_event/2` is observational and **at-least-once**: on reconnect (Claude) or a
   retried turn (Bedrock AgentCore), events from an aborted attempt may be delivered
-  before the successful attempt's. The canonical exactly-once record is
+  before the successful attempt's. When no attempt succeeds (retries exhausted), events
+  live-delivered here were still observed even though the run returns an error; error frames
+  surfaced by the transport (e.g. a `"__stream_error__"` envelope on Bedrock AgentCore) may
+  also appear on this observational surface. The canonical exactly-once record is
   `ReqManagedAgents.SessionResult.events`.
   """
 

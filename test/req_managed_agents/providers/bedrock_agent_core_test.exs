@@ -372,7 +372,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       assert_received {:provider_event, %{"messageStart" => %{"role" => "assistant"}}}
     end
 
-    test "budgets default to nil and on_event still targets the subscriber" do
+    test "budgets default to nil when not provided" do
       test_pid = self()
 
       invoke_fun = fn inv ->

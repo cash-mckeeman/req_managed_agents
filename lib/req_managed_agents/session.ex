@@ -22,9 +22,11 @@ defmodule ReqManagedAgents.Session do
   Required opts: `:handler` (a `ReqManagedAgents.Handler` module or a 3-arity fn). Optional:
   `:context`, `:prompt`, `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`.
   For long AgentCore runs set `:timeout` (the end-to-end run budget, default 600_000 ms)
-  at or above the server-side budget; transport liveness is guarded per turn by
-  `:idle_timeout` and total cost by the `:timeout_seconds`/`:max_iterations`/`:max_tokens`
-  per-invocation overrides (Bedrock AgentCore only).
+  at or above the server-side budget — a `run/2` timeout returns `{:error, :timeout}` but does
+  NOT cancel the in-flight invoke; the harness keeps executing (and billing) server-side up to
+  its own `timeoutSeconds`. Transport liveness is guarded per turn by `:idle_timeout` and total
+  cost by the `:timeout_seconds`/`:max_iterations`/`:max_tokens` per-invocation overrides
+  (Bedrock AgentCore only).
   Provider-specific opts (e.g. `:agent_id`/`:environment_id`, `:harness_arn`/`:runtime_session_id`,
   `:session_id` to resume) are forwarded to the provider's `open/2`.
   """
@@ -408,6 +410,7 @@ defmodule ReqManagedAgents.Session do
 
   # A Converse-envelope event is a single-key map (%{"messageStop" => …}).
   defp envelope_type(%{} = ev), do: ev |> Map.keys() |> List.first()
+  defp envelope_type(_), do: nil
 
   defp forward_raw(%{handler: h, context: ctx}, ev) when is_atom(h) and h != nil do
     if function_exported?(h, :handle_event, 2), do: h.handle_event(ev, ctx)

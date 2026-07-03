@@ -130,6 +130,63 @@ defmodule ReqManagedAgents.SessionLiveEventsTest do
     refute_received {:handler_saw, _}
   end
 
+  # Provider that sends a non-map live event before the normal turn — regression
+  # guard for the envelope_type/1 catch-all (non-map frames must not crash the Session).
+  defmodule NonMapEventRR do
+    @behaviour ReqManagedAgents.Provider
+    alias ReqManagedAgents.TurnResult
+
+    @impl true
+    def mode, do: :request_response
+    @impl true
+    def provision(_spec, _opts), do: {:error, :not_implemented}
+    @impl true
+    def open(opts, subscriber), do: {:ok, %{subscriber: subscriber, opts: opts}}
+    @impl true
+    def kickoff_input(_opts), do: [:kickoff]
+    @impl true
+    def user_input(text), do: [{:user, text}]
+    @impl true
+    def resume_input(_uses, _results), do: [:resume]
+
+    @impl true
+    def poll_turn(conn, _input) do
+      events = [
+        %{"messageStart" => %{"role" => "assistant"}},
+        %{"messageStop" => %{"stopReason" => "end_turn"}}
+      ]
+
+      # Send a non-map frame first (e.g. a bare JSON string from a headerless frame).
+      send(conn.subscriber, {:provider_event, "not-a-map"})
+      Enum.each(events, &send(conn.subscriber, {:provider_event, &1}))
+      {:ok, events, conn}
+    end
+
+    @impl true
+    def normalize(events) do
+      %TurnResult{
+        terminal: :end_turn,
+        stop_reason: "end_turn",
+        text: "",
+        custom_tool_uses: [],
+        server_tool_uses: [],
+        usage: nil,
+        events: events
+      }
+    end
+  end
+
+  test "session survives a non-map live event (envelope_type catch-all)" do
+    assert {:ok, result} =
+             ReqManagedAgents.Session.run(NonMapEventRR,
+               handler: CountingHandler,
+               context: %{test_pid: self()},
+               prompt: "go"
+             )
+
+    assert result.terminal == :end_turn
+  end
+
   test "live events emit [:req_managed_agents, :stream, :event] telemetry with the envelope type" do
     test_pid = self()
     handler_id = "live-events-telemetry-#{inspect(self())}"

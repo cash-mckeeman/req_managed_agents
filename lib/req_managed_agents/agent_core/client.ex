@@ -208,6 +208,9 @@ defmodule ReqManagedAgents.AgentCore.Client do
     ]
     |> Keyword.merge(extra)
     |> Req.new()
+    # req_options merges last and therefore overrides per-call options (including the
+    # invoke path's receive_timeout-as-idle-timeout). It is the test-injection seam
+    # and wins on conflict by design.
     |> Req.merge(c.req_options)
     |> Req.request(method: method, body: body)
   end
@@ -249,10 +252,15 @@ defmodule ReqManagedAgents.AgentCore.Client do
   defp accumulate_ok_chunk(resp, chunk, on_event) do
     buffer = Map.get(resp.private, :rma_buffer, "") <> chunk
     {events, rest} = EventStream.decode(buffer)
+    # Fire on_event in stream order (events is already ordered within the chunk).
     if on_event, do: Enum.each(events, on_event)
 
+    # Prepend rather than append to keep accumulation O(n); streamed_events/1
+    # reverses once before returning to restore stream order.
+    acc = Enum.reverse(events, Map.get(resp.private, :rma_events, []))
+
     resp
-    |> Req.Response.put_private(:rma_events, Map.get(resp.private, :rma_events, []) ++ events)
+    |> Req.Response.put_private(:rma_events, acc)
     |> Req.Response.put_private(:rma_buffer, rest)
   end
 
@@ -268,7 +276,8 @@ defmodule ReqManagedAgents.AgentCore.Client do
         []
 
       events ->
-        events
+        # The accumulator is stored in reverse (prepend-for-O(n)); restore stream order here.
+        Enum.reverse(events)
     end
   end
 

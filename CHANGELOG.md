@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so long-running turns complete while dead connections fail fast.
 - `Handler.handle_event/2` fires live during AgentCore turns (previously only after the
   turn completed) and is documented as at-least-once across retried attempts.
+- `Client.new`'s `receive_timeout` now governs control-plane calls only; the invoke data
+  plane is guarded by the per-invoke `idle_timeout` instead (callers who used
+  `receive_timeout` to cap invokes should now pass `idle_timeout`/`timeout_seconds`).
 
 ### Added
 - Per-invocation AgentCore server budgets on `Session.run/2` opts: `timeout_seconds`,
