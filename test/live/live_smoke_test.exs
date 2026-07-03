@@ -332,7 +332,8 @@ defmodule ReqManagedAgents.LiveSmokeTest do
                agent_id: agent_id,
                environment_id: env_id,
                prompt:
-                 "Save a note: write the text 'artifact-canary-ok' to /mnt/session/outputs/note.txt",
+                 "Save a note: write the text 'artifact-canary-ok' to " <>
+                   ClaudeFiles.output_path("note.txt"),
                handler: Handler,
                timeout: 180_000
              )
