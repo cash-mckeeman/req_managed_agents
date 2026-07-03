@@ -1,27 +1,31 @@
 defmodule ReqManagedAgents.Provisioner do
   @moduledoc """
   Hash-keyed provision cache. `ensure/3` returns a cached provider `handle` for a given
-  `{provider, spec}`, calling `provider.provision/2` only on a miss. ETS-backed
-  (process-independent); the handle is the durable artifact (persistable + reusable across
-  processes), so the cache is an in-process optimization, not the source of truth.
+  `{provider, spec}`, calling `provider.provision/2` only on a miss. The handle is the
+  durable artifact; where the `{hash → handle}` mapping lives is pluggable via the
+  `ReqManagedAgents.Provisioner.Store` behaviour (`:store` option) — in-process ETS by
+  default, or a persistent store (e.g. `Store.File`) for reuse across OS processes.
   """
+  require Logger
   alias ReqManagedAgents.Provider
-  @table :req_managed_agents_provisions
+  alias ReqManagedAgents.Provisioner.Store
+
+  @default_store {Store.ETS, :req_managed_agents_provisions}
 
   @spec ensure(module(), Provider.spec(), keyword()) ::
           {:ok, Provider.handle()} | {:error, term()}
   def ensure(provider, spec, opts \\ []) do
-    table = ensure_table()
-    key = hash({provider, spec})
+    {mod, sopts} = opts[:store] || @default_store
+    key = "provision:" <> hash({provider, spec})
 
-    case :ets.lookup(table, key) do
-      [{^key, handle}] ->
+    case safe_get(mod, sopts, key) do
+      {:ok, handle} ->
         {:ok, handle}
 
-      [] ->
+      :miss ->
         case provider.provision(spec, opts) do
           {:ok, handle} ->
-            :ets.insert(table, {key, handle})
+            safe_put(mod, sopts, key, handle)
             {:ok, handle}
 
           {:error, reason} ->
@@ -30,24 +34,41 @@ defmodule ReqManagedAgents.Provisioner do
     end
   end
 
-  @doc "Drop any cache entry whose value is `handle` (called after teardown)."
-  @spec evict(Provider.handle()) :: :ok
-  def evict(handle) do
-    if :ets.whereis(@table) != :undefined, do: :ets.match_delete(@table, {:"$1", handle})
+  @doc """
+  Drop any cache entry whose value is `handle` (called after teardown). With a
+  persistent store (e.g. `Store.File`) the handle must be JSON-encodable —
+  same constraint as `ensure/3`'s store writes; non-encodable values raise.
+  """
+  @spec evict(Provider.handle(), keyword()) :: :ok
+  def evict(handle, opts \\ []) do
+    {mod, sopts} = opts[:store] || @default_store
+    mod.delete_value(sopts, handle)
     :ok
   end
 
   @doc false
-  def reset,
-    do: if(:ets.whereis(@table) != :undefined, do: :ets.delete_all_objects(@table), else: :ok)
+  def reset do
+    {_mod, table} = @default_store
+    if :ets.whereis(table) != :undefined, do: :ets.delete_all_objects(table)
+    :ok
+  end
 
-  defp hash(term),
+  @doc false
+  def hash(term),
     do: :crypto.hash(:sha256, :erlang.term_to_binary(term, [:deterministic])) |> Base.encode16()
 
-  defp ensure_table do
-    case :ets.whereis(@table) do
-      :undefined -> :ets.new(@table, [:named_table, :public, :set])
-      _ref -> @table
-    end
+  # A broken cache must not block provisioning (loud-but-safe).
+  defp safe_get(mod, sopts, key) do
+    mod.get(sopts, key)
+  rescue
+    e ->
+      Logger.warning("provision store get failed (treating as miss): #{inspect(e)}")
+      :miss
+  end
+
+  defp safe_put(mod, sopts, key, value) do
+    mod.put(sopts, key, value)
+  rescue
+    e -> Logger.warning("provision store put failed (handle still returned): #{inspect(e)}")
   end
 end
