@@ -296,8 +296,19 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     end
   end
 
+  # PROVIDER-GATED (verified 2026-07-03 over three live probe rounds): today's
+  # Managed Agents beta does not associate sandbox-written files to session
+  # scope (scoped list stays empty before AND after archive; sthr_ ids are
+  # invalid scopes) and marks such file objects non-downloadable. Our wire
+  # calls are correct per the platform docs; the provider flow isn't live yet
+  # (the outcomes/deliverables path may be the intended route). `live: false`
+  # The scheduled canary excludes it via `--exclude cma_artifacts_probe`
+  # (an ExUnit `--only live` matches tag PRESENCE, so a `live: false` override
+  # would not deselect it). Probe manually with
+  #   mix test test/live/live_smoke_test.exs --only cma_artifacts_probe
+  # and drop the probe tag the day it passes.
   @tag timeout: 240_000
-  @tag :live_cma_artifacts
+  @tag :cma_artifacts_probe
   test "CMA artifacts: agent writes a file → Artifacts list/fetch/delete round-trip" do
     alias ReqManagedAgents.Artifacts
     alias ReqManagedAgents.Artifacts.ClaudeFiles
