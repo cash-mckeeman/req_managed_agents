@@ -213,4 +213,54 @@ defmodule ReqManagedAgents.ClientTest do
                mount_path: "/data/d.txt"
              })
   end
+
+  test "list_files sends GET /v1/files with scope_id param and BOTH beta headers", %{
+    client: client
+  } do
+    Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+      assert conn.method == "GET"
+      assert conn.request_path == "/v1/files"
+      assert conn.query_string =~ "scope_id=sess_1"
+
+      assert {"anthropic-beta", beta} =
+               Enum.find(conn.req_headers, fn {k, _} -> k == "anthropic-beta" end)
+
+      assert beta =~ "files-api-2025-04-14"
+      assert beta =~ "managed-agents-2026-04-01"
+
+      Req.Test.json(conn, %{
+        "data" => [%{"id" => "file_1", "filename" => "report.md", "size_bytes" => 12}]
+      })
+    end)
+
+    assert {:ok, %{"data" => [%{"id" => "file_1"}]}} =
+             ReqManagedAgents.Client.list_files(client, params: %{scope_id: "sess_1"})
+  end
+
+  test "list_files without params sends no query string", %{client: client} do
+    Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+      assert conn.method == "GET"
+      assert conn.request_path == "/v1/files"
+      assert conn.query_string == ""
+      Req.Test.json(conn, %{"data" => []})
+    end)
+
+    assert {:ok, %{"data" => []}} = ReqManagedAgents.Client.list_files(client)
+  end
+
+  test "delete_file sends DELETE /v1/files/{id} with both beta headers", %{client: client} do
+    Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+      assert conn.method == "DELETE"
+      assert conn.request_path == "/v1/files/file_9"
+
+      assert {"anthropic-beta", beta} =
+               Enum.find(conn.req_headers, fn {k, _} -> k == "anthropic-beta" end)
+
+      assert beta =~ "files-api-2025-04-14"
+      assert beta =~ "managed-agents-2026-04-01"
+      Req.Test.json(conn, %{"id" => "file_9", "deleted" => true})
+    end)
+
+    assert {:ok, %{"deleted" => true}} = ReqManagedAgents.Client.delete_file(client, "file_9")
+  end
 end

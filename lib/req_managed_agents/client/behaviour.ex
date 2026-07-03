@@ -32,4 +32,6 @@ defmodule ReqManagedAgents.Client.Behaviour do
   @callback upload_file(Client.t(), map()) :: result()
   @callback download_file(Client.t(), String.t()) :: {:ok, binary()} | {:error, term()}
   @callback attach_file_to_session(Client.t(), String.t(), map()) :: result()
+  @callback list_files(Client.t(), keyword()) :: result()
+  @callback delete_file(Client.t(), String.t()) :: result()
 end

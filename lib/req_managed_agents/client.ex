@@ -216,6 +216,30 @@ defmodule ReqManagedAgents.Client do
         mount_path: mount_path
       })
 
+  @impl true
+  def list_files(c, opts \\ []) do
+    # Session-scoped listing (scope_id) requires BOTH betas — same combination
+    # download_file/2 sends; harmless when unscoped.
+    combined = "#{c.files_beta},#{c.beta}"
+
+    span(:get, "/v1/files", fn ->
+      c
+      |> file_req("/v1/files", file_headers(c, combined), [])
+      |> Req.get(params: opts[:params] || %{})
+    end)
+  end
+
+  @impl true
+  def delete_file(c, file_id) do
+    combined = "#{c.files_beta},#{c.beta}"
+
+    span(:delete, "/v1/files/#{file_id}", fn ->
+      c
+      |> file_req("/v1/files/#{file_id}", file_headers(c, combined), [])
+      |> Req.delete()
+    end)
+  end
+
   # ---- HTTP primitives -------------------------------------------------------
 
   defp post(c, path, body),
