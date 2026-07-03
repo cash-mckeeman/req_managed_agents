@@ -44,20 +44,23 @@ alias ReqManagedAgents.Session
 alias ReqManagedAgents.Providers.{ClaudeManagedAgents, BedrockAgentCore}
 
 # Claude Managed Agents (streaming)
-{:ok, %{terminal: terminal, stop_reason: stop_reason, events: events}} =
+{:ok, %ReqManagedAgents.SessionResult{} = result} =
   Session.run(ClaudeManagedAgents,
     client: ReqManagedAgents.new(), agent_id: agent_id, environment_id: env_id,
     prompt: "…", handler: MyHandler)
 
-# AWS Bedrock AgentCore (request/response) — same handler, same result shape
-{:ok, _} =
+result.terminal   # :end_turn | :requires_action | :terminated — uniform across providers
+result.text       # the assistant's accumulated text
+result.usage      # %ReqManagedAgents.Usage{input_tokens:, output_tokens:, …}
+
+# AWS Bedrock AgentCore (request/response) — same handler, same result struct
+{:ok, %ReqManagedAgents.SessionResult{}} =
   Session.run(BedrockAgentCore,
-    harness_arn: arn, runtime_session_id: sid, model: "bedrock:anthropic.claude-sonnet-4",
+    harness_arn: arn, runtime_session_id: sid,
     prompt: "…", handler: MyHandler)
 ```
 
-`terminal` (`:end_turn` / `:requires_action` / `:terminated`) is the **uniform** signal to branch
-on. `stop_reason` is each provider's **raw native value** (a map for Claude, e.g.
+`terminal` is the **uniform** signal to branch on. `stop_reason` is each provider's **raw native value** (a map for Claude, e.g.
 `%{"type" => "end_turn"}`; a string for Bedrock, e.g. `"end_turn"`) — preserved verbatim, never
 flattened. The raw events are always in `events`.
 
@@ -95,10 +98,16 @@ defmodule MyHandler do
 end
 ```
 
-See [`examples/local_tool_example.exs`](examples/local_tool_example.exs) for a complete Claude run
-(agent + environment setup, plain-function handler) and
-[`examples/provider_agnostic_example.exs`](examples/provider_agnostic_example.exs) for the same
-handler driven against **both** providers.
+Three runnable, heavily-commented examples ship with the package:
+
+- [`examples/claude_managed_agents.exs`](examples/claude_managed_agents.exs) — the full Claude
+  lifecycle: agent + environment setup, a local tool handler, and the
+  `%SessionResult{}` (text, terminal, token usage).
+- [`examples/bedrock_agent_core.exs`](examples/bedrock_agent_core.exs) — AgentCore Harness:
+  `provision/3` (idempotent, READY-polled), `Session.run/2`, `teardown/2`, and the AWS
+  gotchas (session-id contract, cross-region model profiles, async deletion).
+- [`examples/provider_agnostic.exs`](examples/provider_agnostic.exs) — the core claim: one
+  handler, one loop, two providers, same result shape.
 
 ## The Claude pattern (setup)
 
@@ -110,9 +119,10 @@ handler driven against **both** providers.
 
 ## The Bedrock AgentCore pattern (setup)
 
-1. Provision a Harness once — CreateHarness + READY-poll, cached — via
-   `ReqManagedAgents.Provisioner.ensure/2` (built on `ReqManagedAgents.AgentCore.Client`). Reuse its
-   ARN.
+1. Provision a Harness once — CreateHarness + READY-poll, idempotent and cached — via
+   `ReqManagedAgents.provision/3` (`Provisioner.ensure/3` under the hood, built on
+   `ReqManagedAgents.AgentCore.Client`). Store the returned handle; tear down with
+   `ReqManagedAgents.teardown/2`.
 2. `Session.run(BedrockAgentCore, harness_arn: …, runtime_session_id: …, …)`. Each turn is one
    synchronous signed invoke; resume re-sends the assistant `toolUse` + your `toolResult` delta.
    (`runtimeSessionId` must be ≥33 chars.)
@@ -127,6 +137,8 @@ handler driven against **both** providers.
   AgentCore wire client, Converse decoding, and Harness provisioning.
 - `ReqManagedAgents.Event` / `.Consolidate` — pure builders, classification, reconnect helpers.
 - `ReqManagedAgents.ToolSchema` — custom-tool schema construction.
+- `ReqManagedAgents.SessionResult` / `.TurnResult` / `.Usage` / `.ToolUse` / `.ToolResult` — the
+  canonical result vocabulary shared by every provider.
 
 ## Telemetry
 
@@ -135,6 +147,7 @@ handler driven against **both** providers.
 | Event | Measurements | Metadata |
 |---|---|---|
 | `[:req_managed_agents, :request, :start \| :stop \| :exception]` | `duration` | `method`, `path`, `status` |
+| `[:req_managed_agents, :agent_core, :request, :start \| :stop \| :exception]` | `duration` | `operation`, `service`, `method`, `path`, `status` |
 | `[:req_managed_agents, :stream, :connected \| :event \| :done \| :error]` | — | `session_id`, `type`, `usage`, `reason` |
 | `[:req_managed_agents, :tool, :start \| :stop \| :exception]` | `duration` | `tool`, `session_id`, `is_error` |
 | `[:req_managed_agents, :session, :tool_uses]` | `tool_use_count` | `turn`, `tool_use_ids` |

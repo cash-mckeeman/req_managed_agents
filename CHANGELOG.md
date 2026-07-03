@@ -54,3 +54,6 @@ and the text result you return.
   truncated streams.
 - SigV4 signing is session-token aware (works with STS/OIDC temporary
   credentials).
+- Client structs redact secrets from `inspect/1` output (`api_key`, AWS
+  `credentials`) — a `KeyError` from missing session opts or a crash report
+  can't leak them into logs.
