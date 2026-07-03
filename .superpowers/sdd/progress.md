@@ -11,7 +11,7 @@ Phase order: [P1] 1,2,QA-A,PR1 → [P2] 3,6,7,QA-B,PR2 → [P3] 4,5,8,9,[10 cont
 - [ ] P1 QA-CHECKPOINT A + PR 1 (pause for merge)
 - [x] P2 Task 3: files primitives
 - [x] P2 Task 6: Artifacts behaviour/facade
-- [ ] P2 Task 7: ClaudeFiles store
+- [x] P2 Task 7: ClaudeFiles store
 - [ ] P2 QA-CHECKPOINT B + PR 2 (pause for merge)
 - [ ] P3 Task 4: environment spec fields
 - [ ] P3 Task 5: CommandResult + command API
@@ -29,3 +29,4 @@ P1 PR 1 (#35): MERGED (main e8986b95). Workspace rebased; suite 208 green on new
 ── Phase 2 ──
 P2 Task 3: complete (commit 03ed4c9e after controller rebase [second implementer-on-old-main incident — policy changed: sonnet floor + preflight base check] + controller-applied 2-line test-assertion fix from review; re-review Fix verified ✅ / Approved). Suite 211.
 P2 Task 6: complete (commit 1543c628, preflight PASS, review clean — Spec ✅ / Approved; verbatim behaviour/facade, tight store_term vs store() typing). Suite 213.
+P2 Task 7: complete (commit e69c52a6, preflight PASS, review clean — Spec ✅ / Approved; ISO-sort correctness + :not_found propagation + honest put-no-rollback verified; ⚠️ upload_file map shape resolved by controller — live canary uses same shape). Suite 219.
