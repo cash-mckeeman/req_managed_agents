@@ -96,4 +96,26 @@ defmodule ReqManagedAgents.Artifacts.ClaudeFilesTest do
     assert :ok = Artifacts.put(store, "in.csv", "a,b", mount_path: "/inputs/in.csv")
     assert_received {:attach, _, %{mount_path: "/inputs/in.csv"}}
   end
+
+  # A list body without a "data" key must not leak through as a bare {:ok, body}.
+  defmodule NoDataStubClient do
+    def list_files(_c, _opts), do: {:ok, %{}}
+  end
+
+  describe "unexpected list bodies" do
+    setup do
+      store =
+        {ClaudeFiles, ClaudeFiles.store(:fake_client, "sess_1", client_mod: NoDataStubClient)}
+
+      {:ok, store: store}
+    end
+
+    test "list normalizes a body without \"data\" to an error", %{store: store} do
+      assert {:error, {:unexpected_response, %{}}} = Artifacts.list(store)
+    end
+
+    test "fetch normalizes a body without \"data\" to an error (via newest/3)", %{store: store} do
+      assert {:error, {:unexpected_response, %{}}} = Artifacts.fetch(store, "report.md")
+    end
+  end
 end

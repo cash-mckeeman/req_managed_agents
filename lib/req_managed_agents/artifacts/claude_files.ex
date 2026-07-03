@@ -5,6 +5,10 @@ defmodule ReqManagedAgents.Artifacts.ClaudeFiles do
   server-minted file ids for files the agent wrote); `fetch`/`delete` act on the
   newest record when a name appears more than once (re-runs accumulate);
   `put` uploads and attaches at `opts[:mount_path]` (default `"/data/<name>"`).
+
+  The default mount path is built as `"/data/" <> name` with no sanitization —
+  callers passing untrusted names must validate them (path traversal, e.g.
+  `"../x"`, is forwarded verbatim).
   """
   @behaviour ReqManagedAgents.Artifacts
 
@@ -21,9 +25,10 @@ defmodule ReqManagedAgents.Artifacts.ClaudeFiles do
 
   @impl true
   def list(store, _opts \\ []) do
-    with {:ok, %{"data" => files}} <-
-           store.client_mod.list_files(store.client, params: %{scope_id: store.session_id}) do
-      {:ok, Enum.map(files, &to_artifact/1)}
+    case store.client_mod.list_files(store.client, params: %{scope_id: store.session_id}) do
+      {:ok, %{"data" => files}} -> {:ok, Enum.map(files, &to_artifact/1)}
+      {:ok, other} -> {:error, {:unexpected_response, other}}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -58,15 +63,21 @@ defmodule ReqManagedAgents.Artifacts.ClaudeFiles do
   end
 
   defp newest(store, name, _opts) do
-    with {:ok, %{"data" => files}} <-
-           store.client_mod.list_files(store.client, params: %{scope_id: store.session_id}) do
-      files
-      |> Enum.filter(&(&1["filename"] == name))
-      |> Enum.sort_by(& &1["created_at"], :desc)
-      |> case do
-        [newest | _] -> {:ok, newest}
-        [] -> {:error, :not_found}
-      end
+    case store.client_mod.list_files(store.client, params: %{scope_id: store.session_id}) do
+      {:ok, %{"data" => files}} ->
+        files
+        |> Enum.filter(&(&1["filename"] == name))
+        |> Enum.sort_by(& &1["created_at"], :desc)
+        |> case do
+          [newest | _] -> {:ok, newest}
+          [] -> {:error, :not_found}
+        end
+
+      {:ok, other} ->
+        {:error, {:unexpected_response, other}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
