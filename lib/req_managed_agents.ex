@@ -58,6 +58,14 @@ defmodule ReqManagedAgents do
   def provision(provider, spec, opts \\ []),
     do: ReqManagedAgents.Provisioner.ensure(provider, spec, opts)
 
+  @doc """
+  Build-if-absent for an environment image (Claude Managed Agents): content-addressed
+  by spec digest, named `<base>_<digest8>`, reused on every identical spec. See
+  `ReqManagedAgents.Provisioner.Environments`.
+  """
+  defdelegate ensure_environment(client, env_spec, opts \\ []),
+    to: ReqManagedAgents.Provisioner.Environments
+
   @doc "Tear down a provisioned resource and evict it from the provision cache."
   @spec teardown(module(), ReqManagedAgents.Provider.handle(), keyword()) ::
           :ok | {:error, term()}
