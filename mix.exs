@@ -76,7 +76,7 @@ defmodule ReqManagedAgents.MixProject do
       maintainers: ["cash-mckeeman"],
       # lib/mix is excluded on purpose: the QA/smoke mix tasks are internal
       # runbooks, not consumer surface.
-      files: ~w(lib/req_managed_agents lib/req_managed_agents.ex examples mix.exs
+      files: ~w(lib/req_managed_agents lib/req_managed_agents.ex examples priv mix.exs
                 README.md LICENSE CHANGELOG.md)
     ]
   end
