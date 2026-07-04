@@ -57,10 +57,12 @@ P2 Task 5: complete (commit 29cba367 after Critical fix round: cross-prefix base
 P2 QA-CHECKPOINT B: complete (QA doc 864dc6d5, 21/22; code_bug [normalize_or_miss atom clause over-match] + keep-matrix/index-survival test_gaps + parts:2 doc_issue ALL FIXED in f1088a48 with regressions incl. malformed-entry heal). Suite 264, strict credo clean.
 P2 COMPLETE — PR 2 opening WITHOUT pause per user stacking directive.
 ── Phase 3 (stacked on P2) ──
-- [ ] P3 Task 6: runtimes spec surface
-- [ ] P3 Task 7: SPIKE (controller, live, branch-dispatched)
+- [x] P3 Task 6: runtimes spec surface
+- [x] P3 Task 7: SPIKE — mechanism proven
 - [ ] P3 Task 8: realization (spike-gated)
 - [ ] P3 Task 9: canary legs
 - [ ] P3 Task 10: docs+CHANGELOG
 - [ ] P3 QA-C
 - [ ] P3 Task 11: v0.4.0 stamp + PR 3 (stacked on PR 2 branch)
+P3 Task 6: complete (commit 2b667164 after fix round: version regex guard [shell-injection close, guard/body split], string-keyed networking merge, priv_dir actionable raise, SpyStore ordering test). Review Approved-with-fixes, all folded. Suite 297, strict credo clean.
+P3 Task 7 SPIKE: COMPLETE — mechanism (b) PROVEN live in 4 rounds on probe/runtime-spike branch. Verdict: CMA sandbox = Ubuntu 24.04 x86_64 root+sudo, apt present, network open; mise installs in seconds; mise erlang PRECOMPILED for ubuntu-24.04 (erlang@29.0.2 in 5.4s, elixir 1.4s); full flow mise-installer→PATH export→use --global erlang→elixir → Elixir 1.20.2/OTP29 running (~11s total). Learnings for Task 8: template must prepend mise installer + PATH export (~/.local/bin + shims); persist PATH+locale to ~/.bashrc for subsequent agent bash calls; locale warning validates C.UTF-8 exports; ordering (erlang before elixir) is LOAD-BEARING (round-3 failure without it); apt fallback rejected (OTP 25 too old). Realization shape: handle carries bootstrap (mechanism c enriched) — no server-side build phase exists on CMA cloud envs. Surveys: scratchpad sdd040/spike-survey{2,3,4}.txt.
