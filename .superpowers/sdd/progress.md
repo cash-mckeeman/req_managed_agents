@@ -49,7 +49,8 @@ USER DIRECTIVE: stack P3 on P2 (user away) — PR 2 opens without merge-pause; P
 ── Phase 2 ──
 - [x] P2 Task 3: ensure_environment
 - [x] P2 Task 4: tags
-- [ ] P2 Task 5: prune
+- [x] P2 Task 5: prune
 - [ ] P2 QA-B + PR 2 (no pause)
 P2 Task 3: complete (commit 80a639be after two fix rounds: [1] controller caught wrong-direction deviation — 3-branch recovery taxonomy restored, brief test bug fixed test-side; [2] review Important atomize_handle totality → normalize_or_miss with rebuild-on-malformed + regression; rename Minor folded). Review Approved; digest-vs-storekey semantics verified. Suite 255, strict credo clean. Minor recorded: facade delegates around Provisioner (layering consistency) — final-review candidate.
 P2 Task 4: complete (commit 9190715b after fix round: ArgumentError on malformed ref + test; untracked/4 deleted — implementer caught controller else-scoping bug, threaded digest via tagged tuple; corrupt-registry catch-all; single-writer comment). Review Approved-after-fixes. Suite 259, strict credo clean.
+P2 Task 5: complete (commit 29cba367 after Critical fix round: cross-prefix base collision — strict 8-hex suffix membership in live_versions/2, replace_prefix throughout, 2 isolation regressions RED→GREEN; oldest-first archive order deviation judged correct). Re-review Approved; 8-hex filter verified consistent with minting. Suite 263, strict credo clean. Accepted-by-design note: foreign env named exactly <base>_<8hex> is indistinguishable (inherent to name-based membership).
