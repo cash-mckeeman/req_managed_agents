@@ -79,6 +79,8 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   provision entry is gone (e.g. pruned store) — re-`ensure` the spec to heal.
 
   `ref` must be of the form `"base:tag"` — a ref without a colon raises `ArgumentError`.
+  The split is on the FIRST colon only, so tag names may themselves contain
+  colons (`"a:b:c"` resolves tag `"b:c"` under base `"a"`).
   """
   def resolve(ref, opts \\ []) do
     {smod, sopts} = opts[:store] || @default_store
@@ -244,7 +246,7 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   # three known fields so callers get one shape from either store. Anything
   # else (foreign store content, missing keys) is treated as a miss and
   # rebuilt: provisioning truth beats cache truth (loud-but-safe).
-  defp normalize_or_miss(%{environment_id: _} = h), do: {:ok, h}
+  defp normalize_or_miss(%{environment_id: _, name: _, digest: _} = h), do: {:ok, h}
 
   defp normalize_or_miss(%{"environment_id" => id, "name" => n, "digest" => d}),
     do: {:ok, %{environment_id: id, name: n, digest: d}}

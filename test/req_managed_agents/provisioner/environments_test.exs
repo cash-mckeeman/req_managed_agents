@@ -270,6 +270,12 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
       assert {:error, :keep_required} =
                Provisioner.prune_environments(:c, "d", store: store, list_fun: list_fun)
 
+      assert {:error, :keep_required} =
+               Provisioner.prune_environments(:c, "d", keep: 0, store: store, list_fun: list_fun)
+
+      assert {:error, :keep_required} =
+               Provisioner.prune_environments(:c, "d", keep: -1, store: store, list_fun: list_fun)
+
       assert {:ok, %{archived: archived, kept: kept}} =
                Provisioner.prune_environments(:c, "d",
                  keep: 1,
@@ -300,12 +306,48 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
         "id_d_22222222" -> {:error, {:http_error, 500, %{}}}
       end
 
+      {smod, sopts} = store
+      # Seed digest-index entries so we can prove store cleanup stops at the failure.
+      :ok = smod.put(sopts, "digest:d:11111111", %{"environment_id" => "id_d_11111111"})
+      :ok = smod.put(sopts, "digest:d:22222222", %{"environment_id" => "id_d_22222222"})
+
       assert {:error, {:partial, ["d_11111111"], {"d_22222222", {:http_error, 500, %{}}}}} =
                Provisioner.prune_environments(:c, "d",
                  keep: 1,
                  store: store,
                  list_fun: fn -> {:ok, %{"data" => envs}} end,
                  archive_fun: archive_fun
+               )
+
+      # The archived env's index entry is cleaned; the FAILED env's survives.
+      assert :miss = smod.get(sopts, "digest:d:11111111")
+      assert {:ok, _} = smod.get(sopts, "digest:d:22222222")
+    end
+
+    test "a malformed atom-keyed store entry (missing digest) is rebuilt, not returned" do
+      {smod, sopts} = store = fresh_store()
+      key = "provision:env:" <> ReqManagedAgents.Provisioner.hash({"d", @spec1})
+      :ok = smod.put(sopts, key, %{environment_id: "env_partial"})
+
+      create_fun = fn body -> {:ok, %{"id" => "env_rebuilt", "name" => body.name}} end
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{environment_id: "env_rebuilt", digest: _}} =
+                   Provisioner.ensure_environment(:c, @spec1,
+                     name: "d",
+                     store: store,
+                     create_fun: create_fun
+                   )
+        end)
+
+      assert log =~ "unexpected shape"
+      # Entry healed with the full shape.
+      assert {:ok, %{environment_id: "env_rebuilt"}} =
+               Provisioner.ensure_environment(:c, @spec1,
+                 name: "d",
+                 store: store,
+                 create_fun: fn _ -> flunk("must not re-create after heal") end
                )
     end
 
