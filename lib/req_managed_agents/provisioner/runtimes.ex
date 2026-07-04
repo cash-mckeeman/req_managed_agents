@@ -49,6 +49,35 @@ defmodule ReqManagedAgents.Provisioner.Runtimes do
   end
 
   @doc """
+  Renders the system-prompt instruction block for the given runtime entries.
+
+  The block states which runtimes the session declares, instructs the agent to
+  run the bootstrap script EXACTLY ONCE via bash before the first command that
+  needs the runtimes (the script is idempotent), and embeds the full
+  `bootstrap_script/1` output in a fenced code block.
+
+  Output is deterministic: the same input always produces an identical binary.
+  """
+  @spec system_prompt_block([map()]) :: binary()
+  def system_prompt_block(runtimes) do
+    declared = Enum.map_join(runtimes, ", ", &"#{&1[:lang]} #{&1[:version]}")
+
+    """
+    ## Runtime bootstrap
+
+    This session's environment declares the following runtimes: #{declared}.
+    They are NOT preinstalled. Before the first command that needs them, run
+    the bootstrap script below EXACTLY ONCE via bash (it is idempotent, so an
+    accidental repeat is safe but wasteful). It installs mise, the declared
+    runtimes, and persists PATH + locale to ~/.bashrc for subsequent commands.
+
+    ```bash
+    #{String.trim_trailing(bootstrap_script(runtimes))}
+    ```
+    """
+  end
+
+  @doc """
   Returns the hosts required for the given runtimes, deduplicated and sorted.
 
   Reads `priv/runtime_bootstrap/allowed_hosts.json` at runtime. Returns `[]`

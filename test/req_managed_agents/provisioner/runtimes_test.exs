@@ -157,6 +157,75 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
       assert Runtimes.bootstrap_script(runtimes) == Runtimes.bootstrap_script(runtimes)
     end
+
+    test "installs mise when absent, then exports PATH, before any mise use" do
+      script = Runtimes.bootstrap_script([%{lang: :elixir, version: "1.17.0", via: :mise}])
+
+      installer =
+        "command -v mise >/dev/null 2>&1 || curl -fsSL https://mise.jdx.dev/install.sh | sh"
+
+      path_export = ~S(export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH")
+
+      {installer_pos, _} = :binary.match(script, installer)
+      {path_pos, _} = :binary.match(script, path_export)
+      {use_pos, _} = :binary.match(script, "mise use --global")
+
+      assert installer_pos < path_pos
+      assert path_pos < use_pos
+    end
+
+    test "persists PATH + locale to ~/.bashrc, guarded by the marker comment" do
+      script = Runtimes.bootstrap_script([%{lang: :elixir, version: "1.17.0", via: :mise}])
+
+      assert script =~ "grep -q 'mise activate-rma' ~/.bashrc"
+      assert script =~ "# mise activate-rma"
+      assert script =~ "export LC_ALL=C.UTF-8 LANG=C.UTF-8"
+
+      # The persistence block comes AFTER the final `mise install`.
+      {install_pos, _} = :binary.match(script, "mise install\n")
+      {guard_pos, _} = :binary.match(script, "grep -q 'mise activate-rma'")
+      assert install_pos < guard_pos
+
+      # The bashrc block re-exports PATH (second occurrence of the export line).
+      path_export = ~S(export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH")
+      assert length(String.split(script, path_export)) == 3
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # system_prompt_block/1
+  # ---------------------------------------------------------------------------
+
+  describe "system_prompt_block/1" do
+    @block_runtimes [
+      %{lang: :erlang, version: "29.0.2", via: :mise},
+      %{lang: :elixir, version: "1.20.2", via: :mise}
+    ]
+
+    test "names each declared runtime as \"<lang> <version>\"" do
+      block = Runtimes.system_prompt_block(@block_runtimes)
+      assert block =~ "erlang 29.0.2"
+      assert block =~ "elixir 1.20.2"
+    end
+
+    test "instructs exactly-once execution via bash and notes idempotence" do
+      block = Runtimes.system_prompt_block(@block_runtimes)
+      assert block =~ "EXACTLY ONCE"
+      assert block =~ "bash"
+      assert block =~ "idempotent"
+    end
+
+    test "embeds the full bootstrap script verbatim in a fenced block" do
+      block = Runtimes.system_prompt_block(@block_runtimes)
+      script = Runtimes.bootstrap_script(@block_runtimes)
+      assert block =~ "```bash"
+      assert String.contains?(block, script)
+    end
+
+    test "is deterministic: renders identically twice" do
+      assert Runtimes.system_prompt_block(@block_runtimes) ==
+               Runtimes.system_prompt_block(@block_runtimes)
+    end
   end
 
   # ---------------------------------------------------------------------------

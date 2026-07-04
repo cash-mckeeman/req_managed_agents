@@ -19,15 +19,40 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   Build-if-absent for an environment image. Returns
   `{:ok, %{environment_id: id, name: name, digest: digest}}`.
 
+  When the spec declares runtimes, the RETURNED handle additionally carries
+  `bootstrap: %{script: ..., instructions: ...}` — DERIVED from the spec on
+  every call (all paths: fresh create, recovery, store hit), never stored.
+  The persisted handle stays exactly three fields. Sessions execute the
+  script via the agent's bash on first need; the library only renders it.
+
   Opts: `:name` (repository base, default `"env"`), `:store`
   (`{module, store_opts}`), `:create_fun` / `:list_fun` (test seams; default
   to `ReqManagedAgents.Client` calls on the given client).
   """
   def ensure_environment(client, env_spec, opts \\ []) do
-    case Runtimes.validate(env_spec[:runtimes] || []) do
-      {:error, _} = error -> error
-      :ok -> do_ensure_environment(client, env_spec, opts)
+    runtimes = env_spec[:runtimes] || []
+
+    case Runtimes.validate(runtimes) do
+      {:error, _} = error ->
+        error
+
+      :ok ->
+        with {:ok, handle} <- do_ensure_environment(client, env_spec, opts) do
+          {:ok, attach_bootstrap(handle, runtimes)}
+        end
     end
+  end
+
+  # Bootstrap is a derived view of the spec, recomputed per call — the stored
+  # handle shape is frozen at three fields, so caches never go stale on
+  # template changes.
+  defp attach_bootstrap(handle, []), do: handle
+
+  defp attach_bootstrap(handle, runtimes) do
+    Map.put(handle, :bootstrap, %{
+      script: Runtimes.bootstrap_script(runtimes),
+      instructions: Runtimes.system_prompt_block(runtimes)
+    })
   end
 
   defp do_ensure_environment(client, env_spec, opts) do
@@ -89,6 +114,10 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   `ref` must be of the form `"base:tag"` — a ref without a colon raises `ArgumentError`.
   The split is on the FIRST colon only, so tag names may themselves contain
   colons (`"a:b:c"` resolves tag `"b:c"` under base `"a"`).
+
+  The resolved handle never carries `:bootstrap` — no env spec is in scope
+  here to derive it from; call `ensure_environment/3` with the spec when the
+  bootstrap content is needed.
   """
   def resolve(ref, opts \\ []) do
     {smod, sopts} = opts[:store] || @default_store

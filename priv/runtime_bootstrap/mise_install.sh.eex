@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 export LC_ALL=C.UTF-8 LANG=C.UTF-8
+command -v mise >/dev/null 2>&1 || curl -fsSL https://mise.jdx.dev/install.sh | sh
+export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
 <%= for entry <- entries do %>mise use --global <%= entry %>
 <% end %>mise install
+grep -q 'mise activate-rma' ~/.bashrc 2>/dev/null || cat >> ~/.bashrc <<'RMA_BASHRC'
+# mise activate-rma
+export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
+export LC_ALL=C.UTF-8 LANG=C.UTF-8
+RMA_BASHRC
