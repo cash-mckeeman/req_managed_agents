@@ -10,16 +10,15 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     def handle_event(_ev, _ctx), do: :ok
   end
 
+  @canary_env_spec %{type: "cloud", networking: %{type: "unrestricted"}}
+
   @tag timeout: 120_000
   test "full cycle against the live beta" do
     {:ok, _} = Application.ensure_all_started(:req_managed_agents)
     client = ReqManagedAgents.new()
 
-    {:ok, %{"id" => env_id}} =
-      ReqManagedAgents.Client.create_environment(client, %{
-        name: "req-managed-agents-live-smoke",
-        config: %{type: "cloud", networking: %{type: "unrestricted"}}
-      })
+    {:ok, %{environment_id: env_id}} =
+      ReqManagedAgents.ensure_environment(client, @canary_env_spec, name: "rma_canary")
 
     {:ok, %{"id" => agent_id}} =
       ReqManagedAgents.Client.create_agent(client, %{
@@ -60,11 +59,8 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     {:ok, _} = Application.ensure_all_started(:req_managed_agents)
     client = ReqManagedAgents.new()
 
-    {:ok, %{"id" => env_id}} =
-      ReqManagedAgents.Client.create_environment(client, %{
-        name: "rma-v02-rtc",
-        config: %{type: "cloud", networking: %{type: "unrestricted"}}
-      })
+    {:ok, %{environment_id: env_id}} =
+      ReqManagedAgents.ensure_environment(client, @canary_env_spec, name: "rma_canary")
 
     {:ok, %{"id" => agent_id}} =
       ReqManagedAgents.Client.create_agent(client, %{
@@ -309,11 +305,8 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     {:ok, _} = Application.ensure_all_started(:req_managed_agents)
     client = ReqManagedAgents.new()
 
-    {:ok, %{"id" => env_id}} =
-      ReqManagedAgents.Client.create_environment(client, %{
-        name: "rma-v03-artifacts",
-        config: %{type: "cloud", networking: %{type: "unrestricted"}}
-      })
+    {:ok, %{environment_id: env_id}} =
+      ReqManagedAgents.ensure_environment(client, @canary_env_spec, name: "rma_canary")
 
     # The built-in toolset provides the `write` tool the agent needs.
     {:ok, %{"id" => agent_id}} =
@@ -476,5 +469,115 @@ defmodule ReqManagedAgents.LiveSmokeTest do
         label: "LIVE mount-leg teardown"
       )
     end
+  end
+
+  @tag timeout: 240_000
+  @tag :live_env_images
+  test "image lifecycle: ensure reuse, tag/resolve, run on resolved env, prune" do
+    alias ReqManagedAgents.Provisioner
+    {:ok, _} = Application.ensure_all_started(:req_managed_agents)
+    client = ReqManagedAgents.new()
+
+    # Two consecutive ensure_environment calls with the SAME spec must hit the
+    # ETS store on the second call and return the identical environment_id.
+    {:ok, %{environment_id: env_id_1} = handle} =
+      ReqManagedAgents.ensure_environment(client, @canary_env_spec, name: "rma_canary")
+
+    {:ok, %{environment_id: env_id_2}} =
+      ReqManagedAgents.ensure_environment(client, @canary_env_spec, name: "rma_canary")
+
+    assert env_id_1 == env_id_2,
+           "ensure_environment must return the same environment_id on a store hit"
+
+    # Tag the current image and resolve it back — the returned handle must
+    # point at the same environment.
+    :ok = Provisioner.tag("rma_canary", "current", handle)
+    {:ok, resolved} = Provisioner.resolve("rma_canary:current")
+    assert resolved.environment_id == env_id_1
+
+    # Run a session on the resolved environment to prove it is usable.
+    {:ok, %{"id" => agent_id}} =
+      ReqManagedAgents.Client.create_agent(client, %{
+        name: "rma-v04-image-run",
+        model: System.get_env("CMA_LIVE_MODEL", "claude-haiku-4-5"),
+        system: "When asked to echo, call the echo tool with the user's text.",
+        tools: [
+          %{
+            type: "custom",
+            name: "echo",
+            description: "Echo the user's text back. Always use this to echo.",
+            input_schema: %{
+              "type" => "object",
+              "properties" => %{"text" => %{"type" => "string"}},
+              "required" => ["text"]
+            }
+          }
+        ]
+      })
+
+    assert {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn}} =
+             ReqManagedAgents.run_to_completion(
+               client: client,
+               agent_id: agent_id,
+               environment_id: resolved.environment_id,
+               prompt: "Please echo: image-canary-ok",
+               handler: Handler,
+               timeout: 180_000
+             )
+
+    # Prune: keep 2 — the currently-ensured name must never appear in archived,
+    # and the tagged digest's name must appear in kept. Self-cleaning: superseded
+    # generations from past runs are archived.
+    {:ok, %{archived: archived, kept: kept}} =
+      Provisioner.prune_environments(client, "rma_canary", keep: 2)
+
+    IO.inspect(%{archived: archived, kept: kept}, label: "LIVE prune result")
+
+    assert handle.name in kept,
+           "the currently-ensured env (#{handle.name}) must be in kept, not pruned"
+
+    refute handle.name in archived,
+           "the currently-ensured env (#{handle.name}) must NOT appear in archived"
+  end
+
+  @tag timeout: 420_000
+  @tag :live_runtime
+  test "runtime bootstrap: ensure env with runtimes, agent executes bootstrap, elixir version confirmed" do
+    {:ok, _} = Application.ensure_all_started(:req_managed_agents)
+    client = ReqManagedAgents.new()
+
+    runtime_spec =
+      Map.put(@canary_env_spec, :runtimes, [
+        %{lang: :erlang, version: "29.0.2", via: :mise},
+        %{lang: :elixir, version: "1.20.2", via: :mise}
+      ])
+
+    {:ok, %{environment_id: env_id, bootstrap: %{instructions: instructions}}} =
+      ReqManagedAgents.ensure_environment(client, runtime_spec, name: "rma_canary_rt")
+
+    {:ok, %{"id" => agent_id}} =
+      ReqManagedAgents.Client.create_agent(client, %{
+        name: "rma-v04-runtime",
+        model: System.get_env("CMA_LIVE_MODEL", "claude-sonnet-4-6"),
+        system: instructions <> "\nYou execute exactly what the user asks.",
+        tools: [%{type: "agent_toolset_20260401"}]
+      })
+
+    assert {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn} = result} =
+             ReqManagedAgents.run_to_completion(
+               client: client,
+               agent_id: agent_id,
+               environment_id: env_id,
+               prompt:
+                 "First run the bootstrap exactly once as instructed, then run: " <>
+                   "elixir -e 'IO.puts(\"rt-canary:\" <> System.version())' and paste its full output.",
+               handler: Handler,
+               timeout: 400_000
+             )
+
+    IO.inspect(result.text, label: "LIVE runtime result text")
+
+    assert result.text =~ "rt-canary:1.20",
+           "expected 'rt-canary:1.20' in agent output, got: #{inspect(result.text)}"
   end
 end
