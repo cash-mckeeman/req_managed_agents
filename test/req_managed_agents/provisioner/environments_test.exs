@@ -411,4 +411,146 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
       refute_received {:archived, "id_d_d_aaaaaaaa"}
     end
   end
+
+  describe "bootstrap on the returned handle (derived, never stored)" do
+    alias ReqManagedAgents.Provisioner.Runtimes
+
+    @runtimes [
+      %{lang: :erlang, version: "29.0.2", via: :mise},
+      %{lang: :elixir, version: "1.20.2", via: :mise}
+    ]
+    @rt_spec %{type: :cloud, runtimes: @runtimes, networking: %{type: :unrestricted}}
+
+    defmodule PutSpyStore do
+      @moduledoc false
+      # :miss on every get; records each put VALUE so tests can assert the
+      # stored shape. Store opts = test pid.
+      @behaviour Store
+
+      @impl true
+      def get(_pid, _key), do: :miss
+
+      @impl true
+      def put(pid, key, value) do
+        send(pid, {:put, key, value})
+        :ok
+      end
+
+      @impl true
+      def delete(_pid, _key), do: :ok
+
+      @impl true
+      def delete_value(_pid, _value), do: :ok
+    end
+
+    test "fresh create returns bootstrap with script + instructions" do
+      create_fun = fn body -> {:ok, %{"id" => "env_1", "name" => body.name}} end
+
+      assert {:ok, %{bootstrap: %{script: script, instructions: instructions}}} =
+               Provisioner.ensure_environment(:c, @rt_spec,
+                 name: "d",
+                 store: fresh_store(),
+                 create_fun: create_fun
+               )
+
+      assert script == Runtimes.bootstrap_script(@runtimes)
+      assert instructions == Runtimes.system_prompt_block(@runtimes)
+    end
+
+    test "store HIT still returns bootstrap (no create, no list)" do
+      store = fresh_store()
+      create_fun = fn body -> {:ok, %{"id" => "env_1", "name" => body.name}} end
+
+      {:ok, _} =
+        Provisioner.ensure_environment(:c, @rt_spec,
+          name: "d",
+          store: store,
+          create_fun: create_fun
+        )
+
+      assert {:ok, %{bootstrap: %{script: script, instructions: instructions}}} =
+               Provisioner.ensure_environment(:c, @rt_spec,
+                 name: "d",
+                 store: store,
+                 create_fun: fn _ -> flunk("must not create on hit") end,
+                 list_fun: fn -> flunk("must not list on hit") end
+               )
+
+      assert script == Runtimes.bootstrap_script(@runtimes)
+      assert instructions == Runtimes.system_prompt_block(@runtimes)
+    end
+
+    test "recovery path (409 -> list) carries bootstrap" do
+      create_fun = fn _body -> {:error, {:http_error, 409, %{}}} end
+      digest = @rt_spec |> Provisioner.hash() |> binary_part(0, 8) |> String.downcase()
+      name = "d_" <> digest
+
+      list_fun = fn ->
+        {:ok, %{"data" => [%{"id" => "env_recovered", "name" => name, "archived_at" => nil}]}}
+      end
+
+      assert {:ok, %{environment_id: "env_recovered", bootstrap: %{script: _, instructions: _}}} =
+               Provisioner.ensure_environment(:c, @rt_spec,
+                 name: "d",
+                 store: fresh_store(),
+                 create_fun: create_fun,
+                 list_fun: list_fun
+               )
+    end
+
+    test "stored values never carry bootstrap (spy on every put)" do
+      create_fun = fn body -> {:ok, %{"id" => "env_1", "name" => body.name}} end
+
+      assert {:ok, %{bootstrap: %{}}} =
+               Provisioner.ensure_environment(:c, @rt_spec,
+                 name: "d",
+                 store: {PutSpyStore, self()},
+                 create_fun: create_fun
+               )
+
+      # Two writes: the provision entry and the digest index — both 3-field.
+      assert_received {:put, "provision:env:" <> _, provision_value}
+      assert_received {:put, "digest:d:" <> _, digest_value}
+
+      for value <- [provision_value, digest_value] do
+        refute Map.has_key?(value, :bootstrap)
+        assert Map.keys(value) |> Enum.sort() == [:digest, :environment_id, :name]
+      end
+    end
+
+    test "spec without runtimes yields no :bootstrap key" do
+      create_fun = fn body -> {:ok, %{"id" => "env_1", "name" => body.name}} end
+
+      assert {:ok, handle} =
+               Provisioner.ensure_environment(:c, @spec1,
+                 name: "d",
+                 store: fresh_store(),
+                 create_fun: create_fun
+               )
+
+      refute Map.has_key?(handle, :bootstrap)
+    end
+  end
+
+  test "wire config never carries :runtimes — library vocabulary, provider-opaque" do
+    test_pid = self()
+
+    create_fun = fn body ->
+      send(test_pid, {:wire_body, body})
+      {:ok, %{"id" => "env_rt", "name" => body.name}}
+    end
+
+    spec =
+      Map.put(@spec1, :runtimes, [%{lang: :elixir, version: "1.20.2", via: :mise}])
+
+    {:ok, %{bootstrap: %{script: _}}} =
+      Provisioner.ensure_environment(:c, spec,
+        name: "d",
+        store: fresh_store(),
+        create_fun: create_fun
+      )
+
+    assert_received {:wire_body, %{config: config}}
+    refute Map.has_key?(config, :runtimes)
+  end
 end

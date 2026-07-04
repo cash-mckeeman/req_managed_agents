@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.4.0"
   @source_url "https://github.com/cash-mckeeman/req_managed_agents"
 
   def project do
@@ -64,7 +64,7 @@ defmodule ReqManagedAgents.MixProject do
       # Mix tasks call Mix.shell/Mix.raise; Mix isn't in the core PLT.
       # :ex_unit — test/support modules (StoreContract) import ExUnit.Assertions
       # and CI dialyzes under MIX_ENV=test.
-      plt_add_apps: [:mix, :ex_unit],
+      plt_add_apps: [:mix, :ex_unit, :eex],
       ignore_warnings: ".dialyzer_ignore.exs"
     ]
   end
@@ -76,7 +76,8 @@ defmodule ReqManagedAgents.MixProject do
       maintainers: ["cash-mckeeman"],
       # lib/mix is excluded on purpose: the QA/smoke mix tasks are internal
       # runbooks, not consumer surface.
-      files: ~w(lib/req_managed_agents lib/req_managed_agents.ex examples mix.exs
+      files:
+        ~w(lib/req_managed_agents lib/req_managed_agents.ex examples priv/runtime_bootstrap mix.exs
                 README.md LICENSE CHANGELOG.md)
     ]
   end

@@ -185,3 +185,17 @@ end
 - The provisioning MCP server (MIM-73, parked) and the self-hosted EnvironmentWorker
   (MIM-72, own project).
 - EFS/S3-mount realization of runtimes; any Bedrock-side changes.
+
+## Spike Verdict (Task 7, 2026-07-03 — folded back)
+
+Four live probe rounds on `probe/runtime-spike` (temporary branch, never merged) settled §3's open question:
+
+**Sandbox facts.** CMA cloud environments run Ubuntu 24.04 x86_64 as root (working sudo, apt-get present), 4 cores / 16 GB / ~30 GB free, network open (unrestricted env) to `mise.jdx.dev` and `repo.hex.pm`. No Erlang/Elixir preinstalled. There is NO server-side build phase — runtimes must be realized per-session by the agent itself.
+
+**Mechanism verdict: prompt/script-delivered mise bootstrap — PROVEN (~11s end-to-end).** mise installs via its official installer in seconds; mise ships PRECOMPILED Erlang for ubuntu-24.04 (`erlang@29.0.2` in 5.4s — no kerl compile), elixir in 1.4s; `elixir --version` -> "Elixir 1.20.2 (compiled with Erlang/OTP 29)". The apt fallback is rejected: Ubuntu 24.04 ships OTP 25 (too old).
+
+**Load-bearing details for the realization (Task 8):**
+- The bootstrap script must PREPEND the mise installer (`curl -fsSL https://mise.jdx.dev/install.sh | sh`) and `export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"` — the Task-6 template assumed mise present.
+- `mise use --global erlang@...` BEFORE elixir is load-bearing: bare `mise install elixir@...` fails exit-127 when erl is not on PATH (round-3 failure).
+- PATH + locale must persist to `~/.bashrc` so the agent's SUBSEQUENT bash calls inherit them; the C.UTF-8 exports fix a real latin1 warning observed live.
+- Realization shape (mechanism (c) enriched): `ensure_environment` returns `bootstrap: %{script: ..., instructions: ...}` in the handle when the spec declares runtimes; `Runtimes.system_prompt_block/1` renders the instruction text consumers put in the agent's system prompt. The library cannot run the bootstrap itself — sessions execute it via the agent's bash on first need.
