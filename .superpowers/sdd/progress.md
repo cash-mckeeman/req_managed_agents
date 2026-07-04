@@ -54,3 +54,13 @@ USER DIRECTIVE: stack P3 on P2 (user away) — PR 2 opens without merge-pause; P
 P2 Task 3: complete (commit 80a639be after two fix rounds: [1] controller caught wrong-direction deviation — 3-branch recovery taxonomy restored, brief test bug fixed test-side; [2] review Important atomize_handle totality → normalize_or_miss with rebuild-on-malformed + regression; rename Minor folded). Review Approved; digest-vs-storekey semantics verified. Suite 255, strict credo clean. Minor recorded: facade delegates around Provisioner (layering consistency) — final-review candidate.
 P2 Task 4: complete (commit 9190715b after fix round: ArgumentError on malformed ref + test; untracked/4 deleted — implementer caught controller else-scoping bug, threaded digest via tagged tuple; corrupt-registry catch-all; single-writer comment). Review Approved-after-fixes. Suite 259, strict credo clean.
 P2 Task 5: complete (commit 29cba367 after Critical fix round: cross-prefix base collision — strict 8-hex suffix membership in live_versions/2, replace_prefix throughout, 2 isolation regressions RED→GREEN; oldest-first archive order deviation judged correct). Re-review Approved; 8-hex filter verified consistent with minting. Suite 263, strict credo clean. Accepted-by-design note: foreign env named exactly <base>_<8hex> is indistinguishable (inherent to name-based membership).
+P2 QA-CHECKPOINT B: complete (QA doc 864dc6d5, 21/22; code_bug [normalize_or_miss atom clause over-match] + keep-matrix/index-survival test_gaps + parts:2 doc_issue ALL FIXED in f1088a48 with regressions incl. malformed-entry heal). Suite 264, strict credo clean.
+P2 COMPLETE — PR 2 opening WITHOUT pause per user stacking directive.
+── Phase 3 (stacked on P2) ──
+- [ ] P3 Task 6: runtimes spec surface
+- [ ] P3 Task 7: SPIKE (controller, live, branch-dispatched)
+- [ ] P3 Task 8: realization (spike-gated)
+- [ ] P3 Task 9: canary legs
+- [ ] P3 Task 10: docs+CHANGELOG
+- [ ] P3 QA-C
+- [ ] P3 Task 11: v0.4.0 stamp + PR 3 (stacked on PR 2 branch)

@@ -10,6 +10,7 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   """
   require Logger
   alias ReqManagedAgents.Provisioner
+  alias ReqManagedAgents.Provisioner.Runtimes
   alias ReqManagedAgents.Provisioner.Store
 
   @default_store {Store.ETS, :req_managed_agents_provisions}
@@ -23,6 +24,13 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   to `ReqManagedAgents.Client` calls on the given client).
   """
   def ensure_environment(client, env_spec, opts \\ []) do
+    case Runtimes.validate(env_spec[:runtimes] || []) do
+      {:error, _} = error -> error
+      :ok -> do_ensure_environment(client, env_spec, opts)
+    end
+  end
+
+  defp do_ensure_environment(client, env_spec, opts) do
     base = opts[:name] || "env"
     digest = env_spec |> Provisioner.hash() |> binary_part(0, 8) |> String.downcase()
     name = base <> "_" <> digest
@@ -238,9 +246,37 @@ defmodule ReqManagedAgents.Provisioner.Environments do
     end
   end
 
-  # The env spec is opaque beyond hashing; the wire `config` is the spec minus
-  # our own bookkeeping keys (currently none to strip — pass through).
-  defp wire_config(env_spec), do: env_spec
+  # The env spec is opaque beyond hashing; the wire `config` is the spec with
+  # one transformation applied: when runtimes are declared and networking is
+  # `:limited`/`"limited"`, required runtime hosts are merged into
+  # `networking.allowed_hosts` (deduped, existing order preserved).
+  defp wire_config(env_spec) do
+    runtimes = env_spec[:runtimes] || []
+    networking = env_spec[:networking]
+
+    if runtimes != [] and limited_networking?(networking) do
+      merge_runtime_hosts(env_spec, runtimes, networking)
+    else
+      env_spec
+    end
+  end
+
+  defp limited_networking?(%{type: type}) when type in [:limited, "limited"], do: true
+  defp limited_networking?(%{"type" => type}) when type in [:limited, "limited"], do: true
+  defp limited_networking?(_), do: false
+
+  defp merge_runtime_hosts(env_spec, runtimes, networking) do
+    required = Runtimes.required_hosts(runtimes)
+
+    existing =
+      Map.get(networking, :allowed_hosts) || Map.get(networking, "allowed_hosts") || []
+
+    merged = Enum.uniq(existing ++ required)
+
+    # Write back under the key form the networking map already uses.
+    hosts_key = if Map.has_key?(networking, "type"), do: "allowed_hosts", else: :allowed_hosts
+    Map.put(env_spec, :networking, Map.put(networking, hosts_key, merged))
+  end
 
   # Store.File round-trips handles through JSON (string keys) — re-atomize the
   # three known fields so callers get one shape from either store. Anything
