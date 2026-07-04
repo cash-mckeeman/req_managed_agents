@@ -246,6 +246,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
       runtimes = [%{lang: :erlang, version: "26.2.5", via: :mise}]
       hosts = Runtimes.required_hosts(runtimes)
       assert "mise.jdx.dev" in hosts
+      assert "mise-versions.jdx.dev" in hosts
       assert "github.com" in hosts
       assert "objects.githubusercontent.com" in hosts
       assert "repo.hex.pm" in hosts
@@ -373,6 +374,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
       assert is_list(hosts)
       assert "example.com" in hosts
       assert "mise.jdx.dev" in hosts
+      assert "mise-versions.jdx.dev" in hosts
     end
 
     test "limited networking: hosts deduplicated when consumer already lists a runtime host" do
@@ -414,6 +416,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
       assert_received {:create, body}
       hosts = get_in(body, [:config, :networking, :allowed_hosts])
       assert "mise.jdx.dev" in hosts
+      assert "mise-versions.jdx.dev" in hosts
     end
 
     test "absent networking key: create body unchanged (no networking key added)" do
@@ -449,6 +452,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
       assert is_list(hosts)
       assert "example.com" in hosts
       assert "mise.jdx.dev" in hosts
+      assert "mise-versions.jdx.dev" in hosts
       # No atom-keyed duplicate written into the string-keyed map.
       refute Map.has_key?(body.config[:networking], :allowed_hosts)
     end

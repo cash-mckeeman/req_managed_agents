@@ -4,7 +4,8 @@ name: Live canary
 # AgentCore APIs. Both are beta surfaces that change under us (see MIM-52,
 # PR #17) — this workflow exists to find that drift before users do.
 #
-# Cheap by default: CMA lanes run claude-haiku-4-5, the Bedrock lane runs
+# Cheap by default: most CMA lanes run claude-haiku-4-5 (the runtime-bootstrap
+# leg defaults to sonnet), the Bedrock lane runs
 # nvidia.nemotron-super-3-120b (override with CMA_LIVE_MODEL /
 # BEDROCK_LIVE_MODEL_ID).
 #

@@ -531,4 +531,26 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
       refute Map.has_key?(handle, :bootstrap)
     end
   end
+
+  test "wire config never carries :runtimes — library vocabulary, provider-opaque" do
+    test_pid = self()
+
+    create_fun = fn body ->
+      send(test_pid, {:wire_body, body})
+      {:ok, %{"id" => "env_rt", "name" => body.name}}
+    end
+
+    spec =
+      Map.put(@spec1, :runtimes, [%{lang: :elixir, version: "1.20.2", via: :mise}])
+
+    {:ok, %{bootstrap: %{script: _}}} =
+      Provisioner.ensure_environment(:c, spec,
+        name: "d",
+        store: fresh_store(),
+        create_fun: create_fun
+      )
+
+    assert_received {:wire_body, %{config: config}}
+    refute Map.has_key?(config, :runtimes)
+  end
 end

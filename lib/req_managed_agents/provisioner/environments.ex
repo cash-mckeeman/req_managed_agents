@@ -276,18 +276,23 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   end
 
   # The env spec is opaque beyond hashing; the wire `config` is the spec with
-  # one transformation applied: when runtimes are declared and networking is
-  # `:limited`/`"limited"`, required runtime hosts are merged into
-  # `networking.allowed_hosts` (deduped, existing order preserved).
+  # two transformations applied: `runtimes` is STRIPPED (library vocabulary —
+  # realized client-side via the bootstrap, already covered by the digest;
+  # providers must not receive keys they can't know), and when runtimes are
+  # declared with `:limited`/`"limited"` networking, required runtime hosts
+  # are merged into `networking.allowed_hosts` (deduped, order preserved).
   defp wire_config(env_spec) do
     runtimes = env_spec[:runtimes] || []
     networking = env_spec[:networking]
 
-    if runtimes != [] and limited_networking?(networking) do
-      merge_runtime_hosts(env_spec, runtimes, networking)
-    else
-      env_spec
-    end
+    merged =
+      if runtimes != [] and limited_networking?(networking) do
+        merge_runtime_hosts(env_spec, runtimes, networking)
+      else
+        env_spec
+      end
+
+    Map.delete(merged, :runtimes)
   end
 
   defp limited_networking?(%{type: type}) when type in [:limited, "limited"], do: true
