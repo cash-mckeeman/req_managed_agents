@@ -222,6 +222,75 @@ Declare mounts via the opaque `environment` field on the provision spec.
 > `output_path/1` for a named file) — interpolate it into your agent's system
 > prompt instead of copying the string.
 
+## Environments are images
+
+The Docker mental model maps directly onto the CMA environment lifecycle — with
+the same rules: a changed spec is a *new image*, not an in-place update; tags are
+movable pointers; sessions are the containers that churn; prune is explicit GC.
+
+| Docker | RMA |
+|---|---|
+| Dockerfile | env spec (canonical map) |
+| image digest | spec hash — content-addressed identity |
+| repository | base name (`"data_analysis"`) |
+| `repo@digest` | provider-side name `<base>_<digest8>` |
+| `docker build` (cached) | `ensure_environment/3` — build-if-absent, never rebuilds on a hit |
+| `repo:tag` (movable) | Store-backed tag → digest pointer |
+| `docker run` | `create_session` — ephemeral, references an image |
+| `docker image prune` | `prune_environments/3` — explicit GC, never automatic |
+
+### Worked example
+
+```elixir
+alias ReqManagedAgents.Provisioner
+alias ReqManagedAgents.Provisioner.Store
+
+store = {Store.File, path: Path.expand("~/.cache/myapp/provisions.json")}
+env_spec = %{type: "cloud", packages: %{pip: ["pandas"]}, networking: %{type: "unrestricted"}}
+
+# Build once — next run hits the store and returns the same handle instantly:
+{:ok, handle} =
+  ReqManagedAgents.ensure_environment(client, env_spec, name: "data_analysis", store: store)
+# handle == %{environment_id: "env_id_…", name: "data_analysis_3f9a1b2c", digest: "3f9a1b2c"}
+
+# Pin the current image as "prod" (movable pointer; retag freely):
+:ok = Provisioner.tag("data_analysis", "prod", handle, store: store)
+
+# Resolve the pinned image later — never falls back; {:error, :unknown_tag} on miss:
+{:ok, %{environment_id: _env_id}} = Provisioner.resolve("data_analysis:prod", store: store)
+
+# GC old versions — keep the newest 3 (plus any tagged digest; keep: has no default):
+{:ok, %{archived: _old, kept: _live}} =
+  Provisioner.prune_environments(client, "data_analysis", keep: 3, store: store)
+```
+
+`Store.File` persists handles and tags across OS processes (CLI tools, cron, mix tasks),
+with atomic writes and a single-writer assumption. The default is `Store.ETS` — in-process
+only. Values must be JSON-encodable (provision handles always are).
+
+### Declared runtimes
+
+Add a `runtimes:` key to the env spec to have the library produce a bootstrap script
+and system-prompt instruction the agent runs on first need:
+
+```elixir
+env_spec = %{
+  type: "cloud",
+  packages: %{},
+  networking: %{type: "unrestricted"},
+  runtimes: [%{lang: :elixir, version: "1.20.2", via: :mise}]
+}
+
+{:ok, handle} = ReqManagedAgents.ensure_environment(client, env_spec, name: "myapp")
+# handle.bootstrap == %{script: "…mise install script…", instructions: "…"}
+```
+
+Pass `handle.bootstrap.instructions` into your agent's system prompt. The agent runs
+the bootstrap script once via bash before the first command that needs the runtime.
+Proven end-to-end: ~11s on ubuntu-24.04 (precompiled OTP from mise; no compile step).
+Only `via: :mise` is supported. The runtimes list is digest-covered — adding or changing
+a runtime version produces a new image automatically, no extra machinery.
+
 ## Using with Jido
 
 The core is Jido-free. To use Jido Actions as tools, implement `handle_tool_call/3` by delegating

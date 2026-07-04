@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.4.0 (unreleased)
+
+### Added
+- `ReqManagedAgents.Provisioner.Store` behaviour (`get/2`, `put/3`, `delete/2`,
+  `delete_value/2`) — pluggable provision and tag storage. Two implementations: `Store.ETS`
+  (default; in-process, unchanged semantics) and `Store.File` (JSON, `path:` required,
+  atomic writes, single-writer assumption; handles and tags survive OS-process restarts for
+  CLI/mix-task/cron consumers). `:store` option threads through `Provisioner.ensure/3`,
+  `evict/2`, `ensure_environment/3`, `tag/4`, `resolve/2`, `prune_environments/3`, and
+  the facade `provision/3` / `teardown/3`.
+- `ReqManagedAgents.ensure_environment/3` (facade; delegates to `Provisioner.Environments`)
+  — content-addressed, build-if-absent environment lifecycle. Provider-side name is
+  `<base>_<digest8>`; a 409 recovers by name (same name = same image, always). Returned
+  handle: `%{environment_id:, name:, digest:}`. Error taxonomy:
+  `{:environment_archived, name}` (name exists but archived) /
+  `{:environment_name_conflict, name}` (absent after 409 — unexpected provider state).
+- `Provisioner.tag/4` — writes a movable `base:tag → digest` pointer to the configured
+  store. `Provisioner.resolve/2` — resolves `"base:tag"` to a handle; never falls back;
+  `{:error, :unknown_tag}` on miss; raises `ArgumentError` on a malformed ref (no colon).
+- `Provisioner.prune_environments/3` — explicit image GC for a named base: archives
+  versions beyond the newest `keep:` (REQUIRED, no default — deliberate friction for a
+  permanent operation), always protecting tagged digests. Strict 8-hex suffix membership
+  (a `"data"` prune never touches `"data_analysis"` images). Returns
+  `{:ok, %{archived: [...], kept: [...]}}` or
+  `{:error, {:partial, archived_so_far, {failed_name, reason}}}` on partial failure.
+- Base-scoped digest index (`"digest:<base>:<digest8>"` store entries written at ensure
+  time) so `resolve/2` can look up handles without a linear scan; the base scope prevents
+  two bases sharing an identical spec from resolving each other's environments.
+- `Provisioner.Runtimes`: `runtimes: [%{lang:, version:, via: :mise}]` on env specs
+  participates in the spec digest automatically (a runtime change = a new image). When
+  runtimes are declared, `ensure_environment/3` returns `bootstrap: %{script:, instructions:}`
+  in the handle (derived on every call, never stored). `bootstrap_script/1` renders the
+  mise install script; `system_prompt_block/1` renders the agent instruction. `required_hosts/1`
+  feeds the allowlist merge into `networking.allowed_hosts` when networking is `:limited`.
+  Spike-proven: ~11s end-to-end on ubuntu-24.04 (precompiled OTP via mise, no kerl compile).
+  Only `via: :mise` is supported.
+
+### Changed
+- Provisioner cache keys namespaced: handles now stored under `"provision:" <> hash`
+  (previously bare hash). Cache-only — existing entries are invisible to the new reader
+  (re-provisions once per BEAM start on first upgrade); no consumer API impact.
+- Facade `teardown/3` forwards `:store` to `Provisioner.evict/2` so teardown clears the
+  persistent store when a `Store.File` is in use.
+
 ## v0.3.0 (2026-07-03)
 
 ### Known limitations

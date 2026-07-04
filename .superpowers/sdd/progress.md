@@ -60,10 +60,11 @@ P2 COMPLETE — PR 2 opening WITHOUT pause per user stacking directive.
 - [x] P3 Task 6: runtimes spec surface
 - [x] P3 Task 7: SPIKE — mechanism proven
 - [x] P3 Task 8: realization
-- [ ] P3 Task 9: canary legs
+- [x] P3 Task 9: canary legs
 - [ ] P3 Task 10: docs+CHANGELOG
 - [ ] P3 QA-C
 - [ ] P3 Task 11: v0.4.0 stamp + PR 3 (stacked on PR 2 branch)
 P3 Task 6: complete (commit 2b667164 after fix round: version regex guard [shell-injection close, guard/body split], string-keyed networking merge, priv_dir actionable raise, SpyStore ordering test). Review Approved-with-fixes, all folded. Suite 297, strict credo clean.
 P3 Task 7 SPIKE: COMPLETE — mechanism (b) PROVEN live in 4 rounds on probe/runtime-spike branch. Verdict: CMA sandbox = Ubuntu 24.04 x86_64 root+sudo, apt present, network open; mise installs in seconds; mise erlang PRECOMPILED for ubuntu-24.04 (erlang@29.0.2 in 5.4s, elixir 1.4s); full flow mise-installer→PATH export→use --global erlang→elixir → Elixir 1.20.2/OTP29 running (~11s total). Learnings for Task 8: template must prepend mise installer + PATH export (~/.local/bin + shims); persist PATH+locale to ~/.bashrc for subsequent agent bash calls; locale warning validates C.UTF-8 exports; ordering (erlang before elixir) is LOAD-BEARING (round-3 failure without it); apt fallback rejected (OTP 25 too old). Realization shape: handle carries bootstrap (mechanism c enriched) — no server-side build phase exists on CMA cloud envs. Surveys: scratchpad sdd040/spike-survey{2,3,4}.txt.
 P3 Task 8: complete (commit 8336cb6d, one watchdog-stall resume; review Approved clean — shell script verified safe under pipefail incl. grep-guard/heredoc-quoting/curl-pipe analysis; derive-not-store enforced structurally + PutSpyStore). Suite 308, strict credo clean. Minor recorded: system_prompt_block prose lists runtimes in input order vs script install order (cosmetic) — final-review candidate.
+P3 Task 9: complete (commit 08ab443d; controller-verified diff: 3 legs pinned to rma_canary image, :live_env_images full-lifecycle self-cleaning leg, :live_runtime productized-spike leg on sonnet; live legs validate post-merge in canary; repeat runs exercise 409-recovery live). Offline 308, strict credo clean.
