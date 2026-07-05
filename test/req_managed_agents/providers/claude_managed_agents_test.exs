@@ -407,6 +407,48 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
              ManagedAgents.user_input("hi")
   end
 
+  describe "outcomes" do
+    test "kickoff_input with :outcome emits user.define_outcome (outcome wins over :prompt)" do
+      assert [%{"type" => "user.define_outcome", "description" => "d", "max_iterations" => 3}] =
+               ManagedAgents.kickoff_input(
+                 prompt: "ignored",
+                 outcome: %{description: "d", rubric: "- r", max_iterations: 3}
+               )
+    end
+
+    test "kickoff_input outcome without max_iterations puts no nil on the wire" do
+      assert [%{"type" => "user.define_outcome", "rubric" => %{"content" => "- r"}} = event] =
+               ManagedAgents.kickoff_input(outcome: %{description: "d", rubric: "- r"})
+
+      refute Map.has_key?(event, "max_iterations")
+    end
+
+    test "kickoff_input without :outcome keeps the user.message kickoff" do
+      assert [%{"type" => "user.message"}] =
+               ManagedAgents.kickoff_input(prompt: "hi")
+    end
+
+    test "supports_outcomes?" do
+      assert ManagedAgents.supports_outcomes?()
+    end
+
+    test "outcome stop reasons: satisfied/max_iterations_reached are :end_turn, failed is :terminated" do
+      assert ManagedAgents.terminal("satisfied") == :end_turn
+
+      assert ManagedAgents.terminal("max_iterations_reached") ==
+               :end_turn
+
+      assert ManagedAgents.terminal("failed") == :terminated
+    end
+
+    test "span.outcome_evaluation_end is NOT a turn boundary (needs_revision keeps running)" do
+      refute ManagedAgents.turn_boundary?(%{
+               "type" => "span.outcome_evaluation_end",
+               "verdict" => "needs_revision"
+             })
+    end
+  end
+
   test "resume_input/2 builds user.custom_tool_result events (no echo)" do
     results = [
       %{tool_use_id: "e1", text: "ok", is_error: false},

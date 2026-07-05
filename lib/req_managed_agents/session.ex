@@ -20,7 +20,10 @@ defmodule ReqManagedAgents.Session do
       ReqManagedAgents.Session.message(pid, "follow-up")
 
   Required opts: `:handler` (a `ReqManagedAgents.Handler` module or a 3-arity fn). Optional:
-  `:context`, `:prompt`, `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`,
+  `:context`, `:prompt`, `:outcome` (`%{description:, rubric:, max_iterations:}` — kicks off a
+  `user.define_outcome` graded session instead of a `user.message`; mutually exclusive with
+  `:prompt`, outcome wins; `{:error, :outcome_unsupported}` on providers without native support),
+  `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`,
   `:turn_guard` (a 1-arity fun invoked after each turn's usage accumulation with
   `%{usage: map, turns: n, session_id: id}`, returning `:cont` or `{:halt, reason}`;
   on halt the run stops with `{:error, {:halted, reason}}` and a `:terminated` result is
@@ -106,7 +109,7 @@ defmodule ReqManagedAgents.Session do
 
   # The one home for start-time contract checks — later tasks add clauses here,
   # not another chain in init/1.
-  defp validate_opts(_provider, opts) do
+  defp validate_opts(provider, opts) do
     cond do
       not valid_turn_guard?(opts[:turn_guard]) ->
         {:error, {:invalid_turn_guard, opts[:turn_guard]}}
@@ -114,9 +117,19 @@ defmodule ReqManagedAgents.Session do
       opts[:require_terminal_tool] && not is_binary(opts[:terminal_tool]) ->
         {:error, {:invalid_opts, :terminal_tool_required}}
 
+      # AgentCore has no in-session outcome equivalent (Evaluations is trace-level,
+      # out-of-session); fail at start rather than silently kicking off a user.message.
+      opts[:outcome] != nil and not outcomes_supported?(provider) ->
+        {:error, :outcome_unsupported}
+
       true ->
         :ok
     end
+  end
+
+  defp outcomes_supported?(provider) do
+    Code.ensure_loaded?(provider) and function_exported?(provider, :supports_outcomes?, 0) and
+      provider.supports_outcomes?()
   end
 
   defp valid_turn_guard?(nil), do: true

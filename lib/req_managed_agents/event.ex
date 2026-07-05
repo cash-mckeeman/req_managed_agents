@@ -23,6 +23,24 @@ defmodule ReqManagedAgents.Event do
     %{"type" => "user.message", "content" => [%{"type" => "text", "text" => text}]}
   end
 
+  @doc "Build a `user.define_outcome` event. `rubric_md` is inline markdown criteria."
+  @spec define_outcome(String.t(), String.t(), keyword()) :: event()
+  def define_outcome(description, rubric_md, opts \\ [])
+      when is_binary(description) and is_binary(rubric_md) do
+    base = %{
+      "type" => "user.define_outcome",
+      "description" => description,
+      "rubric" => %{"type" => "text", "content" => rubric_md}
+    }
+
+    # A nil from a caller's absent map key (e.g. kickoff_input's o[:max_iterations])
+    # must not become "max_iterations" => nil on the wire.
+    case Keyword.fetch(opts, :max_iterations) do
+      {:ok, n} when is_integer(n) -> Map.put(base, "max_iterations", n)
+      _ -> base
+    end
+  end
+
   @doc "Build a `user.custom_tool_result` event. Pass `is_error: true` for failures."
   @spec custom_tool_result(String.t(), String.t(), keyword()) :: event()
   def custom_tool_result(custom_tool_use_id, text, opts \\ []) do
@@ -51,6 +69,9 @@ defmodule ReqManagedAgents.Event do
       "end_turn" -> :end_turn
       "requires_action" -> :requires_action
       "retries_exhausted" -> :retries_exhausted
+      "satisfied" -> :end_turn
+      "max_iterations_reached" -> :end_turn
+      "failed" -> :terminated
       _ -> :unknown_idle
     end
   end

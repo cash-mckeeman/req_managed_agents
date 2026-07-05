@@ -101,7 +101,18 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   end
 
   @impl true
-  def kickoff_input(opts), do: [Event.user_message(opts[:prompt] || "Begin.")]
+  def kickoff_input(opts) do
+    case opts[:outcome] do
+      %{description: d, rubric: r} = o ->
+        [Event.define_outcome(d, r, max_iterations: o[:max_iterations])]
+
+      nil ->
+        [Event.user_message(opts[:prompt] || "Begin.")]
+    end
+  end
+
+  @impl true
+  def supports_outcomes?, do: true
 
   @impl true
   def user_input(text), do: [Event.user_message(text)]
@@ -234,6 +245,11 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @doc false
   def terminal("end_turn"), do: :end_turn
   def terminal("requires_action"), do: :requires_action
+  # Outcome sessions (user.define_outcome): the server-side grade→revise loop resolves to one
+  # of these at status_idle. satisfied / max_iterations_reached complete the run; failed doesn't.
+  def terminal("satisfied"), do: :end_turn
+  def terminal("max_iterations_reached"), do: :end_turn
+  def terminal("failed"), do: :terminated
   def terminal(_other), do: :terminated
 
   defp assistant_text(events) do

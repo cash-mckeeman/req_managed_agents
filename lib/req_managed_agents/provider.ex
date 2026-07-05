@@ -92,12 +92,16 @@ defmodule ReqManagedAgents.Provider do
   """
   @callback text_delta(event()) :: String.t() | nil
 
+  @doc "Optional — true when the provider natively honors the `:outcome` kickoff (`user.define_outcome`)."
+  @callback supports_outcomes?() :: boolean()
+
   @optional_callbacks poll_turn: 2,
                       push_input: 2,
                       turn_boundary?: 1,
                       reconnect: 3,
                       teardown: 2,
-                      text_delta: 1
+                      text_delta: 1,
+                      supports_outcomes?: 0
 
   @doc """
   Extract a canonical `%ToolResult{}` from a `Tools.run/7` wire event
