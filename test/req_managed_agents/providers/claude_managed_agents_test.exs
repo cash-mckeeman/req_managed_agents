@@ -390,6 +390,31 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     assert "/v1/agents/agent_1/archive" in paths and "/v1/environments/env_1/archive" in paths
   end
 
+  test "reconnect/3 recovers unanswered tool calls as %ToolUse{} structs" do
+    events = [
+      %{"type" => "agent.custom_tool_use", "id" => "e1", "name" => "lookup", "input" => %{"q" => 1}},
+      %{
+        "type" => "session.status_idle",
+        "stop_reason" => %{"type" => "requires_action", "event_ids" => ["e1"]}
+      }
+    ]
+
+    client = claude_client(__MODULE__.Reconnect)
+
+    Req.Test.stub(__MODULE__.Reconnect, fn conn ->
+      if conn.request_path == "/v1/sessions/s1/events" do
+        Req.Test.json(conn, %{"data" => events})
+      else
+        Plug.Conn.send_chunked(conn, 200)
+      end
+    end)
+
+    {:ok, _conn, pending, _seen} =
+      ManagedAgents.reconnect(%{client: client, session_id: "s1"}, self(), MapSet.new())
+
+    assert [%ReqManagedAgents.ToolUse{id: "e1", name: "lookup", input: %{"q" => 1}}] = pending
+  end
+
   test "turn_boundary?/1 is true only for session status/terminal/error events" do
     assert ManagedAgents.turn_boundary?(%{
              "type" => "session.status_idle",

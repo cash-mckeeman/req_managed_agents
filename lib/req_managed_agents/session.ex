@@ -51,7 +51,16 @@ defmodule ReqManagedAgents.Session do
   """
   use GenServer
   require Logger
-  alias ReqManagedAgents.{Outcome, Provider, SessionInfo, SessionResult, Tools, TurnResult, Usage}
+  alias ReqManagedAgents.{
+    Outcome,
+    Provider,
+    SessionInfo,
+    SessionResult,
+    Tools,
+    ToolUse,
+    TurnResult,
+    Usage
+  }
 
   @max_tool_concurrency 8
 
@@ -501,7 +510,7 @@ defmodule ReqManagedAgents.Session do
   defp run_tools(custom_tool_uses, s) do
     custom_tool_uses
     |> Task.async_stream(
-      fn %{id: id, name: name, input: input} ->
+      fn %ToolUse{id: id, name: name, input: input} ->
         wire = Tools.run(s.handler, id, name, input, s.context, s.info, s.meta)
         Provider.result_of(id, wire)
       end,

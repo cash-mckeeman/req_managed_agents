@@ -166,7 +166,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   @impl true
   def resume_input(custom_tool_uses, results) do
     wire =
-      Enum.map(custom_tool_uses, fn %{id: id, name: name, input: input} ->
+      Enum.map(custom_tool_uses, fn %ToolUse{id: id, name: name, input: input} ->
         %{"toolUseId" => id, "name" => name, "input" => input}
       end)
 

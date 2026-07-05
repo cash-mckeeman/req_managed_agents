@@ -154,7 +154,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
         pending =
           past
           |> ReqManagedAgents.Consolidate.unanswered_tool_uses()
-          |> Enum.map(fn e -> %{id: e["id"], name: e["name"], input: e["input"]} end)
+          |> Enum.map(fn e -> %ToolUse{id: e["id"], name: e["name"], input: e["input"]} end)
 
         ref = make_ref()
 

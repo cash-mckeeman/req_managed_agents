@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.SessionInfoTest do
   use ExUnit.Case, async: true
 
-  alias ReqManagedAgents.{SessionInfo, TurnResult}
+  alias ReqManagedAgents.{SessionInfo, ToolUse, TurnResult}
 
   # request_response fake whose conn carries a session_id (like both real providers post-0.3).
   defmodule InfoRR do
@@ -301,7 +301,7 @@ defmodule ReqManagedAgents.SessionInfoTest do
           {:ok, "ok"}
         end,
         notify: test_pid,
-        pending: [%{id: "t1", name: "echo", input: %{"x" => 1}}],
+        pending: [%ToolUse{id: "t1", name: "echo", input: %{"x" => 1}}],
         turns: [[%{"type" => "stop", "terminal" => :end_turn}]]
       )
 

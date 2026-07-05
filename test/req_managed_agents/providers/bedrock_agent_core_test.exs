@@ -159,7 +159,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   end
 
   test "resume_input/2 produces the strict two-message delta" do
-    uses = [%{id: "tu_1", name: "echo", input: %{"text" => "hi"}}]
+    uses = [%ToolUse{id: "tu_1", name: "echo", input: %{"text" => "hi"}}]
     results = [%{tool_use_id: "tu_1", text: "echoed: hi", is_error: false}]
 
     assert [%{"role" => "assistant", "content" => [%{"toolUse" => tu}]}, user] =
