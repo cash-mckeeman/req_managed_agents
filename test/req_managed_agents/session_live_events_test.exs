@@ -1,8 +1,8 @@
 defmodule ReqManagedAgents.SessionLiveEventsTest do
   use ExUnit.Case, async: true
 
-  # request_response provider that delivers events LIVE (like BedrockAgentCore
-  # post-MIM-50): poll_turn sends {:provider_event, ev} to the subscriber
+  # request_response provider that delivers events LIVE (like BedrockAgentCore's
+  # live provider events): poll_turn sends {:provider_event, ev} to the subscriber
   # captured at open, then returns the same events as the turn result.
   defmodule LiveRR do
     @behaviour ReqManagedAgents.Provider

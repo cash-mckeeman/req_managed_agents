@@ -59,7 +59,7 @@ defmodule ReqManagedAgents.AgentCore.EventStreamTest do
   end
 
   test ":message-type exception frame is surfaced as a tagged __stream_error__ map" do
-    # A real AgentCore early-termination frame (confirmed live, MIM-52 spike):
+    # A real AgentCore early-termination frame (confirmed live):
     # :message-type "exception", :exception-type "runtimeClientError", NO :event-type,
     # body {"message":"...ValidationException...duplicate Ids..."}. Without surfacing,
     # this falls through as a shapeless map → no stop_reason → silent :terminated/nil.

@@ -24,7 +24,7 @@ defmodule ReqManagedAgents.AgentCore.Client do
   @default_control_base "https://bedrock-agentcore-control.us-east-1.amazonaws.com"
   @max_retries 2
   @default_receive_timeout 600_000
-  # Inter-chunk idle timeout for the streaming data plane (spec: MIM-50 design §3).
+  # Inter-chunk idle timeout for the streaming data plane.
   @default_idle_timeout 300_000
 
   # credentials (secret key + session token) must never appear in inspect
