@@ -22,10 +22,6 @@ defmodule ReqManagedAgents.Providers.Local do
   :econnreset | :connect_timeout`. Wrap transport exceptions down to their atom —
   `%{reason: %Req.TransportError{...}}` will NOT match; return `%{reason: err.reason}`.
 
-  Limitations: `Providers.Local` is primarily scoped to `run/2` (one request per conn):
-  the final-turn directive counts polls across the conn's lifetime, so long-lived
-  `start_link` sessions with many follow-ups may see it fire early on later requests.
-
   Open opts: `:spec` (the `t:ReqManagedAgents.Provider.spec/0`, also the `provision/2`
   identity handle), `:model_config` (canonical keys `:model`, `:api_key`, `:base_url`,
   `:metadata`; defaults from `spec.model_config`), `:chat_fun`, `:max_turns`,
@@ -219,8 +215,22 @@ defmodule ReqManagedAgents.Providers.Local do
     do: {name, decode_args(args)}
 
   # ── input application ─────────────────────────────────────────────────────────
+  # A user message (kickoff or follow-up) starts a fresh request: polls, the
+  # duplicate-call guard, and the consecutive-error counters all reset here so a
+  # long-lived start_link session gets a fresh max_turns budget and a fresh
+  # reasoning episode per turn, instead of accumulating across the conn's whole
+  # lifetime. On kickoff these are already at their zero values (no-op).
   defp apply_input(conn, {:messages, messages}) do
-    inject_final_turn(%{conn | history: conn.history ++ messages}, [])
+    inject_final_turn(
+      %{
+        conn
+        | history: conn.history ++ messages,
+          polls: 0,
+          seen: MapSet.new(),
+          error_counts: %{}
+      },
+      []
+    )
   end
 
   defp apply_input(conn, {:resume, tool_uses, results}) do

@@ -250,6 +250,44 @@ defmodule ReqManagedAgents.Providers.LocalTest do
     assert %TurnResult{usage: nil} = Local.normalize(events)
   end
 
+  test "polls reset per request: a follow-up message does not fire final_turn early" do
+    conn = open!(text_response("ok"), max_turns: 3)
+    conn = %{conn | polls: 5}
+
+    {:ok, events, conn2} = Local.poll_turn(conn, Local.user_input("follow up"))
+
+    refute Enum.any?(events, &(&1["type"] == "local.directive" and &1["role"] == "final_turn"))
+    assert conn2.polls == 1
+  end
+
+  test "seen resets per request: an identical tool call in a new request is not deduped" do
+    test = self()
+    args = ~s({"q":1})
+
+    third = fn request ->
+      send(test, {:third_request, request})
+      tool_call_response("c2", "lookup", args).(request)
+    end
+
+    conn =
+      open!(scripted([tool_call_response("c1", "lookup", args), text_response("done"), third]))
+
+    {:ok, _ev1, conn} = Local.poll_turn(conn, Local.kickoff_input(prompt: "go"))
+
+    uses = [%ToolUse{id: "c1", name: "lookup", input: %{"q" => 1}}]
+    results = [%ToolResult{tool_use_id: "c1", text: "found it", is_error: false}]
+    {:ok, _ev2, conn} = Local.poll_turn(conn, Local.resume_input(uses, results))
+
+    # New user turn: the same {name, input} call must NOT be treated as a duplicate,
+    # because the dedup guard is per-request, not per-conn-lifetime.
+    {:ok, ev3, _conn} = Local.poll_turn(conn, Local.user_input("again"))
+
+    refute Enum.any?(ev3, &(&1["type"] == "local.duplicate_tool_call"))
+
+    assert %TurnResult{terminal: :requires_action, custom_tool_uses: [%ToolUse{id: "c2"}]} =
+             Local.normalize(ev3)
+  end
+
   test "outcome kickoff is unsupported (Session gate)" do
     assert {:error, :outcome_unsupported} =
              ReqManagedAgents.Session.run(Local,
