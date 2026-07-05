@@ -179,7 +179,11 @@ defmodule ReqManagedAgents.Providers.LocalTest do
                "role" => "assistant",
                "content" => nil,
                "tool_calls" => [
-                 %{"id" => "c9", "type" => "function", "function" => %{"name" => "lookup", "arguments" => "{}"}}
+                 %{
+                   "id" => "c9",
+                   "type" => "function",
+                   "function" => %{"name" => "lookup", "arguments" => "{}"}
+                 }
                ]
              },
              "finish_reason" => "stop"
@@ -201,7 +205,10 @@ defmodule ReqManagedAgents.Providers.LocalTest do
       {:ok,
        %{
          "choices" => [
-           %{"message" => %{"role" => "assistant", "content" => "trunc"}, "finish_reason" => "length"}
+           %{
+             "message" => %{"role" => "assistant", "content" => "trunc"},
+             "finish_reason" => "length"
+           }
          ],
          "usage" => %{"prompt_tokens" => 1, "completion_tokens" => 1}
        }}
@@ -220,7 +227,10 @@ defmodule ReqManagedAgents.Providers.LocalTest do
   test "text_delta/1 maps local.model_response content" do
     ev = %{"type" => "local.model_response", "message" => %{"content" => "chunk"}}
     assert Local.text_delta(ev) == "chunk"
-    assert Local.text_delta(%{"type" => "local.model_response", "message" => %{"content" => nil}}) == nil
+
+    assert Local.text_delta(%{"type" => "local.model_response", "message" => %{"content" => nil}}) ==
+             nil
+
     assert Local.text_delta(%{"type" => "other"}) == nil
   end
 

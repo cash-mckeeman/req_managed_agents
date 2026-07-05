@@ -133,7 +133,8 @@ defmodule ReqManagedAgents.Providers.Local do
   end
 
   @impl true
-  def kickoff_input(opts), do: {:messages, [%{"role" => "user", "content" => opts[:prompt] || "Begin."}]}
+  def kickoff_input(opts),
+    do: {:messages, [%{"role" => "user", "content" => opts[:prompt] || "Begin."}]}
 
   @impl true
   def user_input(text), do: {:messages, [%{"role" => "user", "content" => text}]}
@@ -155,9 +156,13 @@ defmodule ReqManagedAgents.Providers.Local do
   defp chat_request(conn),
     do: %{model: conn.model, messages: conn.history, tools: conn.tools}
 
-  defp accept_response(conn, injected_events, %{
-         "choices" => [%{"message" => message, "finish_reason" => finish_reason} | _]
-       } = response) do
+  defp accept_response(
+         conn,
+         injected_events,
+         %{
+           "choices" => [%{"message" => message, "finish_reason" => finish_reason} | _]
+         } = response
+       ) do
     conn = %{conn | history: conn.history ++ [message]}
     {conn, dup_events, message} = dedup_tool_calls(conn, message)
 
@@ -245,7 +250,12 @@ defmodule ReqManagedAgents.Providers.Local do
           error_counts[use.name] >= 2,
           do: Directives.corrective(use.name, err)
 
-    conn = %{conn | error_counts: error_counts, history: conn.history ++ user_messages(correctives)}
+    conn = %{
+      conn
+      | error_counts: error_counts,
+        history: conn.history ++ user_messages(correctives)
+    }
+
     {conn, Enum.map(correctives, &directive_event("corrective", &1))}
   end
 

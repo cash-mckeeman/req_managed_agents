@@ -20,7 +20,11 @@ defmodule ReqManagedAgents.Providers.LocalGuardsTest do
              "role" => "assistant",
              "content" => nil,
              "tool_calls" => [
-               %{"id" => id, "type" => "function", "function" => %{"name" => name, "arguments" => args_json}}
+               %{
+                 "id" => id,
+                 "type" => "function",
+                 "function" => %{"name" => name, "arguments" => args_json}
+               }
              ]
            },
            "finish_reason" => "tool_calls"
@@ -75,6 +79,7 @@ defmodule ReqManagedAgents.Providers.LocalGuardsTest do
 
     # Turn 1: fresh call surfaces normally.
     {:ok, ev1, conn} = Local.poll_turn(conn, Local.kickoff_input(prompt: "go"))
+
     assert %TurnResult{terminal: :requires_action, custom_tool_uses: [%ToolUse{id: "c1"}]} =
              Local.normalize(ev1)
 

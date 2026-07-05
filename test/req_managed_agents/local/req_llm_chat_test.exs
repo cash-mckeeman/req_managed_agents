@@ -11,13 +11,24 @@ defmodule ReqManagedAgents.Local.ReqLLMChatTest do
         "role" => "assistant",
         "content" => nil,
         "tool_calls" => [
-          %{"id" => "c1", "type" => "function", "function" => %{"name" => "lookup", "arguments" => ~s({"q":1})}}
+          %{
+            "id" => "c1",
+            "type" => "function",
+            "function" => %{"name" => "lookup", "arguments" => ~s({"q":1})}
+          }
         ]
       },
       %{"role" => "tool", "tool_call_id" => "c1", "content" => "found"}
     ],
     tools: [
-      %{"type" => "function", "function" => %{"name" => "lookup", "description" => "d", "parameters" => %{"type" => "object"}}}
+      %{
+        "type" => "function",
+        "function" => %{
+          "name" => "lookup",
+          "description" => "d",
+          "parameters" => %{"type" => "object"}
+        }
+      }
     ]
   }
 
@@ -43,7 +54,19 @@ defmodule ReqManagedAgents.Local.ReqLLMChatTest do
   end
 
   test "generate_opts/2 threads api_key and tools" do
-    opts = ReqLLMChat.generate_opts([ReqLLM.Tool.new!(name: "t", description: "", parameter_schema: %{}, callback: fn _ -> {:error, :unused} end)], %{api_key: "vk-child"})
+    opts =
+      ReqLLMChat.generate_opts(
+        [
+          ReqLLM.Tool.new!(
+            name: "t",
+            description: "",
+            parameter_schema: %{},
+            callback: fn _ -> {:error, :unused} end
+          )
+        ],
+        %{api_key: "vk-child"}
+      )
+
     assert Keyword.get(opts, :api_key) == "vk-child"
     assert [%ReqLLM.Tool{}] = Keyword.get(opts, :tools)
   end
