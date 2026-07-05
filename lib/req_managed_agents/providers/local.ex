@@ -37,7 +37,7 @@ defmodule ReqManagedAgents.Providers.Local do
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.Local.{Deps, Directives, ReqLLMChat, Retry}
-  alias ReqManagedAgents.{ToolUse, TurnResult, Usage}
+  alias ReqManagedAgents.{ToolResult, ToolUse, TurnResult, Usage}
 
   # The conn is a struct, not a bag of keys: one place to see everything a turn needs.
   defstruct history: [],
@@ -246,7 +246,7 @@ defmodule ReqManagedAgents.Providers.Local do
 
     correctives =
       for use <- tool_uses,
-          %{is_error: true, text: err} <- [results_by_id[use.id]],
+          %ToolResult{is_error: true, text: err} <- [results_by_id[use.id]],
           error_counts[use.name] >= 2,
           do: Directives.corrective(use.name, err)
 
@@ -261,7 +261,7 @@ defmodule ReqManagedAgents.Providers.Local do
 
   defp count_error(use, results_by_id, counts) do
     case results_by_id[use.id] do
-      %{is_error: true} -> Map.update(counts, use.name, 1, &(&1 + 1))
+      %ToolResult{is_error: true} -> Map.update(counts, use.name, 1, &(&1 + 1))
       _success -> Map.put(counts, use.name, 0)
     end
   end
@@ -282,10 +282,10 @@ defmodule ReqManagedAgents.Providers.Local do
   defp directive_event(role, text),
     do: %{"type" => "local.directive", "role" => role, "text" => text}
 
-  defp result_content(%{is_error: true, text: text}),
+  defp result_content(%ToolResult{is_error: true, text: text}),
     do: Jason.encode!(%{"error" => text, "isError" => true})
 
-  defp result_content(%{text: text}), do: text
+  defp result_content(%ToolResult{text: text}), do: text
 
   # ── normalization ─────────────────────────────────────────────────────────────
   @impl true
