@@ -220,3 +220,46 @@ RESULT: PASS — 9/9 scenarios (1 live Ollama, 1 api_key adapted/partial wire pr
 - Scenario 6: Wire-level header interception was not performed (ReqLLM finch pool is not easily bypassed in test). The unit seam proof at `generate_opts/2` is the appropriate gate for this adapter layer. The `:api_key` keyword option is present and correctly named; ReqLLM's own tests cover the `Authorization` header construction from that option.
 
 No defects found. Task 11 (release) may proceed.
+
+---
+
+## Re-verification — PR #54 head (post-rebase), 2026-07-05
+
+The original checkpoint above ran at `bc2159b8`. Since then #54 was **rebased onto
+merged `main`** (picking up #53's 0.5.0 review commits — the `%Usage{}` turn_guard
+payload and `Outcome.new/1`) and gained two review commits: a `mix format` fix and
+the `@finish_reasons` module-attribute refactor in `ReqLLMChat`. Re-verified at the
+new stack head.
+
+**Preflight:** stack head is now `471f7945` (`ryan/rma-060-local-provider`), rebased
+on `main` @ `4108b4b` (#53 merged). Original pin `bc2159b8` no longer applies.
+
+**Baseline (delta):** the suite moved from 373 → **379 passed, 12 excluded** — the +6
+tests are #53's additions (`outcome_test`, turn_guard/outcome cases) arriving via the
+rebase, not new Local tests.
+
+```
+$ mix test 2>&1 | grep -E "^(Finished|Result)"
+Result: 379 passed, 12 excluded
+```
+
+**Live Ollama leg (Scenario 8) — re-run:**
+
+```
+$ OLLAMA_MODEL=llama3.1:latest mix test test/live/local_ollama_test.exs --include live
+Including tags: [:live]
+Result: 1 passed
+```
+
+**Result: PASS (model substitution noted).** `qwen2.5:32b` (the original model) is not
+currently pulled; ran against `llama3.1:latest`. That's an 8B model and a weaker
+tool-caller, so this is a lighter but valid live proof of the round-trip. The live
+path is untouched by the #54 review commits — the live test uses a bare-`Req`
+chat_fun, not `ReqLLMChat`, so the `@finish_reasons` refactor never reaches it.
+
+**Gates at `471f7945`:** `mix format --check-formatted`, `compile --warnings-as-errors`,
+`credo --strict`, `docs --warnings-as-errors` all clean; full CI green (quality,
+dialyzer, test matrix 1.16/1.18/1.20). Scenarios 1–7 are exercised by the green
+379-test unit suite.
+
+**Verdict: PASS at PR #54 state (`471f7945`).** No defects; #54 is merge-ready.
