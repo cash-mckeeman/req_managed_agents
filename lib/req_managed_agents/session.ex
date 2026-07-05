@@ -51,6 +51,7 @@ defmodule ReqManagedAgents.Session do
   """
   use GenServer
   require Logger
+
   alias ReqManagedAgents.{
     Outcome,
     Provider,

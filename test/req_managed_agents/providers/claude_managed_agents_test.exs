@@ -392,7 +392,12 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
 
   test "reconnect/3 recovers unanswered tool calls as %ToolUse{} structs" do
     events = [
-      %{"type" => "agent.custom_tool_use", "id" => "e1", "name" => "lookup", "input" => %{"q" => 1}},
+      %{
+        "type" => "agent.custom_tool_use",
+        "id" => "e1",
+        "name" => "lookup",
+        "input" => %{"q" => 1}
+      },
       %{
         "type" => "session.status_idle",
         "stop_reason" => %{"type" => "requires_action", "event_ids" => ["e1"]}
