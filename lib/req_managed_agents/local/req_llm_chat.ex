@@ -6,6 +6,19 @@ defmodule ReqManagedAgents.Local.ReqLLMChat do
 
   alias ReqManagedAgents.Local.Deps
 
+  # ReqLLM.Response.finish_reason/1's atom vocabulary; a reason outside it is
+  # inferred from tool_calls instead (see finish_reason/2).
+  @finish_reasons [
+    :stop,
+    :tool_calls,
+    :length,
+    :content_filter,
+    :error,
+    :cancelled,
+    :incomplete,
+    :unknown
+  ]
+
   @spec chat_fun(map()) :: (map() -> {:ok, map()} | {:error, term()})
   def chat_fun(model_config) do
     Deps.ensure!()
@@ -109,7 +122,7 @@ defmodule ReqManagedAgents.Local.ReqLLMChat do
   # Prefer the response's own finish_reason when available; fall back to inferring from tool_calls
   defp finish_reason(response, tool_calls) do
     case ReqLLM.Response.finish_reason(response) do
-      reason when reason in [:stop, :tool_calls, :length, :content_filter, :error, :cancelled, :incomplete, :unknown] ->
+      reason when reason in @finish_reasons ->
         Atom.to_string(reason)
 
       _ ->
