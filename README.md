@@ -1,16 +1,30 @@
 # ReqManagedAgents
 
-An Elixir client for **provider-managed agent loops with locally-executed tools**. The provider
-runs the agent loop; **your custom tools execute on your node**, so your code and data never leave
-it — the provider only ever sees each tool's name, description, input schema, and the text result
-you return.
+One Session loop, any loop host — server-side (Claude Managed Agents, AgentCore) or in-process (Local). **Your custom tools execute on your node** regardless of which host runs the loop, so your code and data never leave it — the loop host only ever sees each tool's name, description, input schema, and the text result you return.
 
-One loop, two backends behind a single `Provider` behaviour:
+One loop, three backends behind a single `Provider` behaviour:
 
 | Provider | Module | Transport |
 |---|---|---|
 | **Anthropic Claude Managed Agents** (public beta) | `ReqManagedAgents.Providers.ClaudeManagedAgents` | `:streaming` — long-lived SSE; beta header `managed-agents-2026-04-01` |
 | **AWS Bedrock AgentCore Harness** | `ReqManagedAgents.Providers.BedrockAgentCore` | `:request_response` — synchronous SigV4-signed invoke |
+| **Local (in-process)** | `ReqManagedAgents.Providers.Local` | `:request_response` — in-process loop over a pluggable `chat_fun` (default: ReqLLM via the optional `req_llm` dep); one model call per turn; loop guards for weak-instruction-following local models |
+
+### Local + routing
+
+Point Local's `chat_fun` at an OpenAI-compatible gateway lane (`base_url` + per-run `api_key`
+via `model_config`) and you get hard data-plane budget enforcement with no coupling to the
+gateway's internals. Direct-to-provider `chat_fun`s remain available for dev and tests.
+
+```elixir
+{:ok, result} =
+  ReqManagedAgents.Session.run(ReqManagedAgents.Providers.Local,
+    handler: MyTools,
+    spec: %{system_prompt: "...", tools: tools, terminal_tool: "submit", model_config: nil},
+    model_config: %{model: "openai:gpt-oss", base_url: lane_url, api_key: granted_key},
+    prompt: "Go."
+  )
+```
 
 ## Install
 
@@ -33,10 +47,11 @@ def deps do
 end
 ```
 
-## The core: one loop, the provider is a parameter
+## The core: one loop, the loop host is a parameter
 
 `ReqManagedAgents.Session` is the unified loop — invoke a turn → run your return-of-control tools
-locally → resume → repeat — parameterized by a provider module. It returns the **same** result
+locally → resume → repeat — parameterized by a provider module. The loop host runs the agent loop —
+a managed provider server-side, or `Providers.Local` in-process. It returns the **same** result
 shape for every provider:
 
 ```elixir
@@ -161,7 +176,7 @@ Three runnable, heavily-commented examples ship with the package:
 | `[:req_managed_agents, :session, :tool_uses]` | `tool_use_count` | `turn`, `tool_use_ids` |
 | `[:req_managed_agents, :session, :terminal]` | — | `terminal` |
 
-Both providers run through `Session`, so the `:session` events fire regardless of backend.
+All providers run through `Session`, so the `:session` events fire regardless of loop host.
 `:stream` `:event` also fires for **both** providers as events arrive mid-turn — on Claude,
 `type` is the SSE event type and `session_id`/`usage` are set; on Bedrock AgentCore, `type` is
 the Converse envelope key (e.g. `"contentBlockDelta"`) and there is no `session_id`. The other

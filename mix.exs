@@ -13,9 +13,10 @@ defmodule ReqManagedAgents.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description:
-        "Provider-agnostic Elixir client for managed agent runtimes (Anthropic Claude " <>
-          "Managed Agents, AWS Bedrock AgentCore) — the provider runs the loop, your tools " <>
-          "run locally.",
+        "Provider-agnostic Elixir client for agent runtimes — one Session loop, any " <>
+          "loop host: server-side (Anthropic Claude Managed Agents, AWS Bedrock " <>
+          "AgentCore) or in-process (Local, over any OpenAI-compatible chat endpoint). " <>
+          "Your tools run locally.",
       package: package(),
       docs: docs(),
       dialyzer: dialyzer(),

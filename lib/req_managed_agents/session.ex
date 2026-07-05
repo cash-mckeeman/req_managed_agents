@@ -4,12 +4,14 @@ defmodule ReqManagedAgents.Session do
 
   A `Session` drives any `ReqManagedAgents.Provider` to completion: invoke a turn → normalize →
   run the return-of-control tools locally via the `:handler` → resume → repeat until a terminal.
-  The provider's `mode/0` (`:streaming` push or `:request_response` pull) only changes how a
-  turn's events are *acquired*; the loop, the result shape, and the raw-event passthrough are
-  identical across providers.
+  The loop host runs the agent loop — a managed provider server-side, or
+  `ReqManagedAgents.Providers.Local` in-process. The provider's `mode/0` (`:streaming` push or
+  `:request_response` pull) only changes how a turn's events are *acquired*; the loop, the result
+  shape, and the raw-event passthrough are identical across providers.
 
-  Pick a provider — `ReqManagedAgents.Providers.ClaudeManagedAgents` (streaming) or
-  `ReqManagedAgents.Providers.BedrockAgentCore` (request/response) — and:
+  Pick a provider — `ReqManagedAgents.Providers.ClaudeManagedAgents` (streaming),
+  `ReqManagedAgents.Providers.BedrockAgentCore` (request/response), or
+  `ReqManagedAgents.Providers.Local` (in-process) — and:
 
       # synchronous run-to-completion
       {:ok, %ReqManagedAgents.SessionResult{terminal: t, stop_reason: r, events: raw}} =

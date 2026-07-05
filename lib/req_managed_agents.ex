@@ -1,19 +1,22 @@
 defmodule ReqManagedAgents do
   @moduledoc """
-  Provider-agnostic Elixir client for managed agent runtimes.
+  Provider-agnostic Elixir client for agent runtimes — one Session loop, any loop host.
 
-  The provider runs the agent loop server-side; your custom tools execute
-  locally, so your data and code never leave your node. The provider only ever
-  sees each tool's name, description, input schema, and the text result you
-  return.
+  The loop host runs the agent loop — a managed provider server-side, or
+  `ReqManagedAgents.Providers.Local` in-process. Your custom tools execute
+  locally regardless of which host runs the loop, so your data and code never
+  leave your node. The loop host only ever sees each tool's name, description,
+  input schema, and the text result you return.
 
-  Two backends ship behind the same `ReqManagedAgents.Provider` behaviour:
+  Three backends ship behind the same `ReqManagedAgents.Provider` behaviour:
 
     * `ReqManagedAgents.Providers.ClaudeManagedAgents` — Anthropic Claude
       Managed Agents (public beta), `:streaming` over long-lived SSE
     * `ReqManagedAgents.Providers.BedrockAgentCore` — AWS Bedrock AgentCore
       Harness, `:request_response` over signed invokes (requires the optional
       `:ex_aws_auth` and `:aws_event_stream` deps)
+    * `ReqManagedAgents.Providers.Local` — in-process loop over a pluggable
+      `chat_fun` (default: ReqLLM via the optional `req_llm` dep)
 
   Whichever backend, `ReqManagedAgents.Session.run/2` returns the same
   `ReqManagedAgents.SessionResult` — terminal, text, tool uses, token usage.
