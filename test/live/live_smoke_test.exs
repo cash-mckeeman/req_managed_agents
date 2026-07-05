@@ -227,9 +227,10 @@ defmodule ReqManagedAgents.LiveSmokeTest do
   @tag timeout: 600_000
   @tag :live_bedrock
   @tag skip:
-         (if System.get_env("HARNESS_EXECUTION_ROLE_ARN") not in [nil, ""],
-           do: false,
-           else: "requires HARNESS_EXECUTION_ROLE_ARN (AWS harness execution role ARN)")
+         if(System.get_env("HARNESS_EXECUTION_ROLE_ARN") in [nil, ""],
+           do: "requires HARNESS_EXECUTION_ROLE_ARN (AWS harness execution role ARN)",
+           else: false
+         )
   test "AgentCore Harness: provision → invoke → live usage → teardown" do
     alias ReqManagedAgents.Providers.BedrockAgentCore
     {:ok, _} = Application.ensure_all_started(:req_managed_agents)
@@ -361,9 +362,10 @@ defmodule ReqManagedAgents.LiveSmokeTest do
   @tag timeout: 600_000
   @tag :live_bedrock_command
   @tag skip:
-         (if System.get_env("HARNESS_EXECUTION_ROLE_ARN") not in [nil, ""],
-           do: false,
-           else: "requires HARNESS_EXECUTION_ROLE_ARN (AWS harness execution role ARN)")
+         if(System.get_env("HARNESS_EXECUTION_ROLE_ARN") in [nil, ""],
+           do: "requires HARNESS_EXECUTION_ROLE_ARN (AWS harness execution role ARN)",
+           else: false
+         )
   test "AgentCore command: exec into the session microVM — stdout, stderr, exit codes" do
     alias ReqManagedAgents.AgentCore.{Client, CommandResult}
     alias ReqManagedAgents.Providers.BedrockAgentCore
@@ -419,9 +421,10 @@ defmodule ReqManagedAgents.LiveSmokeTest do
   @tag timeout: 600_000
   @tag :live_bedrock_mount
   @tag skip:
-         (if System.get_env("HARNESS_EXECUTION_ROLE_ARN") not in [nil, ""],
-           do: false,
-           else: "requires HARNESS_EXECUTION_ROLE_ARN (AWS harness execution role ARN)")
+         if(System.get_env("HARNESS_EXECUTION_ROLE_ARN") in [nil, ""],
+           do: "requires HARNESS_EXECUTION_ROLE_ARN (AWS harness execution role ARN)",
+           else: false
+         )
   test "AgentCore sessionStorage mount: environment pass-through + Artifacts put/fetch round-trip" do
     alias ReqManagedAgents.Artifacts
     alias ReqManagedAgents.Artifacts.AgentCoreSessionStorage
