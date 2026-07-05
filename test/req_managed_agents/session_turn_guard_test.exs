@@ -83,7 +83,7 @@ defmodule ReqManagedAgents.SessionTurnGuardTest do
     assert_received {:managed_agents_session, %SessionResult{terminal: :terminated, turns: 2}}
   end
 
-  test "guard payload is plain data: usage map (not struct), turns, session_id" do
+  test "guard payload carries the accumulated %Usage{} struct, turns, session_id" do
     test = self()
 
     {:ok, _} =
@@ -98,8 +98,7 @@ defmodule ReqManagedAgents.SessionTurnGuardTest do
 
     assert_received {:guard_saw, payload}
     assert %{usage: usage, turns: 1, session_id: _} = payload
-    refute is_struct(usage)
-    assert %{input_tokens: 1, output_tokens: 1, raw: [_]} = usage
+    assert %Usage{input_tokens: 1, output_tokens: 1, raw: [_]} = usage
   end
 
   test "invalid turn_guard is rejected at start" do

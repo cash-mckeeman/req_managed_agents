@@ -25,7 +25,7 @@ defmodule ReqManagedAgents.Session do
   `:prompt`, outcome wins; `{:error, :outcome_unsupported}` on providers without native support),
   `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`,
   `:turn_guard` (a 1-arity fun invoked after each turn's usage accumulation with
-  `%{usage: map, turns: n, session_id: id}`, returning `:cont` or `{:halt, reason}`;
+  `%{usage: %ReqManagedAgents.Usage{}, turns: n, session_id: id}`, returning `:cont` or `{:halt, reason}`;
   on halt the run stops with `{:error, {:halted, reason}}` and a `:terminated` result is
   notified — usage/turns accumulate within the current request, the same scope as `:max_turns`;
   the guard runs *before* the `max_turns` check and wins when both would trip on the same turn;
@@ -407,7 +407,7 @@ defmodule ReqManagedAgents.Session do
 
   defp run_turn_guard(s) do
     s.turn_guard.(%{
-      usage: Map.from_struct(s.usage),
+      usage: s.usage,
       turns: s.turns,
       session_id: s.info.session_id
     })

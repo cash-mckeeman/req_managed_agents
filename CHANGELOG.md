@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **`turn_guard`** — the between-turn governance hook, invoked after each turn's usage
-  accumulation with plain data (`%{usage: %{input_tokens:, output_tokens:, raw:}, turns:,
-  session_id:}`), returning `:cont` or `{:halt, reason}`. On halt the run stops with
+  accumulation with `%{usage: %ReqManagedAgents.Usage{}, turns:, session_id:}`, returning
+  `:cont` or `{:halt, reason}`. On halt the run stops with
   `{:error, {:halted, reason}}` and a `:terminated` `SessionResult` is notified. This
   contract is frozen: hosts compose policy (budget caps, grant checks) on top; RMA ships
   only the mechanism. Semantics: the guard runs *before* the `max_turns` check and wins
