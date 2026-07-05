@@ -313,6 +313,29 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     assert ManagedAgents.mode() == :streaming
   end
 
+  describe "text_delta/1" do
+    test "maps agent.message text blocks to a chunk" do
+      ev = %{
+        "type" => "agent.message",
+        "content" => [
+          %{"type" => "text", "text" => "hi "},
+          %{"type" => "text", "text" => "there"}
+        ]
+      }
+
+      assert ManagedAgents.text_delta(ev) == "hi there"
+    end
+
+    test "non-message and empty-text events yield nil" do
+      assert ManagedAgents.text_delta(%{"type" => "session.status_idle"}) == nil
+
+      assert ManagedAgents.text_delta(%{
+               "type" => "agent.message",
+               "content" => [%{"type" => "image"}]
+             }) == nil
+    end
+  end
+
   test "provision/2 rolls back the agent when environment creation fails" do
     {:ok, calls} = Agent.start_link(fn -> [] end)
     client = Client.new(api_key: "sk-test", req_options: [plug: {Req.Test, __MODULE__.Rollback}])
@@ -385,6 +408,60 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
 
     assert [%{"type" => "user.message", "content" => [%{"text" => "hi"}]}] =
              ManagedAgents.user_input("hi")
+  end
+
+  describe "outcomes" do
+    test "kickoff_input with :outcome emits user.define_outcome (outcome wins over :prompt)" do
+      assert [%{"type" => "user.define_outcome", "description" => "d", "max_iterations" => 3}] =
+               ManagedAgents.kickoff_input(
+                 prompt: "ignored",
+                 outcome: %{description: "d", rubric: "- r", max_iterations: 3}
+               )
+    end
+
+    test "kickoff_input outcome without max_iterations puts no nil on the wire" do
+      assert [%{"type" => "user.define_outcome", "rubric" => %{"content" => "- r"}} = event] =
+               ManagedAgents.kickoff_input(outcome: %{description: "d", rubric: "- r"})
+
+      refute Map.has_key?(event, "max_iterations")
+    end
+
+    test "kickoff_input without :outcome keeps the user.message kickoff" do
+      assert [%{"type" => "user.message"}] =
+               ManagedAgents.kickoff_input(prompt: "hi")
+    end
+
+    test "kickoff_input accepts an %Outcome{} struct identically to a map" do
+      assert [%{"type" => "user.define_outcome", "description" => "d", "max_iterations" => 3}] =
+               ManagedAgents.kickoff_input(
+                 prompt: "ignored",
+                 outcome: %ReqManagedAgents.Outcome{
+                   description: "d",
+                   rubric: "- r",
+                   max_iterations: 3
+                 }
+               )
+    end
+
+    test "supports_outcomes?" do
+      assert ManagedAgents.supports_outcomes?()
+    end
+
+    test "outcome stop reasons: satisfied/max_iterations_reached are :end_turn, failed is :terminated" do
+      assert ManagedAgents.terminal("satisfied") == :end_turn
+
+      assert ManagedAgents.terminal("max_iterations_reached") ==
+               :end_turn
+
+      assert ManagedAgents.terminal("failed") == :terminated
+    end
+
+    test "span.outcome_evaluation_end is NOT a turn boundary (needs_revision keeps running)" do
+      refute ManagedAgents.turn_boundary?(%{
+               "type" => "span.outcome_evaluation_end",
+               "verdict" => "needs_revision"
+             })
+    end
   end
 
   test "resume_input/2 builds user.custom_tool_result events (no echo)" do

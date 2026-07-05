@@ -10,7 +10,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   """
   @behaviour ReqManagedAgents.Provider
 
-  alias ReqManagedAgents.{Client, Event, Stream, ToolUse, TurnResult, Usage}
+  alias ReqManagedAgents.{Client, Event, Outcome, Stream, ToolUse, TurnResult, Usage}
 
   @impl true
   def mode, do: :streaming
@@ -101,7 +101,21 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   end
 
   @impl true
-  def kickoff_input(opts), do: [Event.user_message(opts[:prompt] || "Begin.")]
+  def kickoff_input(opts) do
+    case opts[:outcome] do
+      nil ->
+        [Event.user_message(opts[:prompt] || "Begin.")]
+
+      raw ->
+        # The :outcome is validated at session start (Outcome.new/1), so coercing
+        # here is total; matching the struct by name keeps the wire hand-off explicit.
+        {:ok, %Outcome{description: d, rubric: r, max_iterations: n}} = Outcome.new(raw)
+        [Event.define_outcome(d, r, max_iterations: n)]
+    end
+  end
+
+  @impl true
+  def supports_outcomes?, do: true
 
   @impl true
   def user_input(text), do: [Event.user_message(text)]
@@ -153,6 +167,16 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
         {:error, reason}
     end
   end
+
+  @impl true
+  def text_delta(%{"type" => "agent.message", "content" => blocks}) when is_list(blocks) do
+    case for(%{"type" => "text", "text" => t} <- blocks, is_binary(t), do: t) do
+      [] -> nil
+      texts -> Enum.join(texts)
+    end
+  end
+
+  def text_delta(_), do: nil
 
   @impl true
   def normalize(events) do
@@ -224,6 +248,11 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @doc false
   def terminal("end_turn"), do: :end_turn
   def terminal("requires_action"), do: :requires_action
+  # Outcome sessions (user.define_outcome): the server-side grade→revise loop resolves to one
+  # of these at status_idle. satisfied / max_iterations_reached complete the run; failed doesn't.
+  def terminal("satisfied"), do: :end_turn
+  def terminal("max_iterations_reached"), do: :end_turn
+  def terminal("failed"), do: :terminated
   def terminal(_other), do: :terminated
 
   defp assistant_text(events) do

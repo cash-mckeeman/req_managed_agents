@@ -20,7 +20,22 @@ defmodule ReqManagedAgents.Session do
       ReqManagedAgents.Session.message(pid, "follow-up")
 
   Required opts: `:handler` (a `ReqManagedAgents.Handler` module or a 3-arity fn). Optional:
-  `:context`, `:prompt`, `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`.
+  `:context`, `:prompt`, `:outcome` (a `%ReqManagedAgents.Outcome{}` or a map with the same keys
+  `%{description:, rubric:, max_iterations:}` — kicks off a
+  `user.define_outcome` graded session instead of a `user.message`; mutually exclusive with
+  `:prompt`, outcome wins; `{:error, :outcome_unsupported}` on providers without native support),
+  `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`,
+  `:turn_guard` (a 1-arity fun invoked after each turn's usage accumulation with
+  `%{usage: %ReqManagedAgents.Usage{}, turns: n, session_id: id}`, returning `:cont` or `{:halt, reason}`;
+  on halt the run stops with `{:error, {:halted, reason}}` and a `:terminated` result is
+  notified — usage/turns accumulate within the current request, the same scope as `:max_turns`;
+  the guard runs *before* the `max_turns` check and wins when both would trip on the same turn;
+  it fires on terminal-tool re-prompt turns, whose `turns` counter keeps incrementing normally;
+  guards must not raise — a raising guard crashes the session and surfaces as
+  `{:error, {exception, stack}}` to `run/2` rather than producing a `{:halt, …}`),
+  `:require_terminal_tool` + `:terminal_tool` + `:max_reprompts` (default 2): an `:end_turn`
+  that never called `terminal_tool` is re-driven with a re-prompt; exhausted re-prompts finish
+  with `stop_reason: :no_terminal_tool`. Re-prompt turns count against `:max_turns`.
   For long AgentCore runs set `:timeout` (the end-to-end run budget, default 600_000 ms)
   at or above the server-side budget — a `run/2` timeout returns `{:error, :timeout}` and
   tears down the in-flight invoke client-side (the poll task and its HTTP stream are shut
@@ -34,7 +49,7 @@ defmodule ReqManagedAgents.Session do
   """
   use GenServer
   require Logger
-  alias ReqManagedAgents.{Provider, SessionInfo, SessionResult, Tools, TurnResult, Usage}
+  alias ReqManagedAgents.{Outcome, Provider, SessionInfo, SessionResult, Tools, TurnResult, Usage}
 
   @max_tool_concurrency 8
 
@@ -85,16 +100,69 @@ defmodule ReqManagedAgents.Session do
   @spec message(pid(), String.t()) :: :ok
   def message(pid, text), do: GenServer.cast(pid, {:message, text})
 
+  @doc """
+  Post a pre-built raw user event (e.g. `Event.tool_confirmation/2`, a mid-session
+  `Event.define_outcome/3`) into a running live session. The event is pushed verbatim —
+  no turn accounting or accumulator reset. Streaming providers only:
+  `{:error, :unsupported}` on `:request_response` providers (their input is consumed
+  by `poll_turn/2`, there is no out-of-band channel).
+  """
+  @spec send_event(pid(), map()) :: :ok | {:error, term()}
+  def send_event(pid, %{} = event), do: GenServer.call(pid, {:send_event, event})
+
   @impl true
   def init({provider, opts}) do
     # Trap exits so a crash in the linked stream-consumer / poll-turn Task arrives as {:EXIT,…}
     # (driving reconnect or a surfaced error) instead of killing this process and its caller.
     Process.flag(:trap_exit, true)
 
+    case validate_opts(provider, opts) do
+      :ok -> open_session(provider, opts)
+      {:error, reason} -> {:stop, reason}
+    end
+  end
+
+  # The one home for start-time contract checks — later tasks add clauses here,
+  # not another chain in init/1.
+  defp validate_opts(provider, opts) do
+    cond do
+      not valid_turn_guard?(opts[:turn_guard]) ->
+        {:error, {:invalid_turn_guard, opts[:turn_guard]}}
+
+      opts[:require_terminal_tool] && not is_binary(opts[:terminal_tool]) ->
+        {:error, {:invalid_opts, :terminal_tool_required}}
+
+      opts[:outcome] != nil and not valid_outcome?(opts[:outcome]) ->
+        {:error, {:invalid_opts, :outcome}}
+
+      # AgentCore has no in-session outcome equivalent (Evaluations is trace-level,
+      # out-of-session); fail at start rather than silently kicking off a user.message.
+      opts[:outcome] != nil and not outcomes_supported?(provider) ->
+        {:error, :outcome_unsupported}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp valid_outcome?(outcome), do: match?({:ok, _}, Outcome.new(outcome))
+
+  defp outcomes_supported?(provider) do
+    Code.ensure_loaded?(provider) and function_exported?(provider, :supports_outcomes?, 0) and
+      provider.supports_outcomes?()
+  end
+
+  defp valid_turn_guard?(nil), do: true
+  defp valid_turn_guard?(guard), do: is_function(guard, 1)
+
+  # The former init/1 body, from `case provider.open(opts, self()) do` down, moves here
+  # verbatim — state map and {:continue, …} tuple unchanged (plus the new :turn_guard key).
+  defp open_session(provider, opts) do
     case provider.open(opts, self()) do
       {:ok, conn} ->
         state = %{
           provider: provider,
+          delta?: exports_text_delta?(provider),
           mode: provider.mode(),
           conn: conn,
           info: build_info(provider, conn),
@@ -117,7 +185,11 @@ defmodule ReqManagedAgents.Session do
           max_turns: opts[:max_turns] || 50,
           custom_tool_uses: [],
           server_tool_uses: [],
-          usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []}
+          usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []},
+          turn_guard: opts[:turn_guard],
+          enforced_terminal_tool: if(opts[:require_terminal_tool], do: opts[:terminal_tool]),
+          max_reprompts: opts[:max_reprompts] || 2,
+          reprompts_left: opts[:max_reprompts] || 2
         }
 
         {:ok, state, {:continue, if(Map.get(conn, :resume), do: :resume, else: :maybe_kickoff)}}
@@ -154,7 +226,7 @@ defmodule ReqManagedAgents.Session do
       {:noreply, s}
     else
       s = %{s | seen: if(is_binary(id), do: MapSet.put(s.seen, id), else: s.seen)}
-      forward_raw(s, ev)
+      forward_with_delta(s, ev)
       s = %{s | turn_events: s.turn_events ++ [ev]}
       if s.provider.turn_boundary?(ev), do: handle_turn(s, s.turn_events), else: {:noreply, s}
     end
@@ -206,7 +278,7 @@ defmodule ReqManagedAgents.Session do
   # Handler delivery is at-least-once across retried attempts — the canonical
   # exactly-once record is TurnResult/SessionResult.events.
   def handle_info({:provider_event, ev}, s) do
-    forward_raw(s, ev)
+    forward_with_delta(s, ev)
 
     :telemetry.execute(
       [:req_managed_agents, :stream, :event],
@@ -220,7 +292,7 @@ defmodule ReqManagedAgents.Session do
   def handle_info({:turn, {:ok, events, conn}}, s) do
     # Batch forwarding only when nothing was live-forwarded this turn (a live
     # provider already delivered each event as it arrived).
-    if s.live_forwarded == 0, do: Enum.each(events, &forward_raw(s, &1))
+    if s.live_forwarded == 0, do: Enum.each(events, &forward_with_delta(s, &1))
     handle_turn(%{s | conn: conn, live_forwarded: 0, poll_task: nil}, events)
   end
 
@@ -239,6 +311,12 @@ defmodule ReqManagedAgents.Session do
   def handle_info({:EXIT, _pid, reason}, s), do: {:stop, reason, s}
 
   def handle_info(_other, s), do: {:noreply, s}
+
+  @impl true
+  def handle_call({:send_event, event}, _from, %{mode: :streaming} = s),
+    do: {:reply, s.provider.push_input(s.conn, [event]), s}
+
+  def handle_call({:send_event, _event}, _from, s), do: {:reply, {:error, :unsupported}, s}
 
   @impl true
   # A follow-up message starts a fresh request: reset the per-request turn counter and accumulators
@@ -266,6 +344,7 @@ defmodule ReqManagedAgents.Session do
       | events: [],
         custom_tool_uses: [],
         server_tool_uses: [],
+        reprompts_left: s.max_reprompts,
         usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []}
     }
 
@@ -307,11 +386,34 @@ defmodule ReqManagedAgents.Session do
 
   # ── shared per-turn handling ──────────────────────────────────────────────────
   defp handle_turn(s, turn_events) do
-    s = %{s | events: s.events ++ turn_events, turns: s.turns + 1}
+    s = %{s | events: s.events ++ turn_events, turns: s.turns + 1, turn_events: []}
     tr = s.provider.normalize(turn_events)
     s = accumulate(s, tr)
     emit_tool_use_telemetry(s, tr.custom_tool_uses)
 
+    # The frozen governance hook: plain data in, plain verdict out. Hosts compose
+    # policy here (budget caps, grant checks); this library ships only the mechanism.
+    case run_turn_guard(s) do
+      :cont ->
+        continue_turn(s, tr)
+
+      {:halt, reason} ->
+        notify(s, session_result(s, tr, :terminated))
+        stop_error(s, {:halted, reason})
+    end
+  end
+
+  defp run_turn_guard(%{turn_guard: nil}), do: :cont
+
+  defp run_turn_guard(s) do
+    s.turn_guard.(%{
+      usage: s.usage,
+      turns: s.turns,
+      session_id: s.info.session_id
+    })
+  end
+
+  defp continue_turn(s, tr) do
     cond do
       s.turns > s.max_turns ->
         notify(s, session_result(s, tr, :terminated))
@@ -321,10 +423,31 @@ defmodule ReqManagedAgents.Session do
         results = run_tools(tr.custom_tool_uses, s)
         drive(s, s.provider.resume_input(tr.custom_tool_uses, results))
 
+      # Terminal-tool enforcement: an :end_turn that never called the required tool
+      # re-drives with a re-prompt; re-prompt turns count against :max_turns.
+      tr.terminal == :end_turn and missing_terminal_tool?(s) and s.reprompts_left > 0 ->
+        input = s.provider.user_input(terminal_reprompt(s.enforced_terminal_tool))
+        drive(%{s | reprompts_left: s.reprompts_left - 1}, input)
+
+      tr.terminal == :end_turn and missing_terminal_tool?(s) ->
+        finish(s, %{tr | stop_reason: :no_terminal_tool})
+
       true ->
         finish(s, tr)
     end
   end
+
+  defp missing_terminal_tool?(%{enforced_terminal_tool: nil}), do: false
+
+  defp missing_terminal_tool?(%{enforced_terminal_tool: tool} = s),
+    do: not Enum.any?(s.custom_tool_uses, &(&1.name == tool))
+
+  # Wording relocated verbatim from biai-managed-agents' Core.Runner.Directives
+  # (eval-gate continuity for consumers migrating off that loop).
+  defp terminal_reprompt(terminal_tool),
+    do:
+      "You returned a response without calling #{terminal_tool}. You MUST call " <>
+        "#{terminal_tool} now to finish — produce the result via #{terminal_tool}."
 
   defp accumulate(s, %TurnResult{} = tr) do
     %{
@@ -432,6 +555,25 @@ defmodule ReqManagedAgents.Session do
   # A Converse-envelope event is a single-key map (%{"messageStop" => …}).
   defp envelope_type(%{} = ev), do: ev |> Map.keys() |> List.first()
   defp envelope_type(_), do: nil
+
+  defp exports_text_delta?(provider),
+    do: Code.ensure_loaded?(provider) and function_exported?(provider, :text_delta, 1)
+
+  # Additive normalization: the synthetic delta follows the raw event through the same
+  # handler path and is never accumulated into events (raw preservation).
+  defp forward_with_delta(%{delta?: false} = s, ev), do: forward_raw(s, ev)
+
+  defp forward_with_delta(s, ev) do
+    forward_raw(s, ev)
+
+    case s.provider.text_delta(ev) do
+      chunk when is_binary(chunk) and chunk != "" ->
+        forward_raw(s, %{"type" => "rma.text_delta", "text" => chunk})
+
+      _ ->
+        :ok
+    end
+  end
 
   defp forward_raw(%{handler: h, context: ctx, info: info}, ev) when is_atom(h) and h != nil do
     cond do

@@ -55,4 +55,37 @@ defmodule ReqManagedAgents.EventTest do
              "stop_reason" => %{"type" => "weird"}
            }) == :unknown_idle
   end
+
+  describe "define_outcome/3" do
+    test "builds the wire event with a text rubric" do
+      assert Event.define_outcome("ship it", "- compiles\n- tests pass") == %{
+               "type" => "user.define_outcome",
+               "description" => "ship it",
+               "rubric" => %{"type" => "text", "content" => "- compiles\n- tests pass"}
+             }
+    end
+
+    test "max_iterations is included only when given" do
+      assert %{"max_iterations" => 5} =
+               Event.define_outcome("d", "r", max_iterations: 5)
+
+      refute Map.has_key?(Event.define_outcome("d", "r"), "max_iterations")
+
+      # An absent map key at the call site arrives as an explicit nil — it must
+      # not become "max_iterations" => nil on the wire.
+      refute Map.has_key?(Event.define_outcome("d", "r", max_iterations: nil), "max_iterations")
+    end
+  end
+
+  describe "classify/1 outcome stop reasons" do
+    test "satisfied and max_iterations_reached classify as :end_turn; failed as :terminated" do
+      idle = fn reason ->
+        %{"type" => "session.status_idle", "stop_reason" => %{"type" => reason}}
+      end
+
+      assert Event.classify(idle.("satisfied")) == :end_turn
+      assert Event.classify(idle.("max_iterations_reached")) == :end_turn
+      assert Event.classify(idle.("failed")) == :terminated
+    end
+  end
 end

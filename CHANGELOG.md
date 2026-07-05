@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.5.0 (2026-07-04)
+
+### Added
+- **`turn_guard`** — the between-turn governance hook, invoked after each turn's usage
+  accumulation with `%{usage: %ReqManagedAgents.Usage{}, turns:, session_id:}`, returning
+  `:cont` or `{:halt, reason}`. On halt the run stops with
+  `{:error, {:halted, reason}}` and a `:terminated` `SessionResult` is notified. This
+  contract is frozen: hosts compose policy (budget caps, grant checks) on top; RMA ships
+  only the mechanism. Semantics: the guard runs *before* the `max_turns` check and wins
+  when both would trip on the same turn; it fires on terminal-tool re-prompt turns (whose
+  `turns` counter keeps incrementing); guards must not raise.
+- Terminal-tool enforcement: `require_terminal_tool: true` + `terminal_tool: "name"` +
+  `max_reprompts` (default 2). An `:end_turn` that never called the terminal tool is
+  re-driven with a re-prompt; exhausted re-prompts finish with
+  `stop_reason: :no_terminal_tool`. Re-prompt turns count against `:max_turns`.
+- `rma.text_delta` — one documented synthetic event
+  (`%{"type" => "rma.text_delta", "text" => chunk}`) emitted through `handle_event`
+  alongside (never instead of) the raw event, on every provider that implements the new
+  optional `Provider.text_delta/1`. Never stored in `SessionResult.events`.
+- Outcomes (GH #31): `Event.define_outcome/3`, the `:outcome` Session option — a
+  `%ReqManagedAgents.Outcome{}` struct or a map with the same atom keys — honored by
+  the Claude Managed Agents kickoff (`user.define_outcome`; mutually exclusive with
+  `:prompt`, outcome wins), optional `Provider.supports_outcomes?/0`
+  (`{:error, :outcome_unsupported}` on Bedrock AgentCore), and terminal mapping for
+  outcome stop reasons (`satisfied`/`max_iterations_reached` → `:end_turn`, `failed` →
+  `:terminated`; `span.outcome_evaluation_end` with `needs_revision` is not terminal).
+  Shape validation via `ReqManagedAgents.Outcome.new/1` (one gate shared by the start-time
+  check and the kickoff): a non-nil `:outcome` that is not a valid struct or atom-keyed
+  `%{description: binary, rubric: binary}` fails fast at start with
+  `{:error, {:invalid_opts, :outcome}}` before provider-support is checked.
+- `Session.send_event/2` — post a pre-built raw user event (e.g.
+  `user.tool_confirmation`) into a running streaming session.
+
+### Changed
+- `TurnResult`/`SessionResult` `stop_reason` typespec widened to
+  `String.t() | map() | atom() | nil` (`:no_terminal_tool`).
+
 ## v0.4.2 (2026-07-04)
 
 ### Changed

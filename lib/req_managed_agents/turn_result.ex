@@ -11,7 +11,7 @@ defmodule ReqManagedAgents.TurnResult do
 
   @type t :: %__MODULE__{
           terminal: ReqManagedAgents.Provider.terminal(),
-          stop_reason: String.t() | map() | nil,
+          stop_reason: String.t() | map() | atom() | nil,
           text: String.t(),
           custom_tool_uses: [ReqManagedAgents.ToolUse.t()],
           server_tool_uses: [ReqManagedAgents.ToolUse.t()],
