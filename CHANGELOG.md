@@ -13,7 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session_id:}`), returning `:cont` or `{:halt, reason}`. On halt the run stops with
   `{:error, {:halted, reason}}` and a `:terminated` `SessionResult` is notified. This
   contract is frozen: hosts compose policy (budget caps, grant checks) on top; RMA ships
-  only the mechanism.
+  only the mechanism. Semantics: the guard runs *before* the `max_turns` check and wins
+  when both would trip on the same turn; it fires on terminal-tool re-prompt turns (whose
+  `turns` counter keeps incrementing); guards must not raise.
 - Terminal-tool enforcement: `require_terminal_tool: true` + `terminal_tool: "name"` +
   `max_reprompts` (default 2). An `:end_turn` that never called the terminal tool is
   re-driven with a re-prompt; exhausted re-prompts finish with
@@ -28,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`{:error, :outcome_unsupported}` on Bedrock AgentCore), and terminal mapping for
   outcome stop reasons (`satisfied`/`max_iterations_reached` → `:end_turn`, `failed` →
   `:terminated`; `span.outcome_evaluation_end` with `needs_revision` is not terminal).
+  Shape validation: a non-nil `:outcome` that is not `%{description: binary, rubric: binary}`
+  fails fast at start with `{:error, {:invalid_opts, :outcome}}` before provider-support
+  is checked.
 - `Session.send_event/2` — post a pre-built raw user event (e.g.
   `user.tool_confirmation`) into a running streaming session.
 

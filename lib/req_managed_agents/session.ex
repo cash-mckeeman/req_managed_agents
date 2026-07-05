@@ -27,7 +27,11 @@ defmodule ReqManagedAgents.Session do
   `:turn_guard` (a 1-arity fun invoked after each turn's usage accumulation with
   `%{usage: map, turns: n, session_id: id}`, returning `:cont` or `{:halt, reason}`;
   on halt the run stops with `{:error, {:halted, reason}}` and a `:terminated` result is
-  notified — usage/turns accumulate within the current request, the same scope as `:max_turns`),
+  notified — usage/turns accumulate within the current request, the same scope as `:max_turns`;
+  the guard runs *before* the `max_turns` check and wins when both would trip on the same turn;
+  it fires on terminal-tool re-prompt turns, whose `turns` counter keeps incrementing normally;
+  guards must not raise — a raising guard crashes the session and surfaces as
+  `{:error, {exception, stack}}` to `run/2` rather than producing a `{:halt, …}`),
   `:require_terminal_tool` + `:terminal_tool` + `:max_reprompts` (default 2): an `:end_turn`
   that never called `terminal_tool` is re-driven with a re-prompt; exhausted re-prompts finish
   with `stop_reason: :no_terminal_tool`. Re-prompt turns count against `:max_turns`.
@@ -127,6 +131,9 @@ defmodule ReqManagedAgents.Session do
       opts[:require_terminal_tool] && not is_binary(opts[:terminal_tool]) ->
         {:error, {:invalid_opts, :terminal_tool_required}}
 
+      opts[:outcome] != nil and not valid_outcome?(opts[:outcome]) ->
+        {:error, {:invalid_opts, :outcome}}
+
       # AgentCore has no in-session outcome equivalent (Evaluations is trace-level,
       # out-of-session); fail at start rather than silently kicking off a user.message.
       opts[:outcome] != nil and not outcomes_supported?(provider) ->
@@ -136,6 +143,9 @@ defmodule ReqManagedAgents.Session do
         :ok
     end
   end
+
+  defp valid_outcome?(%{description: d, rubric: r}), do: is_binary(d) and is_binary(r)
+  defp valid_outcome?(_), do: false
 
   defp outcomes_supported?(provider) do
     Code.ensure_loaded?(provider) and function_exported?(provider, :supports_outcomes?, 0) and
@@ -376,7 +386,7 @@ defmodule ReqManagedAgents.Session do
 
   # ── shared per-turn handling ──────────────────────────────────────────────────
   defp handle_turn(s, turn_events) do
-    s = %{s | events: s.events ++ turn_events, turns: s.turns + 1}
+    s = %{s | events: s.events ++ turn_events, turns: s.turns + 1, turn_events: []}
     tr = s.provider.normalize(turn_events)
     s = accumulate(s, tr)
     emit_tool_use_telemetry(s, tr.custom_tool_uses)

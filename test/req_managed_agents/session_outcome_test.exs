@@ -74,4 +74,20 @@ defmodule ReqManagedAgents.SessionOutcomeTest do
                outcome: %{description: "d", rubric: "r"}
              )
   end
+
+  test "outcome as a plain string is rejected at start with invalid_opts" do
+    assert {:error, {:invalid_opts, :outcome}} =
+             Session.run(ClaudeManagedAgents,
+               handler: fn _, _, _ -> {:ok, ""} end,
+               outcome: "do it"
+             )
+  end
+
+  test "outcome with string keys is rejected at start with invalid_opts" do
+    assert {:error, {:invalid_opts, :outcome}} =
+             Session.run(ClaudeManagedAgents,
+               handler: fn _, _, _ -> {:ok, ""} end,
+               outcome: %{"description" => "d", "rubric" => "r"}
+             )
+  end
 end
