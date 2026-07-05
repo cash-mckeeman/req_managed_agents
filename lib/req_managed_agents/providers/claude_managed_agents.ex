@@ -104,7 +104,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   def kickoff_input(opts) do
     case opts[:outcome] do
       %{description: d, rubric: r} = o ->
-        [Event.define_outcome(d, r, max_iterations: o[:max_iterations])]
+        [Event.define_outcome(d, r, max_iterations: Map.get(o, :max_iterations))]
 
       nil ->
         [Event.user_message(opts[:prompt] || "Begin.")]

@@ -20,7 +20,8 @@ defmodule ReqManagedAgents.Session do
       ReqManagedAgents.Session.message(pid, "follow-up")
 
   Required opts: `:handler` (a `ReqManagedAgents.Handler` module or a 3-arity fn). Optional:
-  `:context`, `:prompt`, `:outcome` (`%{description:, rubric:, max_iterations:}` — kicks off a
+  `:context`, `:prompt`, `:outcome` (a `%ReqManagedAgents.Outcome{}` or a map with the same keys
+  `%{description:, rubric:, max_iterations:}` — kicks off a
   `user.define_outcome` graded session instead of a `user.message`; mutually exclusive with
   `:prompt`, outcome wins; `{:error, :outcome_unsupported}` on providers without native support),
   `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`,

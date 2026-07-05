@@ -431,6 +431,18 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
                ManagedAgents.kickoff_input(prompt: "hi")
     end
 
+    test "kickoff_input accepts an %Outcome{} struct identically to a map" do
+      assert [%{"type" => "user.define_outcome", "description" => "d", "max_iterations" => 3}] =
+               ManagedAgents.kickoff_input(
+                 prompt: "ignored",
+                 outcome: %ReqManagedAgents.Outcome{
+                   description: "d",
+                   rubric: "- r",
+                   max_iterations: 3
+                 }
+               )
+    end
+
     test "supports_outcomes?" do
       assert ManagedAgents.supports_outcomes?()
     end

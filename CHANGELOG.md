@@ -24,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`%{"type" => "rma.text_delta", "text" => chunk}`) emitted through `handle_event`
   alongside (never instead of) the raw event, on every provider that implements the new
   optional `Provider.text_delta/1`. Never stored in `SessionResult.events`.
-- Outcomes (GH #31): `Event.define_outcome/3`, the `:outcome` Session option honored by
+- Outcomes (GH #31): `Event.define_outcome/3`, the `:outcome` Session option — a
+  `%ReqManagedAgents.Outcome{}` struct or a map with the same atom keys — honored by
   the Claude Managed Agents kickoff (`user.define_outcome`; mutually exclusive with
   `:prompt`, outcome wins), optional `Provider.supports_outcomes?/0`
   (`{:error, :outcome_unsupported}` on Bedrock AgentCore), and terminal mapping for
