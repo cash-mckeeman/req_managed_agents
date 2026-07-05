@@ -1,6 +1,6 @@
 defmodule ReqManagedAgents.ProviderConformanceTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Providers.{BedrockAgentCore, ClaudeManagedAgents}
+  alias ReqManagedAgents.Providers.{BedrockAgentCore, ClaudeManagedAgents, Local}
 
   # Every provider implements the shared callbacks; each mode adds its own.
   @shared [
@@ -38,7 +38,19 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
            "ClaudeManagedAgents missing teardown/2"
   end
 
-  test "both providers normalize to a %TurnResult{}" do
+  test "Local is a complete :request_response provider" do
+    Code.ensure_loaded!(Local)
+    assert Local.mode() == :request_response
+
+    for {f, a} <- @shared ++ [{:poll_turn, 2}] do
+      assert function_exported?(Local, f, a), "Local missing #{f}/#{a}"
+    end
+
+    assert function_exported?(Local, :teardown, 2), "Local missing teardown/2"
+    assert function_exported?(Local, :text_delta, 1), "Local missing text_delta/1"
+  end
+
+  test "all providers normalize to a %TurnResult{}" do
     bedrock = BedrockAgentCore.normalize([%{"messageStop" => %{"stopReason" => "end_turn"}}])
 
     claude =
@@ -46,7 +58,18 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
         %{"type" => "session.status_idle", "stop_reason" => %{"type" => "end_turn"}}
       ])
 
+    local =
+      Local.normalize([
+        %{
+          "type" => "local.model_response",
+          "message" => %{"role" => "assistant", "content" => "hi"},
+          "finish_reason" => "stop",
+          "usage" => %{"prompt_tokens" => 1, "completion_tokens" => 1}
+        }
+      ])
+
     assert %ReqManagedAgents.TurnResult{terminal: :end_turn} = bedrock
     assert %ReqManagedAgents.TurnResult{terminal: :end_turn} = claude
+    assert %ReqManagedAgents.TurnResult{terminal: :end_turn} = local
   end
 end
