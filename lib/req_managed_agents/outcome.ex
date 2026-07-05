@@ -16,4 +16,21 @@ defmodule ReqManagedAgents.Outcome do
           rubric: String.t(),
           max_iterations: pos_integer() | nil
         }
+
+  @doc """
+  Coerce a map or an existing `%Outcome{}` into a validated `%Outcome{}`.
+
+  The single shape gate for the `:outcome` option: `description` and `rubric`
+  must be binaries under atom keys; `max_iterations` is optional. Anything else
+  returns `{:error, :invalid_outcome}`.
+  """
+  @spec new(t() | map()) :: {:ok, t()} | {:error, :invalid_outcome}
+  def new(%__MODULE__{description: d, rubric: r} = outcome) when is_binary(d) and is_binary(r),
+    do: {:ok, outcome}
+
+  def new(%{description: d, rubric: r} = map) when is_binary(d) and is_binary(r),
+    do:
+      {:ok, %__MODULE__{description: d, rubric: r, max_iterations: Map.get(map, :max_iterations)}}
+
+  def new(_other), do: {:error, :invalid_outcome}
 end

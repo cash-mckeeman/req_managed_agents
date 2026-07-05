@@ -31,9 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`{:error, :outcome_unsupported}` on Bedrock AgentCore), and terminal mapping for
   outcome stop reasons (`satisfied`/`max_iterations_reached` → `:end_turn`, `failed` →
   `:terminated`; `span.outcome_evaluation_end` with `needs_revision` is not terminal).
-  Shape validation: a non-nil `:outcome` that is not `%{description: binary, rubric: binary}`
-  fails fast at start with `{:error, {:invalid_opts, :outcome}}` before provider-support
-  is checked.
+  Shape validation via `ReqManagedAgents.Outcome.new/1` (one gate shared by the start-time
+  check and the kickoff): a non-nil `:outcome` that is not a valid struct or atom-keyed
+  `%{description: binary, rubric: binary}` fails fast at start with
+  `{:error, {:invalid_opts, :outcome}}` before provider-support is checked.
 - `Session.send_event/2` — post a pre-built raw user event (e.g.
   `user.tool_confirmation`) into a running streaming session.
 

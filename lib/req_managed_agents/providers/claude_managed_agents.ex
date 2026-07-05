@@ -10,7 +10,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   """
   @behaviour ReqManagedAgents.Provider
 
-  alias ReqManagedAgents.{Client, Event, Stream, ToolUse, TurnResult, Usage}
+  alias ReqManagedAgents.{Client, Event, Outcome, Stream, ToolUse, TurnResult, Usage}
 
   @impl true
   def mode, do: :streaming
@@ -103,11 +103,14 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @impl true
   def kickoff_input(opts) do
     case opts[:outcome] do
-      %{description: d, rubric: r} = o ->
-        [Event.define_outcome(d, r, max_iterations: Map.get(o, :max_iterations))]
-
       nil ->
         [Event.user_message(opts[:prompt] || "Begin.")]
+
+      raw ->
+        # The :outcome is validated at session start (Outcome.new/1), so coercing
+        # here is total; matching the struct by name keeps the wire hand-off explicit.
+        {:ok, %Outcome{description: d, rubric: r, max_iterations: n}} = Outcome.new(raw)
+        [Event.define_outcome(d, r, max_iterations: n)]
     end
   end
 

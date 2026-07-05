@@ -49,7 +49,7 @@ defmodule ReqManagedAgents.Session do
   """
   use GenServer
   require Logger
-  alias ReqManagedAgents.{Provider, SessionInfo, SessionResult, Tools, TurnResult, Usage}
+  alias ReqManagedAgents.{Outcome, Provider, SessionInfo, SessionResult, Tools, TurnResult, Usage}
 
   @max_tool_concurrency 8
 
@@ -145,8 +145,7 @@ defmodule ReqManagedAgents.Session do
     end
   end
 
-  defp valid_outcome?(%{description: d, rubric: r}), do: is_binary(d) and is_binary(r)
-  defp valid_outcome?(_), do: false
+  defp valid_outcome?(outcome), do: match?({:ok, _}, Outcome.new(outcome))
 
   defp outcomes_supported?(provider) do
     Code.ensure_loaded?(provider) and function_exported?(provider, :supports_outcomes?, 0) and
