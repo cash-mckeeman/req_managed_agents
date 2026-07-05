@@ -160,18 +160,24 @@ defmodule ReqManagedAgents.Session do
   defp open_session(provider, opts) do
     case provider.open(opts, self()) do
       {:ok, conn} ->
+        meta =
+          Map.merge(
+            opts[:telemetry_metadata] || %{},
+            model_config_metadata(opts)
+          )
+
         state = %{
           provider: provider,
           delta?: exports_text_delta?(provider),
           mode: provider.mode(),
           conn: conn,
-          info: build_info(provider, conn),
+          info: build_info(provider, conn, meta),
           opts: opts,
           handler: Keyword.fetch!(opts, :handler),
           context: opts[:context],
           caller: opts[:caller],
           notify: opts[:notify],
-          meta: opts[:telemetry_metadata] || %{},
+          meta: meta,
           ref: Map.get(conn, :ref),
           consumer: Map.get(conn, :consumer),
           poll_task: nil,
@@ -252,7 +258,7 @@ defmodule ReqManagedAgents.Session do
         s = %{
           s
           | conn: conn,
-            info: build_info(s.provider, conn),
+            info: build_info(s.provider, conn, s.meta),
             ref: Map.get(conn, :ref),
             consumer: Map.get(conn, :consumer),
             seen: seen,
@@ -594,8 +600,19 @@ defmodule ReqManagedAgents.Session do
 
   # Session identity for handler callbacks: providers standardize a :session_id
   # conn key (Claude mints it at open; Bedrock echoes the caller-supplied id).
-  defp build_info(provider, conn),
-    do: %SessionInfo{session_id: Map.get(conn, :session_id), provider: provider}
+  defp build_info(provider, conn, meta),
+    do: %SessionInfo{session_id: Map.get(conn, :session_id), provider: provider, metadata: meta}
+
+  # Metadata passthrough: correlation ids minted by a routing layer (request ids,
+  # decision ids, …) ride model_config into telemetry AND handle_event's
+  # SessionInfo, uniformly across providers. model_config wins on key conflict —
+  # the route response is the closer source.
+  defp model_config_metadata(opts) do
+    case opts[:model_config] do
+      %{metadata: %{} = m} -> m
+      _ -> %{}
+    end
+  end
 
   defp notify(%{notify: pid}, payload) when is_pid(pid),
     do: send(pid, {:managed_agents_session, payload})
