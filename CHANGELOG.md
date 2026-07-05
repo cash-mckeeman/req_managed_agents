@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.4.1 (2026-07-04)
+
+### Fixed
+- `Session.run/2` timeout now shuts down the in-flight poll task (Bedrock AgentCore
+  invoke) and the streaming SSE consumer, so the client HTTP stream is torn down
+  instead of continuing after the caller received `{:error, :timeout}`. Server-side
+  execution may still run to the provider's own limit — on AgentCore, `timeoutSeconds`
+  remains the authoritative server budget (Session moduledoc updated to match).
+
 ## v0.4.0 (2026-07-04)
 
 ### Added
