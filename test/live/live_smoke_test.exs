@@ -227,7 +227,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
   @tag timeout: 600_000
   @tag :live_bedrock
   @tag skip:
-         (if System.get_env("HARNESS_EXECUTION_ROLE_ARN"),
+         (if System.get_env("HARNESS_EXECUTION_ROLE_ARN") not in [nil, ""],
            do: false,
            else: "requires HARNESS_EXECUTION_ROLE_ARN (AWS harness execution role ARN)")
   test "AgentCore Harness: provision → invoke → live usage → teardown" do
@@ -361,7 +361,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
   @tag timeout: 600_000
   @tag :live_bedrock_command
   @tag skip:
-         (if System.get_env("HARNESS_EXECUTION_ROLE_ARN"),
+         (if System.get_env("HARNESS_EXECUTION_ROLE_ARN") not in [nil, ""],
            do: false,
            else: "requires HARNESS_EXECUTION_ROLE_ARN (AWS harness execution role ARN)")
   test "AgentCore command: exec into the session microVM — stdout, stderr, exit codes" do
@@ -419,7 +419,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
   @tag timeout: 600_000
   @tag :live_bedrock_mount
   @tag skip:
-         (if System.get_env("HARNESS_EXECUTION_ROLE_ARN"),
+         (if System.get_env("HARNESS_EXECUTION_ROLE_ARN") not in [nil, ""],
            do: false,
            else: "requires HARNESS_EXECUTION_ROLE_ARN (AWS harness execution role ARN)")
   test "AgentCore sessionStorage mount: environment pass-through + Artifacts put/fetch round-trip" do
