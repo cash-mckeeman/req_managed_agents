@@ -50,6 +50,10 @@ defmodule ReqManagedAgents.MixProject do
       # first use if they're missing (ReqManagedAgents.AgentCore.Deps).
       {:ex_aws_auth, "~> 1.4", optional: true},
       {:aws_event_stream, "~> 0.1", optional: true},
+      # req_llm is optional: only the Local provider's DEFAULT chat_fun needs it.
+      # Injected chat_funs (tests, Ollama, mimir lanes) work without it;
+      # Local raises a clear error at first use if it's missing (Local.Deps).
+      {:req_llm, "~> 1.10", optional: true},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
