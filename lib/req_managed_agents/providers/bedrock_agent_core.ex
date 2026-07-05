@@ -54,7 +54,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
              do: {:ok, %{harness_arn: arn, harness_id: hid}}
 
       {:error, {:http_error, 409, _}} ->
-        recover_existing(list_fun, get_fun, name, poll_ms, max_polls)
+        recover_existing(create_fun, harness_spec, list_fun, get_fun, name, poll_ms, max_polls)
 
       {:error, reason} ->
         {:error, reason}
@@ -82,15 +82,32 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     [prefix, "harness_#{digest}"] |> Enum.reject(&is_nil/1) |> Enum.join("_")
   end
 
-  defp recover_existing(list_fun, get_fun, name, poll_ms, max_polls) do
-    with {:ok, %{"harnesses" => harnesses}} <- list_fun.(),
-         %{"arn" => arn, "harnessId" => hid} <- recoverable_harness(harnesses, name),
-         :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls) do
-      {:ok, %{harness_arn: arn, harness_id: hid}}
-    else
-      nil -> {:error, {:harness_name_conflict, name}}
-      {:error, reason} -> {:error, reason}
-      other -> {:error, {:unexpected_list_response, other}}
+  defp recover_existing(create_fun, harness_spec, list_fun, get_fun, name, poll_ms, max_polls) do
+    case list_fun.() do
+      {:ok, %{"harnesses" => harnesses}} ->
+        cond do
+          harness = recoverable_harness(harnesses, name) ->
+            with :ok <- wait_until_ready(get_fun, harness["harnessId"], poll_ms, max_polls),
+                 do: {:ok, %{harness_arn: harness["arn"], harness_id: harness["harnessId"]}}
+
+          deleting?(harnesses, name) ->
+            # A prior same-name harness is still tearing down; wait it out, then re-create.
+            with :ok <- wait_until_deleted(list_fun, name, poll_ms, max_polls),
+                 {:ok, %{"harness" => %{"arn" => arn, "harnessId" => hid}}} <-
+                   create_fun.(harness_spec),
+                 :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls) do
+              {:ok, %{harness_arn: arn, harness_id: hid}}
+            end
+
+          true ->
+            {:error, {:harness_name_conflict, name}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+
+      other ->
+        {:error, {:unexpected_list_response, other}}
     end
   end
 
@@ -98,6 +115,29 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     Enum.find(harnesses, fn h ->
       h["harnessName"] == name and h["status"] not in @nonreusable_status
     end)
+  end
+
+  defp deleting?(harnesses, name),
+    do: Enum.any?(harnesses, &(&1["harnessName"] == name and &1["status"] == "DELETING"))
+
+  defp wait_until_deleted(list_fun, name, poll_ms, max_polls, polls \\ 0)
+
+  defp wait_until_deleted(_list_fun, name, _poll_ms, max_polls, polls) when polls >= max_polls,
+    do: {:error, {:harness_still_deleting, name}}
+
+  defp wait_until_deleted(list_fun, name, poll_ms, max_polls, polls) do
+    case list_fun.() do
+      {:ok, %{"harnesses" => hs}} ->
+        if Enum.any?(hs, &(&1["harnessName"] == name)) do
+          Process.sleep(poll_ms)
+          wait_until_deleted(list_fun, name, poll_ms, max_polls, polls + 1)
+        else
+          :ok
+        end
+
+      _ ->
+        :ok
+    end
   end
 
   defp wait_until_ready(get_fun, hid, poll_ms, polls_left) do
