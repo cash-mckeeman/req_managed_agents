@@ -303,6 +303,38 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
              )
   end
 
+  test "provision/2 gives up waiting on a DELETING same-name harness that never disappears" do
+    name = P.harness_name(@spec_bedrock, nil)
+
+    # list: the same-name harness stays DELETING on every call — it never disappears.
+    list_fun = fn ->
+      {:ok, %{"harnesses" => [%{"harnessName" => name, "status" => "DELETING"}]}}
+    end
+
+    # create: first call 409s (name still taken); a second call would mean the retry
+    # happened even though wait_until_deleted should have exhausted first.
+    {:ok, creates} = Agent.start_link(fn -> 0 end)
+
+    create_fun = fn _spec ->
+      Agent.get_and_update(creates, &{&1 + 1, &1 + 1})
+      {:error, {:http_error, 409, "exists"}}
+    end
+
+    get_fun = fn _hid -> {:ok, %{"harness" => %{"status" => "READY"}}} end
+
+    assert {:error, {:harness_still_deleting, ^name}} =
+             P.provision(@spec_bedrock,
+               execution_role_arn: "role",
+               create_fun: create_fun,
+               list_fun: list_fun,
+               get_fun: get_fun,
+               ready_poll_ms: 1,
+               ready_max_polls: 2
+             )
+
+    assert Agent.get(creates, & &1) == 1
+  end
+
   test "provision/2 still returns a name conflict when the same-name harness has a *_FAILED status" do
     name = P.harness_name(@spec_bedrock, nil)
     create = fn _ -> {:error, {:http_error, 409, %{}}} end
