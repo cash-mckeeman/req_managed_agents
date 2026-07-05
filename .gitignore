@@ -25,3 +25,9 @@ req_managed_agents-*.tar
 
 # Dialyzer PLTs (cached in CI, not committed).
 /priv/plts/
+
+# Ops/planning narrative relocated to private biai-ops (see hygiene guardrails).
+docs/superpowers/
+docs/qa/
+docs/qa-runs/
+.superpowers/

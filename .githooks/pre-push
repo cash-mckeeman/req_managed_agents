@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Best-effort local gate. NOTE: jj git push does NOT run this hook.
+repo="$(git rev-parse --show-toplevel)"
+if ! bash "$repo/.hygiene/preflight-scan.sh" --dir "$repo"; then
+  echo "pre-push: hygiene violations found (above). Push aborted." >&2
+  exit 1
+fi
