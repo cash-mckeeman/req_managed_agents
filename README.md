@@ -60,6 +60,32 @@ end
 
 Injected `chat_fun`s (any OpenAI-compatible endpoint via plain `Req`) need nothing extra.
 
+## Configuration
+
+Every config/credential value the library reads funnels through
+`ReqManagedAgents.Config`, in one fixed priority order: an explicit `opts`
+keyword wins, then `Application.get_env(:req_managed_agents, key)`, then a
+`System.get_env` environment variable, then a default. This is the complete
+list of keys read anywhere in the library:
+
+| Key | opt | `:req_managed_agents` app env | ENV var | Default |
+| --- | --- | --- | --- | --- |
+| Anthropic API key | `:api_key` | `:api_key` | `ANTHROPIC_API_KEY` | *(required)* |
+| Base URL | `:base_url` | `:base_url` | — | `"https://api.anthropic.com"` |
+| Beta header | `:beta` | `:beta` | — | `"managed-agents-2026-04-01"` |
+| Files beta header | `:files_beta` | `:files_beta` | — | `"files-api-2025-04-14"` |
+| Anthropic API version | `:anthropic_version` | `:anthropic_version` | — | `"2023-06-01"` |
+| Receive timeout (ms) | `:receive_timeout` | `:receive_timeout` | — | `60_000` |
+| Provider profile | `:profile` | `:profile` | — | `:anthropic` |
+| AWS access key ID | `:aws_access_key_id` | `:aws_access_key_id` | `AWS_ACCESS_KEY_ID` | *(required)* |
+| AWS secret access key | `:aws_secret_access_key` | `:aws_secret_access_key` | `AWS_SECRET_ACCESS_KEY` | *(required)* |
+| AWS region | `:aws_region` | `:aws_region` | `AWS_REGION`, then `AWS_DEFAULT_REGION` | `"us-east-1"` |
+| AWS session token | `:aws_session_token` | `:aws_session_token` | `AWS_SESSION_TOKEN` | `nil` |
+
+`Client.new/1` resolves the Anthropic keys; `AgentCore.SigV4.from_env/1`
+resolves the AWS keys (it still works called with no args — `opts` just gives
+you an override point without touching the environment).
+
 ## The core: one loop, the loop host is a parameter
 
 `ReqManagedAgents.Session` is the unified loop — invoke a turn → run your return-of-control tools

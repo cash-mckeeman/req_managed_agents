@@ -10,6 +10,7 @@ defmodule ReqManagedAgents.AgentCore.SigV4 do
   """
 
   alias ReqManagedAgents.AgentCore.Deps
+  alias ReqManagedAgents.Config
 
   @type creds :: %{
           access_key_id: String.t(),
@@ -20,7 +21,7 @@ defmodule ReqManagedAgents.AgentCore.SigV4 do
 
   @doc """
   Return the signed header list for `method`/`url`/`body`. Caller attaches these
-  to the request. `:credentials` defaults to `from_env/0`; `:service` defaults to
+  to the request. `:credentials` defaults to `from_env/1`; `:service` defaults to
   `"bedrock-agentcore"`; `:headers` are base headers folded into the canonical set.
 
   Returns a list of `{header_name, header_value}` tuples. The `authorization` and
@@ -54,14 +55,20 @@ defmodule ReqManagedAgents.AgentCore.SigV4 do
     )
   end
 
-  @doc "Resolve credentials from the standard AWS_* env vars (session-token aware)."
-  @spec from_env() :: creds()
-  def from_env do
+  @doc """
+  Resolve credentials from `opts`, application env, or the standard AWS_*
+  env vars (session-token aware). Called with no args by default, so plain
+  `from_env()` callers keep working unchanged.
+  """
+  @spec from_env(keyword()) :: creds()
+  def from_env(opts \\ []) do
     %{
-      access_key_id: System.fetch_env!("AWS_ACCESS_KEY_ID"),
-      secret_access_key: System.fetch_env!("AWS_SECRET_ACCESS_KEY"),
-      region: System.get_env("AWS_REGION") || System.get_env("AWS_DEFAULT_REGION") || "us-east-1",
-      security_token: System.get_env("AWS_SESSION_TOKEN")
+      access_key_id: Config.resolve!(opts, :aws_access_key_id, "AWS_ACCESS_KEY_ID"),
+      secret_access_key: Config.resolve!(opts, :aws_secret_access_key, "AWS_SECRET_ACCESS_KEY"),
+      region:
+        Config.resolve(opts, :aws_region, "AWS_REGION") || System.get_env("AWS_DEFAULT_REGION") ||
+          "us-east-1",
+      security_token: Config.resolve(opts, :aws_session_token, "AWS_SESSION_TOKEN")
     }
   end
 end
