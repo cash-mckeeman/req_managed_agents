@@ -261,7 +261,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
             "live-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),
           prompt: "Reply with exactly: hello there",
           handler: Handler,
-          # MIM-50: exercise the per-invocation server budgets + a generous idle guard
+          # Exercise the per-invocation server budgets + a generous idle guard
           # against a real harness — validates the overrides are accepted on the wire
           # and that the 300s idle floor holds during server-side tool execution.
           idle_timeout: 300_000,
@@ -433,7 +433,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
           "modelId" => System.get_env("BEDROCK_LIVE_MODEL_ID", "nvidia.nemotron-super-3-120b")
         }
       },
-      # MIM-65: the opaque environment pass-through, sessionStorage = the no-VPC mount.
+      # The opaque environment pass-through, sessionStorage = the no-VPC mount.
       environment: %{
         "agentCoreRuntimeEnvironment" => %{
           "filesystemConfigurations" => [%{"sessionStorage" => %{"mountPath" => "/mnt/data"}}]

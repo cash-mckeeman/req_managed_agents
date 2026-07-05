@@ -44,7 +44,7 @@ defmodule ReqManagedAgents.AgentCore.ClientStreamTest do
     end)
   end
 
-  test "MIM-50: a turn longer than idle_timeout succeeds while chunks keep flowing", %{
+  test "a turn longer than idle_timeout succeeds while chunks keep flowing", %{
     bypass: bypass,
     client: client
   } do
@@ -63,7 +63,7 @@ defmodule ReqManagedAgents.AgentCore.ClientStreamTest do
     assert length(events) == 6
   end
 
-  test "MIM-50: a stream that stalls beyond idle_timeout fails with a transport timeout", %{
+  test "a stream that stalls beyond idle_timeout fails with a transport timeout", %{
     bypass: bypass,
     client: client
   } do

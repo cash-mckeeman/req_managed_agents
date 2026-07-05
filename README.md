@@ -298,6 +298,10 @@ to `Jido.Action.Tool.execute_action/3`, and derive the tool definitions with
 `Jido.Action.Tool.to_tool/1` (or `ReqManagedAgents.ToolSchema.to_custom_tool/3`). A dedicated
 adapter package is planned.
 
+## Internal docs
+
+Internal planning docs under `docs/superpowers/` and `docs/qa/` are this repo's working log and may reference internal tracker ids; no other surface may (source, tests, CI config, commit messages, PR titles — tracker linkage belongs only in a PR body's trailing `Closes …` line).
+
 ## License
 
 Apache-2.0.

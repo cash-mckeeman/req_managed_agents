@@ -107,7 +107,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     assert P.terminal("anything") == :terminated
   end
 
-  test "MIM-52 regression: a reused contentBlockIndex recovers BOTH distinct tools" do
+  test "regression: a reused contentBlockIndex recovers BOTH distinct tools" do
     events = [start_block(0, "tu_A", "f"), start_block(0, "tu_B", "g"), tool_stop()]
     assert ["tu_A", "tu_B"] = Enum.map(P.normalize(events).custom_tool_uses, & &1.id)
   end
@@ -330,9 +330,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
              )
   end
 
-  # ── MIM-50 long-run threading ─────────────────────────────────────────────────
+  # ── long-run threading (per-invocation budgets) ───────────────────────────────
 
-  describe "MIM-50 long-run threading" do
+  describe "long-run threading (per-invocation budgets)" do
     test "open/2 captures the subscriber and threads budgets; invoke carries on_event + knobs" do
       test_pid = self()
 

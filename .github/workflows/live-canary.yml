@@ -1,8 +1,8 @@
 name: Live canary
 
 # Runs the :live suite against the real Claude Managed Agents and Bedrock
-# AgentCore APIs. Both are beta surfaces that change under us (see MIM-52,
-# PR #17) — this workflow exists to find that drift before users do.
+# AgentCore APIs. Both are beta surfaces that change under us.
+# This workflow exists to find that drift before users do.
 #
 # Cheap by default: most CMA lanes run claude-haiku-4-5 (the runtime-bootstrap
 # leg defaults to sonnet), the Bedrock lane runs

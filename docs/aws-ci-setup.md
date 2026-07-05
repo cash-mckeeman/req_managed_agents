@@ -1,7 +1,7 @@
 # AWS setup for the live canary (CI)
 
-Reference for the CI-scoped AWS resources behind `.github/workflows/live-canary.yml`
-(MIM-44). Created 2026-07-02 in account `819613816573`, region `us-east-1`.
+Reference for the CI-scoped AWS resources behind `.github/workflows/live-canary.yml`.
+Created 2026-07-02 in account `819613816573`, region `us-east-1`.
 GitHub Actions authenticates via OIDC federation — **no long-lived AWS keys
 exist in GitHub**.
 

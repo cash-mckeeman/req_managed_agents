@@ -112,14 +112,14 @@ defmodule ReqManagedAgents.AgentCore.ConverseTest do
     end
   end
 
-  # MIM-52 fix. `parse/1` accumulates tool blocks keyed by `toolUseId` (the source of
+  # `parse/1` accumulates tool blocks keyed by `toolUseId` (the source of
   # truth — Claude mints a fresh id per real call) and routes input deltas via a
   # per-`contentBlockIndex` "active block" pointer. This survives a stream that reuses
   # contentBlockIndex (B — a replayed/concatenated stream: both distinct ids are
   # recovered, in first-seen order) and dedupes a genuinely-reused id (C). A clean
   # parallel-tool turn (A) is unchanged. Live-confirmed mechanism: the Arm-3 vector
   # emitted [{0, A}, {0, B}, {1, C}] — index 0 reused across two DISTINCT ids.
-  describe "tool-use id uniqueness (MIM-52)" do
+  describe "tool-use id uniqueness" do
     test "A: clean parallel tools (distinct indices + ids) parse to distinct tool_uses" do
       events = [start_block(0, "tu_1", "f"), start_block(1, "tu_2", "g"), tool_stop()]
       assert ids(Converse.parse(events).tool_uses) == ["tu_1", "tu_2"]
