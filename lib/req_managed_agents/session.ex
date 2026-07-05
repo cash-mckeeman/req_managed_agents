@@ -20,7 +20,11 @@ defmodule ReqManagedAgents.Session do
       ReqManagedAgents.Session.message(pid, "follow-up")
 
   Required opts: `:handler` (a `ReqManagedAgents.Handler` module or a 3-arity fn). Optional:
-  `:context`, `:prompt`, `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`.
+  `:context`, `:prompt`, `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`,
+  `:turn_guard` (a 1-arity fun invoked after each turn's usage accumulation with
+  `%{usage: map, turns: n, session_id: id}`, returning `:cont` or `{:halt, reason}`;
+  on halt the run stops with `{:error, {:halted, reason}}` and a `:terminated` result is
+  notified — usage/turns accumulate within the current request, the same scope as `:max_turns`).
   For long AgentCore runs set `:timeout` (the end-to-end run budget, default 600_000 ms)
   at or above the server-side budget — a `run/2` timeout returns `{:error, :timeout}` and
   tears down the in-flight invoke client-side (the poll task and its HTTP stream are shut
@@ -91,6 +95,28 @@ defmodule ReqManagedAgents.Session do
     # (driving reconnect or a surfaced error) instead of killing this process and its caller.
     Process.flag(:trap_exit, true)
 
+    case validate_opts(provider, opts) do
+      :ok -> open_session(provider, opts)
+      {:error, reason} -> {:stop, reason}
+    end
+  end
+
+  # The one home for start-time contract checks — later tasks add clauses here,
+  # not another chain in init/1.
+  defp validate_opts(_provider, opts) do
+    if valid_turn_guard?(opts[:turn_guard]) do
+      :ok
+    else
+      {:error, {:invalid_turn_guard, opts[:turn_guard]}}
+    end
+  end
+
+  defp valid_turn_guard?(nil), do: true
+  defp valid_turn_guard?(guard), do: is_function(guard, 1)
+
+  # The former init/1 body, from `case provider.open(opts, self()) do` down, moves here
+  # verbatim — state map and {:continue, …} tuple unchanged (plus the new :turn_guard key).
+  defp open_session(provider, opts) do
     case provider.open(opts, self()) do
       {:ok, conn} ->
         state = %{
@@ -117,7 +143,8 @@ defmodule ReqManagedAgents.Session do
           max_turns: opts[:max_turns] || 50,
           custom_tool_uses: [],
           server_tool_uses: [],
-          usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []}
+          usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []},
+          turn_guard: opts[:turn_guard]
         }
 
         {:ok, state, {:continue, if(Map.get(conn, :resume), do: :resume, else: :maybe_kickoff)}}
@@ -312,6 +339,29 @@ defmodule ReqManagedAgents.Session do
     s = accumulate(s, tr)
     emit_tool_use_telemetry(s, tr.custom_tool_uses)
 
+    # The frozen governance hook: plain data in, plain verdict out. Hosts compose
+    # policy here (budget caps, grant checks); this library ships only the mechanism.
+    case run_turn_guard(s) do
+      :cont ->
+        continue_turn(s, tr)
+
+      {:halt, reason} ->
+        notify(s, session_result(s, tr, :terminated))
+        stop_error(s, {:halted, reason})
+    end
+  end
+
+  defp run_turn_guard(%{turn_guard: nil}), do: :cont
+
+  defp run_turn_guard(s) do
+    s.turn_guard.(%{
+      usage: Map.from_struct(s.usage),
+      turns: s.turns,
+      session_id: s.info.session_id
+    })
+  end
+
+  defp continue_turn(s, tr) do
     cond do
       s.turns > s.max_turns ->
         notify(s, session_result(s, tr, :terminated))
