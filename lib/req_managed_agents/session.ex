@@ -24,7 +24,10 @@ defmodule ReqManagedAgents.Session do
   `:turn_guard` (a 1-arity fun invoked after each turn's usage accumulation with
   `%{usage: map, turns: n, session_id: id}`, returning `:cont` or `{:halt, reason}`;
   on halt the run stops with `{:error, {:halted, reason}}` and a `:terminated` result is
-  notified — usage/turns accumulate within the current request, the same scope as `:max_turns`).
+  notified — usage/turns accumulate within the current request, the same scope as `:max_turns`),
+  `:require_terminal_tool` + `:terminal_tool` + `:max_reprompts` (default 2): an `:end_turn`
+  that never called `terminal_tool` is re-driven with a re-prompt; exhausted re-prompts finish
+  with `stop_reason: :no_terminal_tool`. Re-prompt turns count against `:max_turns`.
   For long AgentCore runs set `:timeout` (the end-to-end run budget, default 600_000 ms)
   at or above the server-side budget — a `run/2` timeout returns `{:error, :timeout}` and
   tears down the in-flight invoke client-side (the poll task and its HTTP stream are shut
@@ -104,10 +107,15 @@ defmodule ReqManagedAgents.Session do
   # The one home for start-time contract checks — later tasks add clauses here,
   # not another chain in init/1.
   defp validate_opts(_provider, opts) do
-    if valid_turn_guard?(opts[:turn_guard]) do
-      :ok
-    else
-      {:error, {:invalid_turn_guard, opts[:turn_guard]}}
+    cond do
+      not valid_turn_guard?(opts[:turn_guard]) ->
+        {:error, {:invalid_turn_guard, opts[:turn_guard]}}
+
+      opts[:require_terminal_tool] && not is_binary(opts[:terminal_tool]) ->
+        {:error, {:invalid_opts, :terminal_tool_required}}
+
+      true ->
+        :ok
     end
   end
 
@@ -144,7 +152,10 @@ defmodule ReqManagedAgents.Session do
           custom_tool_uses: [],
           server_tool_uses: [],
           usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []},
-          turn_guard: opts[:turn_guard]
+          turn_guard: opts[:turn_guard],
+          enforced_terminal_tool: if(opts[:require_terminal_tool], do: opts[:terminal_tool]),
+          max_reprompts: opts[:max_reprompts] || 2,
+          reprompts_left: opts[:max_reprompts] || 2
         }
 
         {:ok, state, {:continue, if(Map.get(conn, :resume), do: :resume, else: :maybe_kickoff)}}
@@ -293,6 +304,7 @@ defmodule ReqManagedAgents.Session do
       | events: [],
         custom_tool_uses: [],
         server_tool_uses: [],
+        reprompts_left: s.max_reprompts,
         usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []}
     }
 
@@ -371,10 +383,31 @@ defmodule ReqManagedAgents.Session do
         results = run_tools(tr.custom_tool_uses, s)
         drive(s, s.provider.resume_input(tr.custom_tool_uses, results))
 
+      # Terminal-tool enforcement: an :end_turn that never called the required tool
+      # re-drives with a re-prompt; re-prompt turns count against :max_turns.
+      tr.terminal == :end_turn and missing_terminal_tool?(s) and s.reprompts_left > 0 ->
+        input = s.provider.user_input(terminal_reprompt(s.enforced_terminal_tool))
+        drive(%{s | reprompts_left: s.reprompts_left - 1}, input)
+
+      tr.terminal == :end_turn and missing_terminal_tool?(s) ->
+        finish(s, %{tr | stop_reason: :no_terminal_tool})
+
       true ->
         finish(s, tr)
     end
   end
+
+  defp missing_terminal_tool?(%{enforced_terminal_tool: nil}), do: false
+
+  defp missing_terminal_tool?(%{enforced_terminal_tool: tool} = s),
+    do: not Enum.any?(s.custom_tool_uses, &(&1.name == tool))
+
+  # Wording relocated verbatim from biai-managed-agents' Core.Runner.Directives
+  # (eval-gate continuity for consumers migrating off that loop).
+  defp terminal_reprompt(terminal_tool),
+    do:
+      "You returned a response without calling #{terminal_tool}. You MUST call " <>
+        "#{terminal_tool} now to finish — produce the result via #{terminal_tool}."
 
   defp accumulate(s, %TurnResult{} = tr) do
     %{
