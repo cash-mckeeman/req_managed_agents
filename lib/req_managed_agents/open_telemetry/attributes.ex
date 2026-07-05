@@ -46,8 +46,14 @@ defmodule ReqManagedAgents.OpenTelemetry.Attributes do
 
   defp put_usage(attrs, %{} = usage) do
     attrs
-    |> maybe_put("gen_ai.usage.input_tokens", usage["input_tokens"] || usage[:input_tokens])
-    |> maybe_put("gen_ai.usage.output_tokens", usage["output_tokens"] || usage[:output_tokens])
+    |> maybe_put(
+      "gen_ai.usage.input_tokens",
+      Map.get(usage, :input_tokens) || Map.get(usage, "input_tokens")
+    )
+    |> maybe_put(
+      "gen_ai.usage.output_tokens",
+      Map.get(usage, :output_tokens) || Map.get(usage, "output_tokens")
+    )
   end
 
   defp put_usage(attrs, _), do: attrs

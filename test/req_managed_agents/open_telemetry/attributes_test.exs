@@ -24,6 +24,18 @@ defmodule ReqManagedAgents.OpenTelemetry.AttributesTest do
     refute Map.has_key?(out, "gen_ai.usage.input_tokens")
   end
 
+  test "chat/1 maps a %Usage{} struct without raising" do
+    attrs = Attributes.chat(%{usage: %ReqManagedAgents.Usage{input_tokens: 10, output_tokens: 5}})
+    assert attrs["gen_ai.usage.input_tokens"] == 10
+    assert attrs["gen_ai.usage.output_tokens"] == 5
+  end
+
+  test "chat/1 still maps a plain string-keyed usage map" do
+    attrs = Attributes.chat(%{"usage" => %{"input_tokens" => 3, "output_tokens" => 7}})
+    assert attrs["gen_ai.usage.input_tokens"] == 3
+    assert attrs["gen_ai.usage.output_tokens"] == 7
+  end
+
   test "tool sets execute_tool + tool name; no input/result content" do
     out = Attributes.tool(%{session_id: "s1", tool: "calculator", is_error: false})
     assert out["gen_ai.operation.name"] == "execute_tool"
