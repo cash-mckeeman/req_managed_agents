@@ -95,6 +95,16 @@ defmodule ReqManagedAgents.Session do
   @spec message(pid(), String.t()) :: :ok
   def message(pid, text), do: GenServer.cast(pid, {:message, text})
 
+  @doc """
+  Post a pre-built raw user event (e.g. `Event.tool_confirmation/2`, a mid-session
+  `Event.define_outcome/3`) into a running live session. The event is pushed verbatim —
+  no turn accounting or accumulator reset. Streaming providers only:
+  `{:error, :unsupported}` on `:request_response` providers (their input is consumed
+  by `poll_turn/2`, there is no out-of-band channel).
+  """
+  @spec send_event(pid(), map()) :: :ok | {:error, term()}
+  def send_event(pid, %{} = event), do: GenServer.call(pid, {:send_event, event})
+
   @impl true
   def init({provider, opts}) do
     # Trap exits so a crash in the linked stream-consumer / poll-turn Task arrives as {:EXIT,…}
@@ -291,6 +301,12 @@ defmodule ReqManagedAgents.Session do
   def handle_info({:EXIT, _pid, reason}, s), do: {:stop, reason, s}
 
   def handle_info(_other, s), do: {:noreply, s}
+
+  @impl true
+  def handle_call({:send_event, event}, _from, %{mode: :streaming} = s),
+    do: {:reply, s.provider.push_input(s.conn, [event]), s}
+
+  def handle_call({:send_event, _event}, _from, s), do: {:reply, {:error, :unsupported}, s}
 
   @impl true
   # A follow-up message starts a fresh request: reset the per-request turn counter and accumulators
