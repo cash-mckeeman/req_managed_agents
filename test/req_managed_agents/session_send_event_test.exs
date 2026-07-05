@@ -103,7 +103,9 @@ defmodule ReqManagedAgents.SessionSendEventTest do
   end
 
   test "send_event/2 pushes the raw event on a streaming session" do
-    {:ok, pid} = Session.start_link(PushRecorder, handler: fn _, _, _ -> {:ok, ""} end, test_pid: self())
+    {:ok, pid} =
+      Session.start_link(PushRecorder, handler: fn _, _, _ -> {:ok, ""} end, test_pid: self())
+
     assert_receive {:pushed, [:kickoff]}
 
     event = Event.tool_confirmation("tu_1", :allow)
@@ -138,6 +140,7 @@ defmodule ReqManagedAgents.SessionSendEventTest do
     # exactly once — the turn_events buffer must be cleared on each handle_turn so they are
     # not re-appended into the accumulator on the next turn.
     e1_count = Enum.count(events2, fn e -> e["id"] == "e1" end)
+
     assert e1_count == 1,
            "turn_events was not cleared: first turn's events duplicated (count=#{e1_count})"
 

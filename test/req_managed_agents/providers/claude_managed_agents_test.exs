@@ -317,7 +317,10 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     test "maps agent.message text blocks to a chunk" do
       ev = %{
         "type" => "agent.message",
-        "content" => [%{"type" => "text", "text" => "hi "}, %{"type" => "text", "text" => "there"}]
+        "content" => [
+          %{"type" => "text", "text" => "hi "},
+          %{"type" => "text", "text" => "there"}
+        ]
       }
 
       assert ManagedAgents.text_delta(ev) == "hi there"
