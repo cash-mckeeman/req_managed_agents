@@ -9,6 +9,17 @@ defmodule ReqManagedAgents.Live.LocalOllamaTest do
 
   @base_url "http://localhost:11434/v1"
 
+  # Unwrap Req.TransportError and similar exception structs to their bare atom reason,
+  # matching the transient-error contract (Local.Retry matches %{reason: atom}).
+  defp unwrap_reason(err) when is_exception(err) do
+    case Map.fetch(err, :reason) do
+      {:ok, atom} when is_atom(atom) -> atom
+      _ -> err
+    end
+  end
+
+  defp unwrap_reason(reason), do: reason
+
   defp ollama_chat_fun do
     # The mimir-lane shape: a bare POST to an OpenAI-compatible /chat/completions.
     fn %{model: model, messages: messages, tools: tools} ->
@@ -17,7 +28,7 @@ defmodule ReqManagedAgents.Live.LocalOllamaTest do
       case Req.post("#{@base_url}/chat/completions", json: body, receive_timeout: 120_000) do
         {:ok, %{status: 200, body: resp}} -> {:ok, resp}
         {:ok, %{status: status, body: body}} -> {:error, %{status: status, body: body}}
-        {:error, reason} -> {:error, %{reason: reason}}
+        {:error, reason} -> {:error, %{reason: unwrap_reason(reason)}}
       end
     end
   end

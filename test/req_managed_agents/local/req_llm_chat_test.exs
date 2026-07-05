@@ -47,4 +47,39 @@ defmodule ReqManagedAgents.Local.ReqLLMChatTest do
     assert Keyword.get(opts, :api_key) == "vk-child"
     assert [%ReqLLM.Tool{}] = Keyword.get(opts, :tools)
   end
+
+  test "to_neutral_response/1 converts ReqLLM.Response to the neutral wire shape" do
+    tc = ReqLLM.ToolCall.new("tc1", "my_tool", Jason.encode!(%{"x" => 1}))
+    msg = %ReqLLM.Message{role: :assistant, content: [], tool_calls: [tc]}
+
+    resp = %ReqLLM.Response{
+      id: "resp1",
+      model: "openai:test",
+      context: ReqLLM.Context.new([]),
+      message: msg,
+      finish_reason: :tool_calls,
+      usage: %{input_tokens: 10, output_tokens: 5}
+    }
+
+    neutral = ReqLLMChat.to_neutral_response(resp)
+
+    assert %{
+             "choices" => [
+               %{
+                 "message" => %{
+                   "role" => "assistant",
+                   "tool_calls" => [
+                     %{
+                       "id" => "tc1",
+                       "type" => "function",
+                       "function" => %{"name" => "my_tool"}
+                     }
+                   ]
+                 },
+                 "finish_reason" => "tool_calls"
+               }
+             ],
+             "usage" => %{"prompt_tokens" => 10, "completion_tokens" => 5}
+           } = neutral
+  end
 end

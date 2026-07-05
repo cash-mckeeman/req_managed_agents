@@ -47,6 +47,19 @@ def deps do
 end
 ```
 
+Using `Providers.Local` with the **default chat_fun** (ReqLLM)? Add:
+
+```elixir
+def deps do
+  [
+    {:req_managed_agents, "~> 0.1"},
+    {:req_llm, "~> 1.10"}
+  ]
+end
+```
+
+Injected `chat_fun`s (any OpenAI-compatible endpoint via plain `Req`) need nothing extra.
+
 ## The core: one loop, the loop host is a parameter
 
 `ReqManagedAgents.Session` is the unified loop — invoke a turn → run your return-of-control tools

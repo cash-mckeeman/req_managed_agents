@@ -77,7 +77,8 @@ defmodule ReqManagedAgents.Local.ReqLLMChat do
     end)
   end
 
-  defp to_neutral_response(response) do
+  @doc false
+  def to_neutral_response(response) do
     tool_calls = Enum.map(ReqLLM.Response.tool_calls(response), &to_neutral_tool_call/1)
 
     %{

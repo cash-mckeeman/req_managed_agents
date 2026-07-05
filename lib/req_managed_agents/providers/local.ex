@@ -10,6 +10,22 @@ defmodule ReqManagedAgents.Providers.Local do
   mimir lane (`/v1/chat/completions` + granted key via `model_config`) for hard
   data-plane budget enforcement.
 
+  The chat_fun's response must be OpenAI-chat-completions shaped, string-keyed:
+  `%{"choices" => [%{"message" => message, "finish_reason" => reason} | _], "usage" => usage}`
+  where `message` is `%{"role" => "assistant", "content" => text_or_nil}` plus an optional
+  `"tool_calls" => [%{"id" => id, "type" => "function", "function" => %{"name" => n, "arguments" => json}}]`,
+  and `usage` is `%{"prompt_tokens" => n, "completion_tokens" => n}` (or absent).
+
+  Errors: return `{:error, reason}`. Transient reasons are retried with exponential
+  backoff: `%{status: 408}` / `%{status: 500..}` (HTTP) and `%{reason: atom}` /
+  `%{cause: atom}` where the atom is one of `:timeout | :closed | :econnrefused |
+  :econnreset | :connect_timeout`. Wrap transport exceptions down to their atom —
+  `%{reason: %Req.TransportError{...}}` will NOT match; return `%{reason: err.reason}`.
+
+  Limitations: `Providers.Local` is primarily scoped to `run/2` (one request per conn):
+  the final-turn directive counts polls across the conn's lifetime, so long-lived
+  `start_link` sessions with many follow-ups may see it fire early on later requests.
+
   Open opts: `:spec` (the `t:ReqManagedAgents.Provider.spec/0`, also the `provision/2`
   identity handle), `:model_config` (canonical keys `:model`, `:api_key`, `:base_url`,
   `:metadata`; defaults from `spec.model_config`), `:chat_fun`, `:max_turns`,
@@ -307,13 +323,17 @@ defmodule ReqManagedAgents.Providers.Local do
   def terminal(_other, _, _), do: :terminated
 
   # The neutral contract names them prompt_tokens/completion_tokens — one shape,
-  # no fallback key-chains. A response without usage yields nil (Session skips it).
-  defp to_usage(%{"prompt_tokens" => input} = usage),
-    do: %Usage{
+  # no fallback key-chains. A response without usage (or with JSON-null tokens)
+  # yields nil (Session skips it).
+  defp to_usage(%{"prompt_tokens" => input} = usage) when is_integer(input) do
+    completion = usage["completion_tokens"]
+
+    %Usage{
       input_tokens: input,
-      output_tokens: usage["completion_tokens"] || 0,
+      output_tokens: if(is_integer(completion), do: completion, else: 0),
       raw: [usage]
     }
+  end
 
   defp to_usage(_), do: nil
 

@@ -16,7 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   including a gateway lane with a granted key for hard data-plane budget
   enforcement. Events are synthesized under the `local.*` namespace
   (`local.model_response`, `local.duplicate_tool_call`, `local.directive`);
-  `provision/2` is identity.
+  `provision/2` is identity. Limitation: `Providers.Local` is primarily scoped to
+  `run/2` (one request per conn) — the final-turn directive counts polls across the
+  conn's lifetime, so long-lived `start_link` sessions with many follow-ups may see
+  it fire early on later requests.
 - Local loop guards (relocated from biai-managed-agents `Core.Runner`, for
   weak-instruction-following local models): duplicate-call dedup (self-answered,
   never re-surfaced), consecutive-error corrective directives (≥2 per tool),

@@ -224,6 +224,22 @@ defmodule ReqManagedAgents.Providers.LocalTest do
     assert Local.text_delta(%{"type" => "other"}) == nil
   end
 
+  test "normalize: null prompt_tokens in usage yields usage: nil" do
+    resp = fn _req ->
+      {:ok,
+       %{
+         "choices" => [
+           %{"message" => %{"role" => "assistant", "content" => "ok"}, "finish_reason" => "stop"}
+         ],
+         "usage" => %{"prompt_tokens" => nil, "completion_tokens" => nil}
+       }}
+    end
+
+    conn = open!(scripted([resp]))
+    {:ok, events, _} = Local.poll_turn(conn, Local.kickoff_input(prompt: "x"))
+    assert %TurnResult{usage: nil} = Local.normalize(events)
+  end
+
   test "outcome kickoff is unsupported (Session gate)" do
     assert {:error, :outcome_unsupported} =
              ReqManagedAgents.Session.run(Local,

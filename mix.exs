@@ -21,7 +21,20 @@ defmodule ReqManagedAgents.MixProject do
       docs: docs(),
       dialyzer: dialyzer(),
       name: "ReqManagedAgents",
-      source_url: @source_url
+      source_url: @source_url,
+      elixirc_options: [
+        no_warn_undefined: [
+          AWSAuth,
+          AWSAuth.Credentials,
+          AWSEventStream,
+          AWSEventStream.JSON,
+          ReqLLM,
+          ReqLLM.Context,
+          ReqLLM.ToolCall,
+          ReqLLM.Tool,
+          ReqLLM.Response
+        ]
+      ]
     ]
   end
 

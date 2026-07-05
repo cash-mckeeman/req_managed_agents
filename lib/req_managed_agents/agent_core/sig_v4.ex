@@ -34,12 +34,13 @@ defmodule ReqManagedAgents.AgentCore.SigV4 do
     creds = opts[:credentials] || from_env()
     base_headers = opts[:headers] || [{"content-type", "application/json"}]
 
-    aws_creds = %AWSAuth.Credentials{
-      access_key_id: creds.access_key_id,
-      secret_access_key: creds.secret_access_key,
-      region: creds.region,
-      session_token: creds[:security_token]
-    }
+    aws_creds =
+      struct!(AWSAuth.Credentials,
+        access_key_id: creds.access_key_id,
+        secret_access_key: creds.secret_access_key,
+        region: creds.region,
+        session_token: creds[:security_token]
+      )
 
     method_str = method |> to_string() |> String.upcase()
 
