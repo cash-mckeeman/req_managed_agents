@@ -475,4 +475,35 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     assert get_in(ok, ["content", Access.at(0), "text"]) == "ok"
     assert boom["is_error"] == true
   end
+
+  describe "model_config client threading" do
+    test "open/2 builds its client from model_config api_key/base_url" do
+      bypass = Bypass.open()
+      test = self()
+
+      Bypass.expect_once(bypass, "POST", "/v1/sessions", fn conn ->
+        send(test, {:api_key_header, Plug.Conn.get_req_header(conn, "x-api-key")})
+        Req.Test.json(conn, %{"id" => "s1"})
+      end)
+
+      Bypass.stub(bypass, "GET", "/v1/sessions/s1/events/stream", fn conn ->
+        Plug.Conn.send_chunked(conn, 200)
+      end)
+
+      assert {:ok, _conn} =
+               ManagedAgents.open(
+                 [
+                   agent_id: "ag",
+                   environment_id: "env",
+                   model_config: %{
+                     api_key: "vk-granted",
+                     base_url: "http://localhost:#{bypass.port}"
+                   }
+                 ],
+                 self()
+               )
+
+      assert_received {:api_key_header, ["vk-granted"]}
+    end
+  end
 end

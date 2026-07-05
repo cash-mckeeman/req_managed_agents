@@ -7,6 +7,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   `normalize/1` keys off the most recent status event. `events`, `text`, and `server_tool_uses`
   reflect exactly the events passed in (a partial list yields a partial view).
+
+  A `model_config: %{api_key:, base_url:}` opt builds the client when no `:client` is injected — the canonical way to run a session on a granted key + routed base_url.
   """
   @behaviour ReqManagedAgents.Provider
 
@@ -17,7 +19,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def provision(spec, opts) do
-    client = opts[:client] || Client.new()
+    client = client_from(opts)
     name = opts[:name] || "agent_#{spec_digest(spec)}"
 
     agent_body = %{
@@ -50,7 +52,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def teardown(%{agent_id: aid, environment_id: eid}, opts) do
-    client = opts[:client] || Client.new()
+    client = client_from(opts)
     # Attempt both archives unconditionally — a failure archiving one must not strand the other.
     a = Client.archive_agent(client, aid)
     e = Client.archive_environment(client, eid)
@@ -66,7 +68,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def open(opts, subscriber) do
-    client = opts[:client] || Client.new()
+    client = client_from(opts)
 
     case opts[:session_id] do
       nil ->
@@ -282,6 +284,21 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
       %{"type" => "session.error"} -> true
       _ -> false
     end)
+  end
+
+  # Canonical model_config keys (:api_key, :base_url) build the client when no
+  # explicit :client is injected — this is how a granted key + routed base_url
+  # reach a session on this provider. Only the client-relevant keys are taken;
+  # :model/:metadata stay opaque to this provider.
+  defp client_from(opts) do
+    case opts[:client] do
+      nil ->
+        config = opts[:model_config] || %{}
+        Client.new(config |> Map.take([:api_key, :base_url]) |> Map.to_list())
+
+      client ->
+        client
+    end
   end
 
   # term_to_binary is deterministic for the small (4-key) spec maps used here.
