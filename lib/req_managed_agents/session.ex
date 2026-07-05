@@ -22,9 +22,11 @@ defmodule ReqManagedAgents.Session do
   Required opts: `:handler` (a `ReqManagedAgents.Handler` module or a 3-arity fn). Optional:
   `:context`, `:prompt`, `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`.
   For long AgentCore runs set `:timeout` (the end-to-end run budget, default 600_000 ms)
-  at or above the server-side budget — a `run/2` timeout returns `{:error, :timeout}` but does
-  NOT cancel the in-flight invoke; the harness keeps executing (and billing) server-side up to
-  its own `timeoutSeconds`. Transport liveness is guarded per turn by `:idle_timeout` and total
+  at or above the server-side budget — a `run/2` timeout returns `{:error, :timeout}` and
+  tears down the in-flight invoke client-side (the poll task and its HTTP stream are shut
+  down). The server may still run the already-received invocation to its own limit: the
+  server-side `timeoutSeconds` remains the authoritative server budget.
+  Transport liveness is guarded per turn by `:idle_timeout` and total
   cost by the `:timeout_seconds`/`:max_iterations`/`:max_tokens` per-invocation overrides
   (Bedrock AgentCore only).
   Provider-specific opts (e.g. `:agent_id`/`:environment_id`, `:harness_arn`/`:runtime_session_id`,
@@ -104,6 +106,7 @@ defmodule ReqManagedAgents.Session do
           meta: opts[:telemetry_metadata] || %{},
           ref: Map.get(conn, :ref),
           consumer: Map.get(conn, :consumer),
+          poll_task: nil,
           kicked_off: false,
           seen: MapSet.new(),
           reconnect_attempts: 0,
@@ -218,7 +221,7 @@ defmodule ReqManagedAgents.Session do
     # Batch forwarding only when nothing was live-forwarded this turn (a live
     # provider already delivered each event as it arrived).
     if s.live_forwarded == 0, do: Enum.each(events, &forward_raw(s, &1))
-    handle_turn(%{s | conn: conn, live_forwarded: 0}, events)
+    handle_turn(%{s | conn: conn, live_forwarded: 0, poll_task: nil}, events)
   end
 
   def handle_info({:turn, {:error, reason}}, s), do: stop_error(s, reason)
@@ -243,6 +246,20 @@ defmodule ReqManagedAgents.Session do
   def handle_cast({:message, text}, s),
     do: drive(reset_acc(%{s | turns: 0}), s.provider.user_input(text))
 
+  @impl true
+  # Session traps exits, so this runs on every stop — including run/2's timeout
+  # stop. Linked poll/consumer tasks ignore a :normal exit signal, so an
+  # in-flight AgentCore invoke (or SSE consumer) would otherwise keep its HTTP
+  # stream — and server-side billing — alive after the caller got :timeout.
+  def terminate(_reason, s) do
+    shutdown(s.poll_task)
+    shutdown(s.consumer)
+  end
+
+  # Killing an already-dead pid is a harmless no-op — no liveness check needed.
+  defp shutdown(pid) when is_pid(pid), do: Process.exit(pid, :kill)
+  defp shutdown(_other), do: :ok
+
   defp reset_acc(s),
     do: %{
       s
@@ -259,20 +276,21 @@ defmodule ReqManagedAgents.Session do
     parent = self()
     %{provider: p, conn: c} = s
 
-    Task.start_link(fn ->
-      # Convert a provider raise into a surfaced error so it can't crash the Session (and, for a
-      # sync run/2, the caller) — the {:ok}|{:error} contract holds even on malformed data.
-      result =
-        try do
-          p.poll_turn(c, input)
-        rescue
-          e -> {:error, {:provider_error, e}}
-        end
+    {:ok, task} =
+      Task.start_link(fn ->
+        # Convert a provider raise into a surfaced error so it can't crash the Session (and, for a
+        # sync run/2, the caller) — the {:ok}|{:error} contract holds even on malformed data.
+        result =
+          try do
+            p.poll_turn(c, input)
+          rescue
+            e -> {:error, {:provider_error, e}}
+          end
 
-      send(parent, {:turn, result})
-    end)
+        send(parent, {:turn, result})
+      end)
 
-    {:noreply, s}
+    {:noreply, %{s | poll_task: task}}
   end
 
   defp drive(%{mode: :streaming} = s, input) do
