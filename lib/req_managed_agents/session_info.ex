@@ -7,10 +7,11 @@ defmodule ReqManagedAgents.SessionInfo do
   Grows by fields, never by arity: future runtime facts land here.
   """
   @derive Jason.Encoder
-  defstruct session_id: nil, provider: nil
+  defstruct session_id: nil, provider: nil, metadata: %{}
 
   @type t :: %__MODULE__{
           session_id: String.t() | nil,
-          provider: module() | nil
+          provider: module() | nil,
+          metadata: map()
         }
 end

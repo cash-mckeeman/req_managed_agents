@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.6.0 (2026-07-04)
+
+### Added
+- **`ReqManagedAgents.Providers.Local`** — the third provider: the agent loop runs
+  in-process (`:request_response`, one model call per turn) over a pluggable
+  `chat_fun` with a neutral OpenAI-chat-completions-shaped wire contract
+  (`chat_fun.(%{model:, messages:, tools:}) :: {:ok, response} | {:error, reason}`).
+  Pointing the chat_fun at any OpenAI-compatible endpoint is a bare `Req.post` —
+  including a gateway lane with a granted key for hard data-plane budget
+  enforcement. Events are synthesized under the `local.*` namespace
+  (`local.model_response`, `local.duplicate_tool_call`, `local.directive`);
+  `provision/2` is identity. Limitation: `Providers.Local` is primarily scoped to
+  `run/2` (one request per conn) — the final-turn directive counts polls across the
+  conn's lifetime, so long-lived `start_link` sessions with many follow-ups may see
+  it fire early on later requests.
+- Local loop guards (relocated from biai-managed-agents `Core.Runner`, for
+  weak-instruction-following local models): duplicate-call dedup (self-answered,
+  never re-surfaced), consecutive-error corrective directives (≥2 per tool),
+  final-turn directive (names the spec's `terminal_tool`), and transient-error
+  retry with exponential backoff around the chat call (HTTP 408/≥500 + transport
+  errors; `max_chat_retries`/`retry_backoff_ms`/`sleep_fun` opts).
+- Optional `req_llm` dependency (`~> 1.10`, raise-at-first-use via
+  `Local.Deps`) backing the default chat_fun; `model_config[:api_key]` and
+  `[:base_url]` thread into the ReqLLM call.
+- api_key carry-in: the Claude Managed Agents provider builds its client from
+  `model_config: %{api_key:, base_url:}` when no `:client` is injected.
+  (Bedrock AgentCore signs with SigV4 — not applicable.)
+- Metadata carry-in: `model_config[:metadata]` merges into every telemetry
+  event's metadata and into `SessionInfo.metadata` for `handle_event/3` —
+  decision correlation (`mimir_request_id`, `decision_id`) rides uniformly
+  across providers.
+
+### Changed
+- Positioning: "one Session loop, any loop host — server-side (Claude Managed
+  Agents, AgentCore) or in-process (Local)". README, package description, and
+  moduledocs updated; vocabulary and result shapes unchanged.
+
 ## v0.5.0 (2026-07-04)
 
 ### Added

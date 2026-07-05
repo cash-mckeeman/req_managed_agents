@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.MixProject do
   use Mix.Project
 
-  @version "0.5.0"
+  @version "0.6.0"
   @source_url "https://github.com/cash-mckeeman/req_managed_agents"
 
   def project do
@@ -13,14 +13,28 @@ defmodule ReqManagedAgents.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description:
-        "Provider-agnostic Elixir client for managed agent runtimes (Anthropic Claude " <>
-          "Managed Agents, AWS Bedrock AgentCore) — the provider runs the loop, your tools " <>
-          "run locally.",
+        "Provider-agnostic Elixir client for agent runtimes — one Session loop, any " <>
+          "loop host: server-side (Anthropic Claude Managed Agents, AWS Bedrock " <>
+          "AgentCore) or in-process (Local, over any OpenAI-compatible chat endpoint). " <>
+          "Your tools run locally.",
       package: package(),
       docs: docs(),
       dialyzer: dialyzer(),
       name: "ReqManagedAgents",
-      source_url: @source_url
+      source_url: @source_url,
+      elixirc_options: [
+        no_warn_undefined: [
+          AWSAuth,
+          AWSAuth.Credentials,
+          AWSEventStream,
+          AWSEventStream.JSON,
+          ReqLLM,
+          ReqLLM.Context,
+          ReqLLM.ToolCall,
+          ReqLLM.Tool,
+          ReqLLM.Response
+        ]
+      ]
     ]
   end
 
@@ -50,6 +64,10 @@ defmodule ReqManagedAgents.MixProject do
       # first use if they're missing (ReqManagedAgents.AgentCore.Deps).
       {:ex_aws_auth, "~> 1.4", optional: true},
       {:aws_event_stream, "~> 0.1", optional: true},
+      # req_llm is optional: only the Local provider's DEFAULT chat_fun needs it.
+      # Injected chat_funs (tests, Ollama, mimir lanes) work without it;
+      # Local raises a clear error at first use if it's missing (Local.Deps).
+      {:req_llm, "~> 1.10", optional: true},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
