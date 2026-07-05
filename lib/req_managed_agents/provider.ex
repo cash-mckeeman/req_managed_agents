@@ -80,7 +80,24 @@ defmodule ReqManagedAgents.Provider do
   @callback reconnect(conn(), subscriber :: pid(), seen :: MapSet.t()) ::
               {:ok, conn(), [ReqManagedAgents.ToolUse.t()], MapSet.t()} | {:error, term()}
 
-  @optional_callbacks poll_turn: 2, push_input: 2, turn_boundary?: 1, reconnect: 3, teardown: 2
+  @doc """
+  Optional — map ONE raw event to a normalized text chunk, or `nil`.
+
+  When implemented, the `Session` emits `%{"type" => "rma.text_delta", "text" => chunk}`
+  through `handle_event` immediately after forwarding the raw event (additive
+  normalization: alongside, never instead of, the raw event; never stored in
+  `SessionResult.events`). Chunk granularity is whatever the provider's wire exposes —
+  true streaming deltas on AgentCore (`contentBlockDelta`), whole message blocks on
+  Claude Managed Agents (`agent.message`).
+  """
+  @callback text_delta(event()) :: String.t() | nil
+
+  @optional_callbacks poll_turn: 2,
+                      push_input: 2,
+                      turn_boundary?: 1,
+                      reconnect: 3,
+                      teardown: 2,
+                      text_delta: 1
 
   @doc """
   Extract a canonical `%ToolResult{}` from a `Tools.run/7` wire event

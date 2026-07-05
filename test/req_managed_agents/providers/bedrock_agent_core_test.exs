@@ -135,6 +135,21 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     assert P.mode() == :request_response
   end
 
+  describe "text_delta/1" do
+    test "maps contentBlockDelta text to a chunk" do
+      ev = %{"contentBlockDelta" => %{"contentBlockIndex" => 0, "delta" => %{"text" => "chunk"}}}
+      assert P.text_delta(ev) == "chunk"
+    end
+
+    test "toolUse deltas and other envelopes yield nil" do
+      assert P.text_delta(%{
+               "contentBlockDelta" => %{"delta" => %{"toolUse" => %{"input" => "{}"}}}
+             }) == nil
+
+      assert P.text_delta(%{"messageStop" => %{}}) == nil
+    end
+  end
+
   test "kickoff_input/1 and user_input/1 build user messages" do
     assert P.kickoff_input(prompt: "go") == [
              %{"role" => "user", "content" => [%{"text" => "go"}]}

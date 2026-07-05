@@ -313,6 +313,26 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     assert ManagedAgents.mode() == :streaming
   end
 
+  describe "text_delta/1" do
+    test "maps agent.message text blocks to a chunk" do
+      ev = %{
+        "type" => "agent.message",
+        "content" => [%{"type" => "text", "text" => "hi "}, %{"type" => "text", "text" => "there"}]
+      }
+
+      assert ManagedAgents.text_delta(ev) == "hi there"
+    end
+
+    test "non-message and empty-text events yield nil" do
+      assert ManagedAgents.text_delta(%{"type" => "session.status_idle"}) == nil
+
+      assert ManagedAgents.text_delta(%{
+               "type" => "agent.message",
+               "content" => [%{"type" => "image"}]
+             }) == nil
+    end
+  end
+
   test "provision/2 rolls back the agent when environment creation fails" do
     {:ok, calls} = Agent.start_link(fn -> [] end)
     client = Client.new(api_key: "sk-test", req_options: [plug: {Req.Test, __MODULE__.Rollback}])

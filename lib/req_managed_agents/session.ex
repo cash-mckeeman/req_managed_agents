@@ -129,6 +129,7 @@ defmodule ReqManagedAgents.Session do
       {:ok, conn} ->
         state = %{
           provider: provider,
+          delta?: exports_text_delta?(provider),
           mode: provider.mode(),
           conn: conn,
           info: build_info(provider, conn),
@@ -192,7 +193,7 @@ defmodule ReqManagedAgents.Session do
       {:noreply, s}
     else
       s = %{s | seen: if(is_binary(id), do: MapSet.put(s.seen, id), else: s.seen)}
-      forward_raw(s, ev)
+      forward_with_delta(s, ev)
       s = %{s | turn_events: s.turn_events ++ [ev]}
       if s.provider.turn_boundary?(ev), do: handle_turn(s, s.turn_events), else: {:noreply, s}
     end
@@ -244,7 +245,7 @@ defmodule ReqManagedAgents.Session do
   # Handler delivery is at-least-once across retried attempts — the canonical
   # exactly-once record is TurnResult/SessionResult.events.
   def handle_info({:provider_event, ev}, s) do
-    forward_raw(s, ev)
+    forward_with_delta(s, ev)
 
     :telemetry.execute(
       [:req_managed_agents, :stream, :event],
@@ -258,7 +259,7 @@ defmodule ReqManagedAgents.Session do
   def handle_info({:turn, {:ok, events, conn}}, s) do
     # Batch forwarding only when nothing was live-forwarded this turn (a live
     # provider already delivered each event as it arrived).
-    if s.live_forwarded == 0, do: Enum.each(events, &forward_raw(s, &1))
+    if s.live_forwarded == 0, do: Enum.each(events, &forward_with_delta(s, &1))
     handle_turn(%{s | conn: conn, live_forwarded: 0, poll_task: nil}, events)
   end
 
@@ -515,6 +516,25 @@ defmodule ReqManagedAgents.Session do
   # A Converse-envelope event is a single-key map (%{"messageStop" => …}).
   defp envelope_type(%{} = ev), do: ev |> Map.keys() |> List.first()
   defp envelope_type(_), do: nil
+
+  defp exports_text_delta?(provider),
+    do: Code.ensure_loaded?(provider) and function_exported?(provider, :text_delta, 1)
+
+  # Additive normalization: the synthetic delta follows the raw event through the same
+  # handler path and is never accumulated into events (raw preservation).
+  defp forward_with_delta(%{delta?: false} = s, ev), do: forward_raw(s, ev)
+
+  defp forward_with_delta(s, ev) do
+    forward_raw(s, ev)
+
+    case s.provider.text_delta(ev) do
+      chunk when is_binary(chunk) and chunk != "" ->
+        forward_raw(s, %{"type" => "rma.text_delta", "text" => chunk})
+
+      _ ->
+        :ok
+    end
+  end
 
   defp forward_raw(%{handler: h, context: ctx, info: info}, ev) when is_atom(h) and h != nil do
     cond do

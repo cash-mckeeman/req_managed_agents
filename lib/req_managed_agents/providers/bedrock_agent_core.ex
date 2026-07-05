@@ -216,6 +216,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   end
 
   @impl true
+  def text_delta(%{"contentBlockDelta" => %{"delta" => %{"text" => t}}}) when is_binary(t), do: t
+  def text_delta(_), do: nil
+
+  @impl true
   def normalize(events) do
     %{stop_reason: reason, tool_uses: tool_uses, text: text, usage: usage} =
       Converse.parse(events)

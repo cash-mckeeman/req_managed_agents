@@ -155,6 +155,16 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   end
 
   @impl true
+  def text_delta(%{"type" => "agent.message", "content" => blocks}) when is_list(blocks) do
+    case for(%{"type" => "text", "text" => t} <- blocks, is_binary(t), do: t) do
+      [] -> nil
+      texts -> Enum.join(texts)
+    end
+  end
+
+  def text_delta(_), do: nil
+
+  @impl true
   def normalize(events) do
     uses_by_id =
       for %{"type" => "agent.custom_tool_use", "id" => id} = e <- events, into: %{}, do: {id, e}
