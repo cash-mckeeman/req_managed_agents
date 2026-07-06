@@ -160,4 +160,48 @@ defmodule ReqManagedAgents.Provisioner.AgentsTest do
 
     assert_raise ArgumentError, fn -> Agents.resolve_agent("no-colon", store: store) end
   end
+
+  defp agent_row(base, digest, created),
+    do: %{
+      "id" => "id_" <> digest,
+      "name" => base <> "_" <> digest,
+      "archived_at" => nil,
+      "created_at" => created
+    }
+
+  test "keeps newest N, archives the rest oldest-first, protects tagged, requires keep", %{
+    store: store
+  } do
+    base = "analyst"
+
+    rows = [
+      agent_row(base, "aaaaaaaa", 3),
+      agent_row(base, "bbbbbbbb", 2),
+      agent_row(base, "cccccccc", 1)
+    ]
+
+    list = fn -> {:ok, %{"data" => rows}} end
+    {:ok, archived} = Agent.start_link(fn -> [] end)
+
+    archive = fn id ->
+      Agent.update(archived, &[id | &1])
+      {:ok, %{}}
+    end
+
+    :ok = Agents.tag_agent(base, "prod", "cccccccc", store: store)
+
+    assert {:error, :keep_required} =
+             Agents.prune_agents(nil, base, store: store, list_fun: list, archive_fun: archive)
+
+    assert {:ok, %{archived: ["analyst_bbbbbbbb"], kept: kept}} =
+             Agents.prune_agents(nil, base,
+               keep: 1,
+               store: store,
+               list_fun: list,
+               archive_fun: archive
+             )
+
+    assert "analyst_aaaaaaaa" in kept and "analyst_cccccccc" in kept
+    assert Agent.get(archived, & &1) == ["id_bbbbbbbb"]
+  end
 end
