@@ -51,7 +51,17 @@ defmodule ReqManagedAgents.Session do
   """
   use GenServer
   require Logger
-  alias ReqManagedAgents.{Outcome, Provider, SessionInfo, SessionResult, Tools, TurnResult, Usage}
+
+  alias ReqManagedAgents.{
+    Outcome,
+    Provider,
+    SessionInfo,
+    SessionResult,
+    Tools,
+    ToolUse,
+    TurnResult,
+    Usage
+  }
 
   @max_tool_concurrency 8
 
@@ -450,7 +460,7 @@ defmodule ReqManagedAgents.Session do
   defp missing_terminal_tool?(%{enforced_terminal_tool: tool} = s),
     do: not Enum.any?(s.custom_tool_uses, &(&1.name == tool))
 
-  # Wording relocated verbatim from biai-managed-agents' Core.Runner.Directives
+  # Wording relocated verbatim from an internal agent runner's Core.Runner.Directives
   # (eval-gate continuity for consumers migrating off that loop).
   defp terminal_reprompt(terminal_tool),
     do:
@@ -501,7 +511,7 @@ defmodule ReqManagedAgents.Session do
   defp run_tools(custom_tool_uses, s) do
     custom_tool_uses
     |> Task.async_stream(
-      fn %{id: id, name: name, input: input} ->
+      fn %ToolUse{id: id, name: name, input: input} ->
         wire = Tools.run(s.handler, id, name, input, s.context, s.info, s.meta)
         Provider.result_of(id, wire)
       end,

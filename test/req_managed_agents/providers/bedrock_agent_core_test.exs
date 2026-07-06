@@ -159,7 +159,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   end
 
   test "resume_input/2 produces the strict two-message delta" do
-    uses = [%{id: "tu_1", name: "echo", input: %{"text" => "hi"}}]
+    uses = [%ToolUse{id: "tu_1", name: "echo", input: %{"text" => "hi"}}]
     results = [%{tool_use_id: "tu_1", text: "echoed: hi", is_error: false}]
 
     assert [%{"role" => "assistant", "content" => [%{"toolUse" => tu}]}, user] =
@@ -266,6 +266,84 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     list = fn -> {:ok, %{}} end
 
     assert {:error, {:unexpected_list_response, {:ok, %{}}}} =
+             P.provision(@spec_bedrock, prov_opts(create, list_fun: list))
+  end
+
+  test "409 caused by a DELETING same-name harness waits it out and retries the create" do
+    {:ok, seq} = Agent.start_link(fn -> 0 end)
+    name = P.harness_name(@spec_bedrock, nil)
+
+    # list: call 1 (in recover) shows DELETING; call 2 (wait poll) still DELETING; call 3 gone.
+    list_fun = fn ->
+      n = Agent.get_and_update(seq, &{&1 + 1, &1 + 1})
+      harnesses = if n >= 3, do: [], else: [%{"harnessName" => name, "status" => "DELETING"}]
+      {:ok, %{"harnesses" => harnesses}}
+    end
+
+    # create: first call 409s (name still taken by the deleting one); retry succeeds.
+    {:ok, creates} = Agent.start_link(fn -> 0 end)
+
+    create_fun = fn _spec ->
+      case Agent.get_and_update(creates, &{&1 + 1, &1 + 1}) do
+        1 -> {:error, {:http_error, 409, "exists"}}
+        _ -> {:ok, %{"harness" => %{"arn" => "arn:new", "harnessId" => "h_new"}}}
+      end
+    end
+
+    get_fun = fn _hid -> {:ok, %{"harness" => %{"status" => "READY"}}} end
+
+    assert {:ok, %{harness_arn: "arn:new", harness_id: "h_new"}} =
+             P.provision(@spec_bedrock,
+               execution_role_arn: "role",
+               create_fun: create_fun,
+               list_fun: list_fun,
+               get_fun: get_fun,
+               ready_poll_ms: 1,
+               ready_max_polls: 5
+             )
+  end
+
+  test "provision/2 gives up waiting on a DELETING same-name harness that never disappears" do
+    name = P.harness_name(@spec_bedrock, nil)
+
+    # list: the same-name harness stays DELETING on every call — it never disappears.
+    list_fun = fn ->
+      {:ok, %{"harnesses" => [%{"harnessName" => name, "status" => "DELETING"}]}}
+    end
+
+    # create: first call 409s (name still taken); a second call would mean the retry
+    # happened even though wait_until_deleted should have exhausted first.
+    {:ok, creates} = Agent.start_link(fn -> 0 end)
+
+    create_fun = fn _spec ->
+      Agent.get_and_update(creates, &{&1 + 1, &1 + 1})
+      {:error, {:http_error, 409, "exists"}}
+    end
+
+    get_fun = fn _hid -> {:ok, %{"harness" => %{"status" => "READY"}}} end
+
+    assert {:error, {:harness_still_deleting, ^name}} =
+             P.provision(@spec_bedrock,
+               execution_role_arn: "role",
+               create_fun: create_fun,
+               list_fun: list_fun,
+               get_fun: get_fun,
+               ready_poll_ms: 1,
+               ready_max_polls: 2
+             )
+
+    assert Agent.get(creates, & &1) == 1
+  end
+
+  test "provision/2 still returns a name conflict when the same-name harness has a *_FAILED status" do
+    name = P.harness_name(@spec_bedrock, nil)
+    create = fn _ -> {:error, {:http_error, 409, %{}}} end
+
+    list = fn ->
+      {:ok, %{"harnesses" => [%{"harnessName" => name, "status" => "CREATE_FAILED"}]}}
+    end
+
+    assert {:error, {:harness_name_conflict, ^name}} =
              P.provision(@spec_bedrock, prov_opts(create, list_fun: list))
   end
 

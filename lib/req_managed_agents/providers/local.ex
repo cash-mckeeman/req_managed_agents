@@ -22,10 +22,6 @@ defmodule ReqManagedAgents.Providers.Local do
   :econnreset | :connect_timeout`. Wrap transport exceptions down to their atom —
   `%{reason: %Req.TransportError{...}}` will NOT match; return `%{reason: err.reason}`.
 
-  Limitations: `Providers.Local` is primarily scoped to `run/2` (one request per conn):
-  the final-turn directive counts polls across the conn's lifetime, so long-lived
-  `start_link` sessions with many follow-ups may see it fire early on later requests.
-
   Open opts: `:spec` (the `t:ReqManagedAgents.Provider.spec/0`, also the `provision/2`
   identity handle), `:model_config` (canonical keys `:model`, `:api_key`, `:base_url`,
   `:metadata`; defaults from `spec.model_config`), `:chat_fun`, `:max_turns`,
@@ -37,7 +33,7 @@ defmodule ReqManagedAgents.Providers.Local do
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.Local.{Deps, Directives, ReqLLMChat, Retry}
-  alias ReqManagedAgents.{ToolUse, TurnResult, Usage}
+  alias ReqManagedAgents.{ToolResult, ToolUse, TurnResult, Usage}
 
   # The conn is a struct, not a bag of keys: one place to see everything a turn needs.
   defstruct history: [],
@@ -179,7 +175,7 @@ defmodule ReqManagedAgents.Providers.Local do
   defp accept_response(_conn, _injected_events, malformed),
     do: {:error, {:malformed_chat_response, malformed}}
 
-  # Duplicate-call dedup (relocated from biai Core.Runner.Dispatch): a repeated
+  # Duplicate-call dedup (relocated from an internal agent runner's Core.Runner.Dispatch): a repeated
   # {name, decoded-input} call is never surfaced — the provider self-answers it in
   # history with the duplicate directive, and the surviving message carries only the
   # fresh calls. If ALL calls were duplicates the turn normalizes to :requires_action
@@ -219,8 +215,22 @@ defmodule ReqManagedAgents.Providers.Local do
     do: {name, decode_args(args)}
 
   # ── input application ─────────────────────────────────────────────────────────
+  # A user message (kickoff or follow-up) starts a fresh request: polls, the
+  # duplicate-call guard, and the consecutive-error counters all reset here so a
+  # long-lived start_link session gets a fresh max_turns budget and a fresh
+  # reasoning episode per turn, instead of accumulating across the conn's whole
+  # lifetime. On kickoff these are already at their zero values (no-op).
   defp apply_input(conn, {:messages, messages}) do
-    inject_final_turn(%{conn | history: conn.history ++ messages}, [])
+    inject_final_turn(
+      %{
+        conn
+        | history: conn.history ++ messages,
+          polls: 0,
+          seen: MapSet.new(),
+          error_counts: %{}
+      },
+      []
+    )
   end
 
   defp apply_input(conn, {:resume, tool_uses, results}) do
@@ -237,7 +247,7 @@ defmodule ReqManagedAgents.Providers.Local do
     inject_final_turn(conn, corrective_events)
   end
 
-  # (b) consecutive-error correctives (relocated from biai Core.Runner): a tool that
+  # (b) consecutive-error correctives (relocated from an internal agent runner's Core.Runner): a tool that
   # errors on two consecutive dispatches gets a corrective user directive. Two passes:
   # fold the counts, then collect directives for the tools past the threshold.
   defp apply_correctives(conn, tool_uses, results_by_id) do
@@ -246,7 +256,7 @@ defmodule ReqManagedAgents.Providers.Local do
 
     correctives =
       for use <- tool_uses,
-          %{is_error: true, text: err} <- [results_by_id[use.id]],
+          %ToolResult{is_error: true, text: err} <- [results_by_id[use.id]],
           error_counts[use.name] >= 2,
           do: Directives.corrective(use.name, err)
 
@@ -261,7 +271,7 @@ defmodule ReqManagedAgents.Providers.Local do
 
   defp count_error(use, results_by_id, counts) do
     case results_by_id[use.id] do
-      %{is_error: true} -> Map.update(counts, use.name, 1, &(&1 + 1))
+      %ToolResult{is_error: true} -> Map.update(counts, use.name, 1, &(&1 + 1))
       _success -> Map.put(counts, use.name, 0)
     end
   end
@@ -282,10 +292,10 @@ defmodule ReqManagedAgents.Providers.Local do
   defp directive_event(role, text),
     do: %{"type" => "local.directive", "role" => role, "text" => text}
 
-  defp result_content(%{is_error: true, text: text}),
+  defp result_content(%ToolResult{is_error: true, text: text}),
     do: Jason.encode!(%{"error" => text, "isError" => true})
 
-  defp result_content(%{text: text}), do: text
+  defp result_content(%ToolResult{text: text}), do: text
 
   # ── normalization ─────────────────────────────────────────────────────────────
   @impl true

@@ -31,3 +31,7 @@ docs/superpowers/
 docs/qa/
 docs/qa-runs/
 .superpowers/
+
+# Transient jj/git worktrees (local workspaces — never committed). Keep the rest
+# of .claude/ (CLAUDE.md, shared config) trackable.
+.claude/worktrees/

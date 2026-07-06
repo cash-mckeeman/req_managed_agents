@@ -9,6 +9,8 @@ defmodule ReqManagedAgents.Client do
   """
   @behaviour ReqManagedAgents.Client.Behaviour
 
+  alias ReqManagedAgents.Config
+
   @base_url "https://api.anthropic.com"
   @beta "managed-agents-2026-04-01"
   @files_beta "files-api-2025-04-14"
@@ -39,19 +41,16 @@ defmodule ReqManagedAgents.Client do
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
     %__MODULE__{
-      api_key: opts[:api_key] || env(:api_key) || System.fetch_env!("ANTHROPIC_API_KEY"),
-      base_url: opts[:base_url] || env(:base_url) || @base_url,
-      beta: opts[:beta] || env(:beta) || @beta,
-      anthropic_version:
-        opts[:anthropic_version] || env(:anthropic_version) || @anthropic_version,
-      files_beta: opts[:files_beta] || env(:files_beta) || @files_beta,
-      receive_timeout: opts[:receive_timeout] || env(:receive_timeout) || 60_000,
+      api_key: Config.resolve!(opts, :api_key, "ANTHROPIC_API_KEY"),
+      base_url: Config.resolve(opts, :base_url, nil, @base_url),
+      beta: Config.resolve(opts, :beta, nil, @beta),
+      anthropic_version: Config.resolve(opts, :anthropic_version, nil, @anthropic_version),
+      files_beta: Config.resolve(opts, :files_beta, nil, @files_beta),
+      receive_timeout: Config.resolve(opts, :receive_timeout, nil, 60_000),
       req_options: opts[:req_options] || [],
-      profile: opts[:profile] || env(:profile) || :anthropic
+      profile: Config.resolve(opts, :profile, nil, :anthropic)
     }
   end
-
-  defp env(key), do: Application.get_env(:req_managed_agents, key)
 
   @doc false
   def headers(%__MODULE__{} = c) do

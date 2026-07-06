@@ -1,9 +1,9 @@
 defmodule ReqManagedAgents.Local.Directives do
   @moduledoc false
   # Loop directives injected into the conversation for weak-instruction-following
-  # local models. Wording relocated verbatim from biai-managed-agents
+  # local models. Wording relocated verbatim from an internal agent runner's
   # Core.Runner.Directives (eval-gate continuity), except final_turn/1 which
-  # names the spec's terminal_tool instead of biai's hardcoded example.
+  # names the spec's terminal_tool instead of a hardcoded example.
 
   def duplicate_tool,
     do:

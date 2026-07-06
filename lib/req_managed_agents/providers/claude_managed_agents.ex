@@ -154,7 +154,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
         pending =
           past
           |> ReqManagedAgents.Consolidate.unanswered_tool_uses()
-          |> Enum.map(fn e -> %{id: e["id"], name: e["name"], input: e["input"]} end)
+          |> Enum.map(fn e -> %ToolUse{id: e["id"], name: e["name"], input: e["input"]} end)
 
         ref = make_ref()
 
@@ -225,7 +225,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   end
 
   # Managed Agents reports token usage on each `span.model_request_end` event under `model_usage`
-  # (a turn may make several model requests — sum them). Confirmed against the biai-platform live
+  # (a turn may make several model requests — sum them). Confirmed against a live
   # consumer (chat_handler.ex); Anthropic's snake_case `input_tokens`/`output_tokens`.
   defp claude_usage(events) do
     usages =

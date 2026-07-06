@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.6.2 (2026-07-05)
+
+### Fixed
+- `Providers.Local` now resets its per-request turn budget (`polls`, plus the
+  duplicate-call and consecutive-error guards) on each new user message, so
+  long-lived `start_link` sessions no longer hit the final-turn directive early
+  on follow-up turns. Resolves the v0.6.0 limitation note.
+- Bedrock AgentCore provisioning waits out a same-name harness in `DELETING` and
+  retries the create, instead of failing with `harness_name_conflict` (a transient
+  flake when a prior harness is still tearing down). `*_FAILED` and other
+  non-reusable statuses still surface the conflict.
+- OTel usage mapper (`OpenTelemetry.Attributes`) reads token counts via `Map.get`,
+  so a `%ReqManagedAgents.Usage{}` struct can never raise on `Access` (structs
+  don't implement it). Hardening — no live path threads a struct here today; the
+  string-keyed SSE path is unchanged.
+
+### Changed
+- Configuration funnels through a single `ReqManagedAgents.Config` resolver
+  (`opts → :req_managed_agents app env → env var → default`); `Client` and AgentCore
+  SigV4 credentials route through it. Env-var behavior is unchanged; app-config
+  override is now available for AWS credentials. See the README "Configuration" section.
+- Internal struct hygiene (no API change): `%ToolUse{}` and `%ToolResult{}` are
+  referenced by name across the reconnect / tool-run / resume / corrective paths
+  rather than destructured as bare maps.
+
 ## v0.6.1 (2026-07-05)
 
 ### Changed
