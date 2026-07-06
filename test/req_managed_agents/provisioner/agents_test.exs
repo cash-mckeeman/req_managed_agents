@@ -139,4 +139,25 @@ defmodule ReqManagedAgents.Provisioner.AgentsTest do
                create_fun: fn _ -> {:ok, %{"id" => "rebuilt"}} end
              )
   end
+
+  test "tag then resolve returns the handle; unknown tag and pruned digest error; no-colon raises",
+       %{store: store} do
+    {:ok, %{digest: _digest} = handle} =
+      Agents.ensure_agent(nil, @spec_attrs,
+        store: store,
+        create_fun: fn _ -> {:ok, %{"id" => "a1"}} end
+      )
+
+    assert :ok = Agents.tag_agent("analyst", "prod", handle, store: store)
+    assert {:ok, ^handle} = Agents.resolve_agent("analyst:prod", store: store)
+
+    assert {:error, :unknown_tag} = Agents.resolve_agent("analyst:staging", store: store)
+
+    assert :ok = Agents.tag_agent("analyst", "ghost", "00000000", store: store)
+
+    assert {:error, {:untracked_digest, "00000000"}} =
+             Agents.resolve_agent("analyst:ghost", store: store)
+
+    assert_raise ArgumentError, fn -> Agents.resolve_agent("no-colon", store: store) end
+  end
 end

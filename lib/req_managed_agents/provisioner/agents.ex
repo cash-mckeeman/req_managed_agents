@@ -105,6 +105,55 @@ defmodule ReqManagedAgents.Provisioner.Agents do
   defp atomize_handle(%{"agent_id" => id, "name" => n, "digest" => d}),
     do: %{agent_id: id, name: n, digest: d}
 
+  @doc "Point `base:tag` at an agent digest (or a handle's digest). Movable; tagged digests survive prune."
+  @spec tag_agent(String.t(), String.t(), map() | String.t(), keyword()) :: :ok
+  def tag_agent(base, tag, digest_or_handle, opts \\ []) do
+    {smod, sopts} = opts[:store] || @default_store
+    digest = to_digest(digest_or_handle)
+
+    registry =
+      case store_get(smod, sopts, "tags:agent:" <> base) do
+        {:ok, %{} = reg} -> reg
+        _ -> %{}
+      end
+
+    smod.put(sopts, "tags:agent:" <> base, Map.put(registry, tag, digest))
+  end
+
+  @doc """
+  Resolve `"base:tag"` to the tagged agent's handle. `{:error, :unknown_tag}`
+  when the tag is absent, `{:error, {:untracked_digest, d}}` when its digest has
+  no provision entry (re-`ensure_agent` to heal). Split is on the FIRST colon only.
+  """
+  @spec resolve_agent(String.t(), keyword()) ::
+          {:ok, map()} | {:error, :unknown_tag} | {:error, {:untracked_digest, String.t()}}
+  def resolve_agent(ref, opts \\ []) do
+    {smod, sopts} = opts[:store] || @default_store
+
+    {base, tag} =
+      case String.split(ref, ":", parts: 2) do
+        [base, tag] -> {base, tag}
+        _ -> raise ArgumentError, "resolve_agent/2 requires \"base:tag\", got: #{inspect(ref)}"
+      end
+
+    with {:ok, %{} = registry} <- store_get(smod, sopts, "tags:agent:" <> base),
+         {:tag, digest} when is_binary(digest) <- {:tag, registry[tag]},
+         {:handle, _d, {:ok, handle}} <- {:handle, digest, find_handle(smod, sopts, base, digest)} do
+      {:ok, atomize_handle(handle)}
+    else
+      {:tag, nil} -> {:error, :unknown_tag}
+      {:handle, digest, :miss} -> {:error, {:untracked_digest, digest}}
+      _ -> {:error, :unknown_tag}
+    end
+  end
+
+  defp find_handle(smod, sopts, base, digest),
+    do: store_get(smod, sopts, "digest:agent:" <> base <> ":" <> digest)
+
+  defp to_digest(%{digest: d}), do: d
+  defp to_digest(%{"digest" => d}), do: d
+  defp to_digest(d) when is_binary(d), do: d
+
   defp store_get(mod, sopts, key) do
     mod.get(sopts, key)
   rescue
