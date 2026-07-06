@@ -8,6 +8,7 @@ defmodule ReqManagedAgents.Provisioner.Agents do
   mean "this exact agent already exists", and recovery by name is version-correct
   even with an empty store.
   """
+  require Logger
   alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.Provisioner
   alias ReqManagedAgents.Provisioner.Store
@@ -86,20 +87,35 @@ defmodule ReqManagedAgents.Provisioner.Agents do
     end
   end
 
-  # normalize_or_miss/atomize_handle/store_* filled in Task 4; minimal forms here
-  # so ensure_agent compiles and the happy path works.
+  # Store.File round-trips handles through JSON (string keys) — re-atomize the
+  # three known fields so callers get one shape from either store. Anything else
+  # is a miss and rebuilt: provisioning truth beats cache truth (loud-but-safe).
   defp normalize_or_miss(%{agent_id: _, name: _, digest: _} = h), do: {:ok, h}
-  defp normalize_or_miss(_other), do: :miss
+
+  defp normalize_or_miss(%{"agent_id" => id, "name" => n, "digest" => d}),
+    do: {:ok, %{agent_id: id, name: n, digest: d}}
+
+  defp normalize_or_miss(other) do
+    Logger.warning("agent store entry has unexpected shape, treating as miss: #{inspect(other)}")
+    :miss
+  end
+
+  defp atomize_handle(%{agent_id: _} = h), do: h
+
+  defp atomize_handle(%{"agent_id" => id, "name" => n, "digest" => d}),
+    do: %{agent_id: id, name: n, digest: d}
 
   defp store_get(mod, sopts, key) do
     mod.get(sopts, key)
   rescue
-    _ -> :miss
+    e ->
+      Logger.warning("agent store get failed (treating as miss): #{inspect(e)}")
+      :miss
   end
 
   defp store_put(mod, sopts, key, value) do
     mod.put(sopts, key, value)
   rescue
-    _ -> :ok
+    e -> Logger.warning("agent store put failed (handle still returned): #{inspect(e)}")
   end
 end

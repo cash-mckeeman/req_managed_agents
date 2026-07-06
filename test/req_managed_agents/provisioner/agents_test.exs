@@ -1,5 +1,6 @@
 defmodule ReqManagedAgents.Provisioner.AgentsTest do
   use ExUnit.Case, async: true
+  alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.Provisioner.Agents
 
   @spec_attrs %{
@@ -104,6 +105,38 @@ defmodule ReqManagedAgents.Provisioner.AgentsTest do
                store: store,
                create_fun: fn _ -> @conflict end,
                list_fun: unrelated
+             )
+  end
+
+  test "a string-keyed stored handle is re-atomized on the next ensure", %{store: store} do
+    {:ok, %{name: name, digest: digest}} =
+      Agents.ensure_agent(nil, @spec_attrs,
+        store: store,
+        create_fun: fn _ -> {:ok, %{"id" => "a1"}} end
+      )
+
+    {smod, sopts} = store
+    key = "provision:agent:" <> ReqManagedAgents.Provisioner.hash({"analyst", digest})
+    smod.put(sopts, key, %{"agent_id" => "a1", "name" => name, "digest" => digest})
+
+    assert {:ok, %{agent_id: "a1", name: ^name, digest: ^digest}} =
+             Agents.ensure_agent(nil, @spec_attrs,
+               store: store,
+               create_fun: fn _ -> flunk("should hit store") end
+             )
+  end
+
+  test "a foreign-shape store entry is a miss and rebuilds", %{store: store} do
+    {smod, sopts} = store
+    {:ok, spec} = Spec.new(@spec_attrs)
+    digest = Spec.digest(spec)
+    key = "provision:agent:" <> ReqManagedAgents.Provisioner.hash({"analyst", digest})
+    smod.put(sopts, key, %{"junk" => true})
+
+    assert {:ok, %{agent_id: "rebuilt"}} =
+             Agents.ensure_agent(nil, @spec_attrs,
+               store: store,
+               create_fun: fn _ -> {:ok, %{"id" => "rebuilt"}} end
              )
   end
 end
