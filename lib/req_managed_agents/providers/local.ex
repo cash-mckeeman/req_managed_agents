@@ -175,7 +175,7 @@ defmodule ReqManagedAgents.Providers.Local do
   defp accept_response(_conn, _injected_events, malformed),
     do: {:error, {:malformed_chat_response, malformed}}
 
-  # Duplicate-call dedup (relocated from biai Core.Runner.Dispatch): a repeated
+  # Duplicate-call dedup (relocated from an internal agent runner's Core.Runner.Dispatch): a repeated
   # {name, decoded-input} call is never surfaced — the provider self-answers it in
   # history with the duplicate directive, and the surviving message carries only the
   # fresh calls. If ALL calls were duplicates the turn normalizes to :requires_action
@@ -247,7 +247,7 @@ defmodule ReqManagedAgents.Providers.Local do
     inject_final_turn(conn, corrective_events)
   end
 
-  # (b) consecutive-error correctives (relocated from biai Core.Runner): a tool that
+  # (b) consecutive-error correctives (relocated from an internal agent runner's Core.Runner): a tool that
   # errors on two consecutive dispatches gets a corrective user directive. Two passes:
   # fold the counts, then collect directives for the tools past the threshold.
   defp apply_correctives(conn, tool_uses, results_by_id) do

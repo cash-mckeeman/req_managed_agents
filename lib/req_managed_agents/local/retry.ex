@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.Local.Retry do
   @moduledoc false
   # Transient-error retry for the chat_fun (HTTP 408/≥500 + transport; exponential
-  # backoff). Relocated from biai-managed-agents Core.Runner.Retry.
+  # backoff). Relocated from an internal agent runner's Core.Runner.Retry.
   require Logger
   defstruct max_retries: 3, backoff_ms: 1000, sleep_fun: &Process.sleep/1
 

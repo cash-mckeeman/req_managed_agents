@@ -460,7 +460,7 @@ defmodule ReqManagedAgents.Session do
   defp missing_terminal_tool?(%{enforced_terminal_tool: tool} = s),
     do: not Enum.any?(s.custom_tool_uses, &(&1.name == tool))
 
-  # Wording relocated verbatim from biai-managed-agents' Core.Runner.Directives
+  # Wording relocated verbatim from an internal agent runner's Core.Runner.Directives
   # (eval-gate continuity for consumers migrating off that loop).
   defp terminal_reprompt(terminal_tool),
     do:

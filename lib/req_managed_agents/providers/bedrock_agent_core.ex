@@ -87,8 +87,14 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       {:ok, %{"harnesses" => harnesses}} ->
         cond do
           harness = recoverable_harness(harnesses, name) ->
-            with :ok <- wait_until_ready(get_fun, harness["harnessId"], poll_ms, max_polls),
-                 do: {:ok, %{harness_arn: harness["arn"], harness_id: harness["harnessId"]}}
+            case harness do
+              %{"arn" => arn, "harnessId" => hid} ->
+                with :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls),
+                     do: {:ok, %{harness_arn: arn, harness_id: hid}}
+
+              _ ->
+                {:error, {:unexpected_list_response, harness}}
+            end
 
           deleting?(harnesses, name) ->
             # A prior same-name harness is still tearing down; wait it out, then re-create.

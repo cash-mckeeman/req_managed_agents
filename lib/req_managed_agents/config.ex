@@ -10,16 +10,32 @@ defmodule ReqManagedAgents.Config do
 
   @spec resolve(keyword(), atom(), String.t() | nil, term()) :: term()
   def resolve(opts, key, env_var \\ nil, default \\ nil) do
-    opts[key] || Application.get_env(@app, key) || env(env_var) || default
+    case fetch_layer(opts, key, env_var) do
+      {:ok, val} -> val
+      :error -> default
+    end
   end
 
   @spec resolve!(keyword(), atom(), String.t()) :: term()
   def resolve!(opts, key, env_var) do
-    resolve(opts, key, env_var) ||
-      raise "missing required configuration: set opt #{inspect(key)}, " <>
-              "config #{inspect(@app)}, #{inspect(key)}, or env #{env_var}"
+    case fetch_layer(opts, key, env_var) do
+      {:ok, val} ->
+        val
+
+      :error ->
+        raise "missing required configuration: set opt #{inspect(key)}, " <>
+                "config #{inspect(@app)}, #{inspect(key)}, or env #{env_var}"
+    end
   end
 
-  defp env(nil), do: nil
-  defp env(var), do: System.get_env(var)
+  # First layer that HAS the key wins — even if its value is nil/false.
+  defp fetch_layer(opts, key, env_var) do
+    with :error <- Keyword.fetch(opts, key),
+         :error <- Application.fetch_env(@app, key) do
+      fetch_env(env_var)
+    end
+  end
+
+  defp fetch_env(nil), do: :error
+  defp fetch_env(var), do: System.fetch_env(var)
 end

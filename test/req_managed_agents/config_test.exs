@@ -24,4 +24,11 @@ defmodule ReqManagedAgents.ConfigTest do
       Config.resolve!([], :rma_missing, "RMA_MISSING")
     end
   end
+
+  test "resolve/4 is presence-based: a falsy app-env value still wins over the default" do
+    Application.put_env(:req_managed_agents, :some_flag, false)
+    on_exit(fn -> Application.delete_env(:req_managed_agents, :some_flag) end)
+
+    assert Config.resolve([], :some_flag, "NOPE", "default_val") == false
+  end
 end
