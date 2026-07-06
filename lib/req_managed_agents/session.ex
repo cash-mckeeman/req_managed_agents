@@ -47,7 +47,11 @@ defmodule ReqManagedAgents.Session do
   cost by the `:timeout_seconds`/`:max_iterations`/`:max_tokens` per-invocation overrides
   (Bedrock AgentCore only).
   Provider-specific opts (e.g. `:agent_id`/`:environment_id`, `:harness_arn`/`:runtime_session_id`,
-  `:session_id` to resume) are forwarded to the provider's `open/2`.
+  `:session_id` to resume) are forwarded to the provider's `open/2`. `:agent`/`:environment` accept
+  the handle returned by `ReqManagedAgents.ensure_agent/3` / `ensure_environment/3`
+  (`%{agent_id:, name:, digest:}` / `%{environment_id:, name:, digest:}`) — the handle is unpacked
+  to `:agent_id`/`:environment_id` before `open/2` runs, so callers pass the handle instead of
+  hand-threading the raw id; an explicit `:agent_id`/`:environment_id` wins if both are given.
   """
   use GenServer
   require Logger
@@ -170,6 +174,8 @@ defmodule ReqManagedAgents.Session do
   # The former init/1 body, from `case provider.open(opts, self()) do` down, moves here
   # verbatim — state map and {:continue, …} tuple unchanged (plus the new :turn_guard key).
   defp open_session(provider, opts) do
+    opts = lift_handles(opts)
+
     case provider.open(opts, self()) do
       {:ok, conn} ->
         meta =
@@ -215,6 +221,25 @@ defmodule ReqManagedAgents.Session do
       # Surface the provider's error verbatim (e.g. {:create_session_failed, _}) — no extra wrapping.
       {:error, reason} ->
         {:stop, reason}
+    end
+  end
+
+  # Managed-entity handles (from ensure_agent/3, ensure_environment/3) unpack to
+  # the raw ids providers' open/2 read — callers pass the handle, not the id.
+  # An explicit :agent_id / :environment_id wins if both are present.
+  defp lift_handles(opts) do
+    opts
+    |> lift_handle(:agent, :agent_id)
+    |> lift_handle(:environment, :environment_id)
+  end
+
+  defp lift_handle(opts, handle_key, id_key) do
+    case {opts[id_key], opts[handle_key]} do
+      {nil, h} when is_map(h) and not is_struct(h) ->
+        Keyword.put(opts, id_key, h[id_key] || h[to_string(id_key)])
+
+      _ ->
+        opts
     end
   end
 

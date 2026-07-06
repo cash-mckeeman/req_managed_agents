@@ -1,5 +1,6 @@
 defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   use ExUnit.Case, async: true
+  alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.Client
   alias ReqManagedAgents.Providers.ClaudeManagedAgents, as: ManagedAgents
 
@@ -334,6 +335,25 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
                "content" => [%{"type" => "image"}]
              }) == nil
     end
+  end
+
+  test "provision/2's agent name digest is byte-identical to ReqManagedAgents.Agent.Spec.digest/1" do
+    # The naming digest was unified onto Agent.Spec.digest/1 (previously a private
+    # `spec_digest/1` hashing the whole provider spec). A CMA provider spec is
+    # exactly Agent.Spec's identity content (system_prompt/tools/terminal_tool/
+    # model_config), so the two computations MUST agree byte-for-byte, or every
+    # already-provisioned agent would silently re-provision under a new name.
+    old_digest =
+      @spec_claude
+      |> :erlang.term_to_binary([:deterministic])
+      |> then(&:crypto.hash(:sha256, &1))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 8)
+
+    {:ok, spec} = Spec.new(Map.put(@spec_claude, :name, "agent"))
+    new_digest = Spec.digest(spec)
+
+    assert old_digest == new_digest
   end
 
   test "provision/2 rolls back the agent when environment creation fails" do

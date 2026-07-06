@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.7.0 (2026-07-05)
+
+### Added
+- `%ReqManagedAgents.Agent.Spec{}` — a content-addressed agent definition; the digest
+  covers `system_prompt`, `tools`, `terminal_tool`, and `model_config` (`name` is the
+  base, not identity content), the same shape environment specs give environments.
+- `ensure_agent/3` — build-if-absent for agents: content-addressed, provision-if-absent
+  (a repeat call with the same spec hits the store and returns the same handle instead
+  of re-creating), and 409-recover-by-name (a provider-side name collision on
+  `<base>_<digest8>` recovers the live agent instead of failing, version-correct even
+  with an empty store). Returns the same three-field handle shape as environments:
+  `%{agent_id:, name:, digest:}`.
+- `tag_agent/4` / `resolve_agent/2` / `prune_agents/3` — movable tag→digest pointers,
+  tag resolution (`{:error, :unknown_tag}` on miss, never a silent fallback), and
+  explicit GC (archives old versions beyond `keep:`, never touching tagged digests),
+  mirroring the environment lifecycle.
+- The canonical identity content is unified onto `Agent.Spec.digest/1` (`system_prompt`,
+  `tools`, `terminal_tool`, `model_config`): Claude Managed Agents and Bedrock AgentCore
+  both derive agent naming from it, so identical content names identically regardless of
+  provider. AgentCore harnesses that carry the opaque `:environment`/`:environment_variables`
+  passthrough are the one exception — those fields have no place in the provider-agnostic
+  `Agent.Spec`, so such harnesses intentionally keep their pre-0.7.0 full-spec digest
+  instead of folding onto `Agent.Spec.digest/1`.
+- `Session.run/2` (and `start_link/2`) accept `:agent`/`:environment` opts carrying the
+  handle returned by `ensure_agent/3`/`ensure_environment/3`; the handle is unpacked to
+  `:agent_id`/`:environment_id` before the provider opens the session, so callers stop
+  hand-threading raw ids. An explicit `:agent_id`/`:environment_id` still works and
+  wins if both are given.
+
+### Security
+- Bumped transitive deps `mint` 1.9.0 → 1.9.1 (EEF-CVE-2026-56810 — chunked-response
+  memory buffering) and `hpax` 1.0.3 → 1.0.4 (EEF-CVE-2026-58226 — unbounded HPACK
+  integer decoding DoS). Patch bumps, no API impact.
+
+**Upgrade note:** specs that conform to the documented `Agent.Spec` type keep
+byte-identical agent/harness names across the upgrade — no re-provisioning. The only
+exception is hand-built, out-of-contract specs (omitting the `terminal_tool` key
+entirely, or passing `environment: nil` explicitly rather than leaving it unset); those
+re-provision once on upgrade, which is non-destructive.
+
 ## v0.6.2 (2026-07-05)
 
 ### Fixed
@@ -53,7 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `run/2` (one request per conn) — the final-turn directive counts polls across the
   conn's lifetime, so long-lived `start_link` sessions with many follow-ups may see
   it fire early on later requests.
-- Local loop guards (relocated from biai-managed-agents `Core.Runner`, for
+- Local loop guards (relocated from an internal agent runner, for
   weak-instruction-following local models): duplicate-call dedup (self-answered,
   never re-surfaced), consecutive-error corrective directives (≥2 per tool),
   final-turn directive (names the spec's `terminal_tool`), and transient-error

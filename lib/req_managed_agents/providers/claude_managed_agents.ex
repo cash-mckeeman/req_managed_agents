@@ -12,6 +12,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   """
   @behaviour ReqManagedAgents.Provider
 
+  alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.{Client, Event, Outcome, Stream, ToolUse, TurnResult, Usage}
 
   @impl true
@@ -20,7 +21,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @impl true
   def provision(spec, opts) do
     client = client_from(opts)
-    name = opts[:name] || "agent_#{spec_digest(spec)}"
+    name = opts[:name] || "agent_" <> agent_digest(spec)
 
     agent_body = %{
       name: name,
@@ -301,10 +302,10 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     end
   end
 
-  # term_to_binary is deterministic for the small (4-key) spec maps used here.
-  defp spec_digest(spec),
-    do:
-      :crypto.hash(:sha256, :erlang.term_to_binary(spec, [:deterministic]))
-      |> Base.encode16(case: :lower)
-      |> binary_part(0, 8)
+  # Same content-address as `Agent.Spec.digest/1` (env-agent naming, Bedrock's harness_name) —
+  # one digest source across all providers so identical content always names identically.
+  defp agent_digest(spec) do
+    {:ok, s} = Spec.new(Map.put_new(spec, :name, "agent"))
+    Spec.digest(s)
+  end
 end

@@ -11,6 +11,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   """
   @behaviour ReqManagedAgents.Provider
 
+  alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.AgentCore.{Client, Converse}
   alias ReqManagedAgents.{ToolUse, TurnResult, Usage}
 
@@ -74,12 +75,33 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   @doc false
   def harness_name(spec, prefix) do
-    digest =
-      :crypto.hash(:sha256, :erlang.term_to_binary(spec, [:deterministic]))
-      |> Base.encode16(case: :lower)
-      |> binary_part(0, 8)
+    [prefix, "harness_#{agent_digest(spec)}"] |> Enum.reject(&is_nil/1) |> Enum.join("_")
+  end
 
-    [prefix, "harness_#{digest}"] |> Enum.reject(&is_nil/1) |> Enum.join("_")
+  # Same content-address as `Agent.Spec.digest/1` (env-agent naming, Claude Managed Agents'
+  # `spec_digest`) for the identity fields it covers (system_prompt/tools/terminal_tool/
+  # model_config) — this is byte-identical to the pre-0.7.0 digest for specs with no env
+  # fields, so those harnesses keep their names across the upgrade.
+  #
+  # A Bedrock spec may additionally carry opaque `environment`/`environment_variables` maps
+  # (see moduledoc) that pass through to CreateHarness verbatim (filesystem mounts, custom
+  # containers, env vars). `Agent.Spec` is provider-agnostic and has no field for these, so
+  # when they're present we fall back to the ORIGINAL pre-0.7.0 computation — a full-spec hash
+  # — rather than folding them onto `Agent.Spec.digest/1`. That keeps env-bearing harnesses'
+  # names byte-identical to what shipped in 0.6.x (no re-provision on upgrade), while distinct
+  # environment payloads still produce distinct names (they differ in the hashed spec map).
+  defp agent_digest(spec) do
+    case {Map.get(spec, :environment), Map.get(spec, :environment_variables)} do
+      {nil, nil} ->
+        {:ok, s} = Spec.new(Map.put_new(spec, :name, "harness"))
+        Spec.digest(s)
+
+      _ ->
+        :sha256
+        |> :crypto.hash(:erlang.term_to_binary(spec, [:deterministic]))
+        |> Base.encode16(case: :lower)
+        |> binary_part(0, 8)
+    end
   end
 
   defp recover_existing(create_fun, harness_spec, list_fun, get_fun, name, poll_ms, max_polls) do
