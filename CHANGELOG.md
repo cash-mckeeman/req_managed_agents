@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hand-threading raw ids. An explicit `:agent_id`/`:environment_id` still works and
   wins if both are given.
 
+### Security
+- Bumped transitive deps `mint` 1.9.0 → 1.9.1 (EEF-CVE-2026-56810 — chunked-response
+  memory buffering) and `hpax` 1.0.3 → 1.0.4 (EEF-CVE-2026-58226 — unbounded HPACK
+  integer decoding DoS). Patch bumps, no API impact.
+
 **Upgrade note:** specs that conform to the documented `Agent.Spec` type keep
 byte-identical agent/harness names across the upgrade — no re-provisioning. The only
 exception is hand-built, out-of-contract specs (omitting the `terminal_tool` key
