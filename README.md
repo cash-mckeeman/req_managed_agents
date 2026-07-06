@@ -345,6 +345,60 @@ Proven end-to-end: ~11s on ubuntu-24.04 (precompiled OTP from mise; no compile s
 Only `via: :mise` is supported. The runtimes list is digest-covered — adding or changing
 a runtime version produces a new image automatically, no extra machinery.
 
+## Agents as managed entities
+
+The same content-addressed lifecycle `Provisioner.Environments` gives environments
+applies to agents: `ReqManagedAgents.Agent.Spec` hashes an agent's identity
+(`system_prompt`, `tools`, `terminal_tool`, `model_config` — `name` is the base, not
+identity content); `ensure_agent/3` is build-if-absent, never re-creating on a hit;
+tags are movable pointers; prune is explicit GC.
+
+```elixir
+agent_spec = %{
+  name: "support_bot",
+  system_prompt: "You triage support tickets.",
+  tools: [],
+  model_config: %{model: "claude-opus-4-6"}
+}
+
+# Build once — a second call with the same spec returns the same handle, no re-create:
+{:ok, agent} = ReqManagedAgents.ensure_agent(client, agent_spec, name: "support_bot", store: store)
+# agent == %{agent_id: "agent_id_…", name: "support_bot_3f9a1b2c", digest: "3f9a1b2c"}
+
+# Pin the current version as "prod" (movable; retag freely):
+:ok = ReqManagedAgents.tag_agent("support_bot", "prod", agent, store: store)
+
+# Resolve the pinned version later — {:error, :unknown_tag} on miss, never a silent fallback:
+{:ok, agent} = ReqManagedAgents.resolve_agent("support_bot:prod", store: store)
+
+# GC old versions — keep the newest 3 (plus any tagged digest; keep: has no default):
+{:ok, %{archived: _old, kept: _live}} =
+  ReqManagedAgents.prune_agents(client, "support_bot", keep: 3, store: store)
+```
+
+A 409 on create (a name collision on the provider side) recovers by name instead of
+failing — the provider-side name is `<base>_<digest8>`, so a live agent with that exact
+name IS this exact spec.
+
+Pass the `ensure_agent/3` handle straight into `Session.run/2` alongside an environment
+handle — `:agent`/`:environment` are unpacked to `:agent_id`/`:environment_id` before the
+provider opens the session, so callers stop hand-threading raw ids:
+
+```elixir
+{:ok, env} = ReqManagedAgents.ensure_environment(client, env_spec, name: "data_analysis", store: store)
+
+{:ok, result} =
+  ReqManagedAgents.Session.run(ReqManagedAgents.Providers.ClaudeManagedAgents,
+    agent: agent,
+    environment: env,
+    handler: MyTools,
+    prompt: "Summarize this quarter's tickets"
+  )
+```
+
+An explicit `:agent_id`/`:environment_id` still works and wins if both a handle and an
+id are given.
+
 ## Using with Jido
 
 The core is Jido-free. To use Jido Actions as tools, implement `handle_tool_call/3` by delegating
