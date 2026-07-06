@@ -11,6 +11,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   """
   @behaviour ReqManagedAgents.Provider
 
+  alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.AgentCore.{Client, Converse}
   alias ReqManagedAgents.{ToolUse, TurnResult, Usage}
 
@@ -74,12 +75,30 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   @doc false
   def harness_name(spec, prefix) do
-    digest =
-      :crypto.hash(:sha256, :erlang.term_to_binary(spec, [:deterministic]))
-      |> Base.encode16(case: :lower)
-      |> binary_part(0, 8)
+    [prefix, "harness_#{agent_digest(spec)}"] |> Enum.reject(&is_nil/1) |> Enum.join("_")
+  end
 
-    [prefix, "harness_#{digest}"] |> Enum.reject(&is_nil/1) |> Enum.join("_")
+  # Same content-address as `Agent.Spec.digest/1` (env-agent naming, Claude Managed Agents'
+  # `spec_digest`) for the identity fields it covers (system_prompt/tools/terminal_tool/
+  # model_config). A Bedrock spec may additionally carry opaque `environment`/
+  # `environment_variables` maps (see moduledoc) — `Agent.Spec` has no field for these, but they
+  # genuinely change what CreateHarness provisions (e.g. filesystem mounts), so when present
+  # they're folded into the digest too. Two specs that agree on everything Agent.Spec covers
+  # must still provision under distinct harness names if their environment payloads differ.
+  defp agent_digest(spec) do
+    {:ok, s} = Spec.new(Map.put_new(spec, :name, "harness"))
+    base = Spec.digest(s)
+
+    case {Map.get(spec, :environment), Map.get(spec, :environment_variables)} do
+      {nil, nil} ->
+        base
+
+      extra ->
+        :sha256
+        |> :crypto.hash(base <> :erlang.term_to_binary(extra, [:deterministic]))
+        |> Base.encode16(case: :lower)
+        |> binary_part(0, 8)
+    end
   end
 
   defp recover_existing(create_fun, harness_spec, list_fun, get_fun, name, poll_ms, max_polls) do

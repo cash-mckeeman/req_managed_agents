@@ -1,5 +1,6 @@
 defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   use ExUnit.Case, async: true
+  alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.Providers.BedrockAgentCore, as: P
   alias ReqManagedAgents.{ToolUse, TurnResult}
 
@@ -494,6 +495,50 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       assert inv.max_iterations == nil
       assert inv.max_tokens == nil
     end
+  end
+
+  test "harness_name/2's digest is byte-identical to ReqManagedAgents.Agent.Spec.digest/1 for a spec with no environment fields" do
+    # harness_name/2's digest was unified onto Agent.Spec.digest/1 (previously an inline
+    # :crypto.hash over the whole spec map). For a spec that only carries the identity
+    # fields Agent.Spec knows about (system_prompt/tools/terminal_tool/model_config), the
+    # two computations MUST agree byte-for-byte, or an already-provisioned harness would
+    # silently re-provision under a new name.
+    spec = %{
+      system_prompt: "x",
+      tools: [%{"name" => "t"}],
+      terminal_tool: nil,
+      model_config: %{"m" => 1}
+    }
+
+    old_digest =
+      spec
+      |> :erlang.term_to_binary([:deterministic])
+      |> then(&:crypto.hash(:sha256, &1))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 8)
+
+    {:ok, agent_spec} = Spec.new(Map.put(spec, :name, "harness"))
+    new_digest = Spec.digest(agent_spec)
+
+    assert old_digest == new_digest
+    assert P.harness_name(spec, nil) == "harness_#{new_digest}"
+  end
+
+  test "harness_name/2 stays sensitive to environment/environment_variables even though Agent.Spec.digest/1 ignores them" do
+    # Agent.Spec has no field for Bedrock's opaque environment/environment_variables
+    # passthrough (see moduledoc) — routing the whole digest through Agent.Spec.digest/1
+    # would make differently-mounted specs collide on the same harness name. Confirm the
+    # unification did NOT introduce that collision: the digest still differs whenever
+    # environment/environment_variables differ, even though the Agent.Spec-covered content
+    # (system_prompt/tools/terminal_tool/model_config) is identical.
+    base = %{system_prompt: "x", tools: [], model_config: %{"m" => 1}}
+    with_env = Map.merge(base, %{environment: %{"a" => 1}, environment_variables: %{"A" => "1"}})
+
+    {:ok, agent_spec} = Spec.new(Map.put(base, :name, "harness"))
+    bare_digest = Spec.digest(agent_spec)
+
+    refute P.harness_name(base, "t") == P.harness_name(with_env, "t")
+    refute P.harness_name(with_env, "t") == "t_harness_#{bare_digest}"
   end
 
   test "provision threads environment fields into the harness spec, and the spec-hash covers them" do

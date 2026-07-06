@@ -65,6 +65,15 @@ defmodule ReqManagedAgents.Provisioner do
   defdelegate prune_environments(client, base, opts \\ []),
     to: ReqManagedAgents.Provisioner.Environments
 
+  defdelegate ensure_agent(client, agent_spec, opts \\ []),
+    to: ReqManagedAgents.Provisioner.Agents
+
+  defdelegate tag_agent(base, tag, digest_or_handle, opts \\ []),
+    to: ReqManagedAgents.Provisioner.Agents
+
+  defdelegate resolve_agent(ref, opts \\ []), to: ReqManagedAgents.Provisioner.Agents
+  defdelegate prune_agents(client, base, opts \\ []), to: ReqManagedAgents.Provisioner.Agents
+
   @doc false
   def hash(term),
     do: :crypto.hash(:sha256, :erlang.term_to_binary(term, [:deterministic])) |> Base.encode16()

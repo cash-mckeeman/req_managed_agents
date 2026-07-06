@@ -69,6 +69,11 @@ defmodule ReqManagedAgents do
   defdelegate ensure_environment(client, env_spec, opts \\ []),
     to: ReqManagedAgents.Provisioner.Environments
 
+  defdelegate ensure_agent(client, agent_spec, opts \\ []), to: ReqManagedAgents.Provisioner
+  defdelegate tag_agent(base, tag, digest_or_handle, opts \\ []), to: ReqManagedAgents.Provisioner
+  defdelegate resolve_agent(ref, opts \\ []), to: ReqManagedAgents.Provisioner
+  defdelegate prune_agents(client, base, opts \\ []), to: ReqManagedAgents.Provisioner
+
   @doc "Tear down a provisioned resource and evict it from the provision cache."
   @spec teardown(module(), ReqManagedAgents.Provider.handle(), keyword()) ::
           :ok | {:error, term()}

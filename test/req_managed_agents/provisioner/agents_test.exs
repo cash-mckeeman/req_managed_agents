@@ -270,4 +270,15 @@ defmodule ReqManagedAgents.Provisioner.AgentsTest do
                archive_fun: archive
              )
   end
+
+  test "facade delegates reach Provisioner.Agents" do
+    store =
+      {ReqManagedAgents.Provisioner.Store.ETS, :"facade_#{System.unique_integer([:positive])}"}
+
+    assert {:ok, %{agent_id: "f1"}} =
+             ReqManagedAgents.ensure_agent(nil, @spec_attrs,
+               store: store,
+               create_fun: fn _ -> {:ok, %{"id" => "f1"}} end
+             )
+  end
 end
