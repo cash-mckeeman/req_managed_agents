@@ -21,15 +21,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tag resolution (`{:error, :unknown_tag}` on miss, never a silent fallback), and
   explicit GC (archives old versions beyond `keep:`, never touching tagged digests),
   mirroring the environment lifecycle.
-- The content-address computation is unified across Claude Managed Agents and Bedrock
-  AgentCore — both providers' agent/environment naming now derives from the same
-  digest function, so provider-side names are consistent regardless of which provider
-  created the entity.
+- The canonical identity content is unified onto `Agent.Spec.digest/1` (`system_prompt`,
+  `tools`, `terminal_tool`, `model_config`): Claude Managed Agents and Bedrock AgentCore
+  both derive agent naming from it, so identical content names identically regardless of
+  provider. AgentCore harnesses that carry the opaque `:environment`/`:environment_variables`
+  passthrough are the one exception — those fields have no place in the provider-agnostic
+  `Agent.Spec`, so such harnesses intentionally keep their pre-0.7.0 full-spec digest
+  instead of folding onto `Agent.Spec.digest/1`.
 - `Session.run/2` (and `start_link/2`) accept `:agent`/`:environment` opts carrying the
   handle returned by `ensure_agent/3`/`ensure_environment/3`; the handle is unpacked to
   `:agent_id`/`:environment_id` before the provider opens the session, so callers stop
   hand-threading raw ids. An explicit `:agent_id`/`:environment_id` still works and
   wins if both are given.
+
+**Upgrade note:** specs that conform to the documented `Agent.Spec` type keep
+byte-identical agent/harness names across the upgrade — no re-provisioning. The only
+exception is hand-built, out-of-contract specs (omitting the `terminal_tool` key
+entirely, or passing `environment: nil` explicitly rather than leaving it unset); those
+re-provision once on upgrade, which is non-destructive.
 
 ## v0.6.2 (2026-07-05)
 

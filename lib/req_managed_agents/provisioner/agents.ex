@@ -75,15 +75,19 @@ defmodule ReqManagedAgents.Provisioner.Agents do
   # `<base>_<digest8>`, a live agent with this exact name IS this exact spec —
   # recovery by name is version-correct even with an empty store.
   defp recover(list_fun, name, digest) do
-    with {:ok, %{"data" => agents}} <- list_fun.() do
-      live = Enum.find(agents, &(&1["name"] == name and is_nil(&1["archived_at"])))
-      name_match = Enum.find(agents, &(&1["name"] == name))
+    case list_fun.() do
+      {:ok, %{"data" => agents}} ->
+        live = Enum.find(agents, &(&1["name"] == name and is_nil(&1["archived_at"])))
+        name_match = Enum.find(agents, &(&1["name"] == name))
 
-      cond do
-        live -> {:ok, %{agent_id: live["id"], name: name, digest: digest}}
-        name_match -> {:error, {:agent_archived, name}}
-        true -> {:error, {:agent_name_conflict, name}}
-      end
+        cond do
+          live -> {:ok, %{agent_id: live["id"], name: name, digest: digest}}
+          name_match -> {:error, {:agent_archived, name}}
+          true -> {:error, {:agent_name_conflict, name}}
+        end
+
+      other ->
+        {:error, {:unexpected_list_response, other}}
     end
   end
 
@@ -181,12 +185,16 @@ defmodule ReqManagedAgents.Provisioner.Agents do
         _ -> MapSet.new()
       end
 
-    with {:ok, %{"data" => agents}} <- list_fun.() do
-      {kept_by_count, candidates} = agents |> live_versions(base) |> Enum.split(keep)
-      {tagged_keeps, to_archive} = Enum.split_with(candidates, &tagged?(&1, tagged, base))
-      kept = Enum.map(kept_by_count ++ tagged_keeps, & &1["name"])
-      # Archive oldest-first so a partial failure preserves the newest history.
-      archive_all(Enum.reverse(to_archive), archive_fun, smod, sopts, base, kept, [])
+    case list_fun.() do
+      {:ok, %{"data" => agents}} ->
+        {kept_by_count, candidates} = agents |> live_versions(base) |> Enum.split(keep)
+        {tagged_keeps, to_archive} = Enum.split_with(candidates, &tagged?(&1, tagged, base))
+        kept = Enum.map(kept_by_count ++ tagged_keeps, & &1["name"])
+        # Archive oldest-first so a partial failure preserves the newest history.
+        archive_all(Enum.reverse(to_archive), archive_fun, smod, sopts, base, kept, [])
+
+      other ->
+        {:error, {:unexpected_list_response, other}}
     end
   end
 

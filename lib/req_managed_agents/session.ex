@@ -235,8 +235,11 @@ defmodule ReqManagedAgents.Session do
 
   defp lift_handle(opts, handle_key, id_key) do
     case {opts[id_key], opts[handle_key]} do
-      {nil, %{} = h} -> Keyword.put(opts, id_key, h[id_key] || h[to_string(id_key)])
-      _ -> opts
+      {nil, h} when is_map(h) and not is_struct(h) ->
+        Keyword.put(opts, id_key, h[id_key] || h[to_string(id_key)])
+
+      _ ->
+        opts
     end
   end
 
