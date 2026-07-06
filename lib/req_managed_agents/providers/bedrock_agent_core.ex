@@ -80,22 +80,25 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   # Same content-address as `Agent.Spec.digest/1` (env-agent naming, Claude Managed Agents'
   # `spec_digest`) for the identity fields it covers (system_prompt/tools/terminal_tool/
-  # model_config). A Bedrock spec may additionally carry opaque `environment`/
-  # `environment_variables` maps (see moduledoc) — `Agent.Spec` has no field for these, but they
-  # genuinely change what CreateHarness provisions (e.g. filesystem mounts), so when present
-  # they're folded into the digest too. Two specs that agree on everything Agent.Spec covers
-  # must still provision under distinct harness names if their environment payloads differ.
+  # model_config) — this is byte-identical to the pre-0.7.0 digest for specs with no env
+  # fields, so those harnesses keep their names across the upgrade.
+  #
+  # A Bedrock spec may additionally carry opaque `environment`/`environment_variables` maps
+  # (see moduledoc) that pass through to CreateHarness verbatim (filesystem mounts, custom
+  # containers, env vars). `Agent.Spec` is provider-agnostic and has no field for these, so
+  # when they're present we fall back to the ORIGINAL pre-0.7.0 computation — a full-spec hash
+  # — rather than folding them onto `Agent.Spec.digest/1`. That keeps env-bearing harnesses'
+  # names byte-identical to what shipped in 0.6.x (no re-provision on upgrade), while distinct
+  # environment payloads still produce distinct names (they differ in the hashed spec map).
   defp agent_digest(spec) do
-    {:ok, s} = Spec.new(Map.put_new(spec, :name, "harness"))
-    base = Spec.digest(s)
-
     case {Map.get(spec, :environment), Map.get(spec, :environment_variables)} do
       {nil, nil} ->
-        base
+        {:ok, s} = Spec.new(Map.put_new(spec, :name, "harness"))
+        Spec.digest(s)
 
-      extra ->
+      _ ->
         :sha256
-        |> :crypto.hash(base <> :erlang.term_to_binary(extra, [:deterministic]))
+        |> :crypto.hash(:erlang.term_to_binary(spec, [:deterministic]))
         |> Base.encode16(case: :lower)
         |> binary_part(0, 8)
     end

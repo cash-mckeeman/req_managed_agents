@@ -541,6 +541,31 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     refute P.harness_name(with_env, "t") == "t_harness_#{bare_digest}"
   end
 
+  test "harness_name/2 for an env-bearing spec is byte-identical to the pre-0.7.0 full-spec digest (no re-provision on upgrade)" do
+    # Agent.Spec has no field for environment/environment_variables, so env-bearing specs
+    # can't route through Agent.Spec.digest/1 without changing the digest (and thus the
+    # harness name) for anyone already running an env-mounted harness. Instead they fall
+    # back to the ORIGINAL pre-0.7.0 computation: a full-spec :erlang.term_to_binary hash.
+    # This proves that fallback, byte-for-byte, against a spec that predates the unification.
+    env_spec = %{
+      system_prompt: "x",
+      tools: [%{"name" => "t"}],
+      terminal_tool: nil,
+      model_config: %{"m" => 1},
+      environment: %{"agentCoreRuntimeEnvironment" => %{"filesystemConfigurations" => []}},
+      environment_variables: %{"A" => "1"}
+    }
+
+    pre_070_digest =
+      env_spec
+      |> :erlang.term_to_binary([:deterministic])
+      |> then(&:crypto.hash(:sha256, &1))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 8)
+
+    assert P.harness_name(env_spec, nil) == "harness_#{pre_070_digest}"
+  end
+
   test "provision threads environment fields into the harness spec, and the spec-hash covers them" do
     base = %{system_prompt: "x", tools: [], model_config: %{"m" => 1}}
 
