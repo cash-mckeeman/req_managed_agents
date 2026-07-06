@@ -204,4 +204,70 @@ defmodule ReqManagedAgents.Provisioner.AgentsTest do
     assert "analyst_aaaaaaaa" in kept and "analyst_cccccccc" in kept
     assert Agent.get(archived, & &1) == ["id_bbbbbbbb"]
   end
+
+  test "with 3+ untagged versions, archives strictly oldest-first and keeps only the newest", %{
+    store: store
+  } do
+    base = "analyst"
+
+    rows = [
+      agent_row(base, "aaaaaaaa", 3),
+      agent_row(base, "bbbbbbbb", 2),
+      agent_row(base, "cccccccc", 1)
+    ]
+
+    list = fn -> {:ok, %{"data" => rows}} end
+    {:ok, call_order} = Agent.start_link(fn -> [] end)
+
+    archive = fn id ->
+      Agent.update(call_order, &(&1 ++ [id]))
+      {:ok, %{}}
+    end
+
+    assert {:ok, %{archived: archived, kept: kept}} =
+             Agents.prune_agents(nil, base,
+               keep: 1,
+               store: store,
+               list_fun: list,
+               archive_fun: archive
+             )
+
+    assert kept == ["analyst_aaaaaaaa"]
+    assert archived == ["analyst_cccccccc", "analyst_bbbbbbbb"]
+    assert Agent.get(call_order, & &1) == ["id_cccccccc", "id_bbbbbbbb"]
+  end
+
+  test "a failure archiving the second-oldest returns a partial result naming both lists", %{
+    store: store
+  } do
+    base = "analyst"
+
+    rows = [
+      agent_row(base, "aaaaaaaa", 3),
+      agent_row(base, "bbbbbbbb", 2),
+      agent_row(base, "cccccccc", 1)
+    ]
+
+    list = fn -> {:ok, %{"data" => rows}} end
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
+    reason = {:http_error, 500, "boom"}
+
+    archive = fn _id ->
+      n = Agent.get_and_update(calls, &{&1 + 1, &1 + 1})
+
+      if n == 1 do
+        {:ok, %{}}
+      else
+        {:error, reason}
+      end
+    end
+
+    assert {:error, {:partial, ["analyst_cccccccc"], {"analyst_bbbbbbbb", ^reason}}} =
+             Agents.prune_agents(nil, base,
+               keep: 1,
+               store: store,
+               list_fun: list,
+               archive_fun: archive
+             )
+  end
 end
