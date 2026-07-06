@@ -70,8 +70,21 @@ defmodule ReqManagedAgents.Provisioner.Agents do
     end
   end
 
-  # recover/3 added in Task 3.
-  defp recover(_list_fun, name, _digest), do: {:error, {:agent_name_conflict, name}}
+  # A 409 on create means a name collision. Since the provider-side name is
+  # `<base>_<digest8>`, a live agent with this exact name IS this exact spec —
+  # recovery by name is version-correct even with an empty store.
+  defp recover(list_fun, name, digest) do
+    with {:ok, %{"data" => agents}} <- list_fun.() do
+      live = Enum.find(agents, &(&1["name"] == name and is_nil(&1["archived_at"])))
+      name_match = Enum.find(agents, &(&1["name"] == name))
+
+      cond do
+        live -> {:ok, %{agent_id: live["id"], name: name, digest: digest}}
+        name_match -> {:error, {:agent_archived, name}}
+        true -> {:error, {:agent_name_conflict, name}}
+      end
+    end
+  end
 
   # normalize_or_miss/atomize_handle/store_* filled in Task 4; minimal forms here
   # so ensure_agent compiles and the happy path works.

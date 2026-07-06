@@ -45,4 +45,65 @@ defmodule ReqManagedAgents.Provisioner.AgentsTest do
     assert h1 == h2
     assert length(Agent.get(calls, & &1)) == 1, "create_fun ran exactly once"
   end
+
+  @conflict {:error, {:http_error, 409, "exists"}}
+
+  test "409 recovers by name when a live agent matches", %{store: store} do
+    {:ok, %{name: name, digest: digest}} =
+      Agents.ensure_agent(nil, @spec_attrs,
+        store: store,
+        create_fun: fn _ -> {:ok, %{"id" => "seed"}} end
+      )
+
+    store2 =
+      {ReqManagedAgents.Provisioner.Store.ETS,
+       :"agents_recover_#{System.unique_integer([:positive])}"}
+
+    live_list = fn ->
+      {:ok, %{"data" => [%{"id" => "live_1", "name" => name, "archived_at" => nil}]}}
+    end
+
+    assert {:ok, %{agent_id: "live_1", name: ^name, digest: ^digest}} =
+             Agents.ensure_agent(nil, @spec_attrs,
+               store: store2,
+               create_fun: fn _ -> @conflict end,
+               list_fun: live_list
+             )
+  end
+
+  test "409 with an archived name is an error", %{store: store} do
+    {:ok, %{name: name}} =
+      Agents.ensure_agent(nil, @spec_attrs,
+        store: store,
+        create_fun: fn _ -> {:ok, %{"id" => "seed"}} end
+      )
+
+    store2 =
+      {ReqManagedAgents.Provisioner.Store.ETS,
+       :"agents_arch_#{System.unique_integer([:positive])}"}
+
+    archived = fn ->
+      {:ok, %{"data" => [%{"id" => "x", "name" => name, "archived_at" => "2026-01-01"}]}}
+    end
+
+    assert {:error, {:agent_archived, ^name}} =
+             Agents.ensure_agent(nil, @spec_attrs,
+               store: store2,
+               create_fun: fn _ -> @conflict end,
+               list_fun: archived
+             )
+  end
+
+  test "409 with no matching name is a conflict", %{store: store} do
+    unrelated = fn ->
+      {:ok, %{"data" => [%{"id" => "y", "name" => "other_deadbeef", "archived_at" => nil}]}}
+    end
+
+    assert {:error, {:agent_name_conflict, _name}} =
+             Agents.ensure_agent(nil, @spec_attrs,
+               store: store,
+               create_fun: fn _ -> @conflict end,
+               list_fun: unrelated
+             )
+  end
 end
