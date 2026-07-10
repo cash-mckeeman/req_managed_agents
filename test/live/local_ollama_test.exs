@@ -4,6 +4,11 @@ defmodule ReqManagedAgents.Live.LocalOllamaTest do
   #   OLLAMA_MODEL=qwen2.5:32b mix test test/live/local_ollama_test.exs --include live
   use ExUnit.Case
   @moduletag :live
+  @moduletag skip:
+               if(System.get_env("OLLAMA_MODEL") in [nil, ""],
+                 do: "requires OLLAMA_MODEL (and a local `ollama serve`)",
+                 else: false
+               )
 
   alias ReqManagedAgents.{Providers.Local, Session}
 
@@ -34,7 +39,7 @@ defmodule ReqManagedAgents.Live.LocalOllamaTest do
   end
 
   test "Local drives a real tool round-trip against Ollama" do
-    model = System.get_env("OLLAMA_MODEL") || "qwen2.5:32b"
+    model = System.fetch_env!("OLLAMA_MODEL")
     test = self()
 
     spec = %{
