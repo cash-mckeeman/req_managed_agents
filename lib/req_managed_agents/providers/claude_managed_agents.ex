@@ -151,11 +151,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     case Client.list_all_events(conn.client, conn.session_id) do
       {:ok, past} ->
         {_fresh, seen} = ReqManagedAgents.Consolidate.dedupe(past, seen)
-
-        pending =
-          past
-          |> ReqManagedAgents.Consolidate.unanswered_tool_uses()
-          |> Enum.map(fn e -> %ToolUse{id: e["id"], name: e["name"], input: e["input"]} end)
+        pending = pending_tool_uses(past)
 
         ref = make_ref()
 
@@ -169,6 +165,18 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  @impl true
+  # Same recovery reconnect/3 does for a stream drop, but keyed off the events the Session
+  # already holds in memory (no extra round trip): a `requires_action` batch that resolves
+  # to zero `custom_tool_uses` means the ids its idle references live in an earlier batch —
+  # find them the same way (unanswered agent.custom_tool_use, by history) and let Session
+  # re-run + resume them instead of ever driving an empty resume (issue #61).
+  def pending_tool_uses(events) do
+    events
+    |> ReqManagedAgents.Consolidate.unanswered_tool_uses()
+    |> Enum.map(fn e -> %ToolUse{id: e["id"], name: e["name"], input: e["input"]} end)
   end
 
   @impl true

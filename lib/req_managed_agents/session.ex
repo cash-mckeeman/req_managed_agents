@@ -462,6 +462,9 @@ defmodule ReqManagedAgents.Session do
         notify(s, session_result(s, tr, :terminated))
         stop_error(s, {:max_turns_exceeded, s.max_turns})
 
+      tr.terminal == :requires_action and tr.custom_tool_uses == [] ->
+        handle_empty_requires_action(s, tr)
+
       tr.terminal == :requires_action ->
         results = run_tools(tr.custom_tool_uses, s)
         drive(s, s.provider.resume_input(tr.custom_tool_uses, results))
@@ -477,6 +480,35 @@ defmodule ReqManagedAgents.Session do
 
       true ->
         finish(s, tr)
+    end
+  end
+
+  # A `requires_action` turn whose batch resolved to zero `custom_tool_uses` (the classic
+  # shape: an idle references ids that live in an earlier, already-processed batch — see
+  # `Provider.pending_tool_uses/1`). An empty resume must NEVER be sent (the API rejects it
+  # outright), so recover via the provider's optional `pending_tool_uses/1` — keyed off the
+  # session's own accumulated history, no extra round trip — the same recovery `reconnect/3`
+  # already does across a stream drop. Nothing recoverable is a genuine protocol-state
+  # error, surfaced loudly instead of the doomed empty resume.
+  defp handle_empty_requires_action(s, tr) do
+    case recoverable_tool_uses(s) do
+      [] ->
+        notify(s, session_result(s, tr, :terminated))
+        stop_error(s, {:unresolved_requires_action, tr.stop_reason})
+
+      recovered ->
+        emit_tool_use_telemetry(s, recovered)
+        results = run_tools(recovered, s)
+        s = %{s | custom_tool_uses: s.custom_tool_uses ++ recovered}
+        drive(s, s.provider.resume_input(recovered, results))
+    end
+  end
+
+  defp recoverable_tool_uses(s) do
+    if function_exported?(s.provider, :pending_tool_uses, 1) do
+      s.provider.pending_tool_uses(s.events)
+    else
+      []
     end
   end
 

@@ -95,13 +95,30 @@ defmodule ReqManagedAgents.Provider do
   @doc "Optional — true when the provider natively honors the `:outcome` kickoff (`user.define_outcome`)."
   @callback supports_outcomes?() :: boolean()
 
+  @doc """
+  Optional — recover unanswered custom tool uses from `events` (the session's full
+  accumulated raw event history, oldest first).
+
+  A `requires_action` turn's per-batch `normalize/1` can resolve to zero
+  `custom_tool_uses` when the ids its own stop condition references live in an
+  EARLIER, already-processed batch (the referencing idle and the tool uses it
+  names don't always land in the same batch). When that happens, `Session` calls
+  this callback instead of driving an empty resume — implement it the same way
+  `reconnect/3` recovers unanswered tool calls across a stream drop (e.g. via
+  `ReqManagedAgents.Consolidate.unanswered_tool_uses/1`). Return `[]` when nothing
+  is recoverable; `Session` then surfaces a loud protocol-state error rather than
+  ever POSTing an empty events list.
+  """
+  @callback pending_tool_uses([event()]) :: [ReqManagedAgents.ToolUse.t()]
+
   @optional_callbacks poll_turn: 2,
                       push_input: 2,
                       turn_boundary?: 1,
                       reconnect: 3,
                       teardown: 2,
                       text_delta: 1,
-                      supports_outcomes?: 0
+                      supports_outcomes?: 0,
+                      pending_tool_uses: 1
 
   @doc """
   Extract a canonical `%ToolResult{}` from a `Tools.run/7` wire event
