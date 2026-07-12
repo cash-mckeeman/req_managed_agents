@@ -20,7 +20,7 @@ defmodule ReqManagedAgents.Handler do
 
   `handle_tool_call/3` (and its `/4` form) is likewise **at-least-once**, not
   exactly-once: session recovery from a `requires_action` batch that resolves to
-  zero tool uses (see `ReqManagedAgents.Provider.pending_tool_uses/1`), and
+  zero tool uses (see `c:ReqManagedAgents.Provider.pending_tool_uses/1`), and
   reconnect re-drive after a stream drop, both re-run a tool call for a
   `tool_use` id that may already have been dispatched. Side-effecting handlers
   should be idempotent, or dedupe on `tool_use` id themselves.
