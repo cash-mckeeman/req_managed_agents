@@ -17,13 +17,21 @@ defmodule ReqManagedAgents.Handler do
   surfaced by the transport (e.g. a `"__stream_error__"` envelope on Bedrock AgentCore) may
   also appear on this observational surface. The canonical exactly-once record is
   `ReqManagedAgents.SessionResult.events`.
+
+  `handle_tool_call/3` (and its `/4` form) is likewise **at-least-once**, not
+  exactly-once: session recovery from a `requires_action` batch that resolves to
+  zero tool uses (see `c:ReqManagedAgents.Provider.pending_tool_uses/1`), and
+  reconnect re-drive after a stream drop, both re-run a tool call for a
+  `tool_use` id that may already have been dispatched. Side-effecting handlers
+  should be idempotent, or dedupe on `tool_use` id themselves.
   """
 
   @doc """
   Run a custom tool locally. `name` and `input` come from the
   `agent.custom_tool_use` event; `ctx` is the `:context` passed at session start.
   Return `{:ok, text}` (sent as the tool result) or `{:error, text}` (sent with
-  `is_error: true`).
+  `is_error: true`). See the moduledoc — this callback is at-least-once, not
+  exactly-once.
   """
   @callback handle_tool_call(name :: String.t(), input :: map(), ctx :: term()) ::
               {:ok, String.t()} | {:error, String.t()}

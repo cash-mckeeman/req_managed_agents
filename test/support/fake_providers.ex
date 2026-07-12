@@ -206,4 +206,83 @@ defmodule ReqManagedAgents.FakeProviders do
     @impl true
     defdelegate normalize(events), to: Shared
   end
+
+  # Streaming fake exercising the `pending_tool_uses/1` recovery seam (issue #61): a
+  # `requires_action` batch can resolve to zero `custom_tool_uses` when the tool uses it
+  # references live in an EARLIER already-processed batch. `resume_input/2`'s echoes
+  # (`"tool_result"`) ride the wire so `pending_tool_uses/1` can compute "unanswered" purely
+  # from the session's own accumulated history — no extra round trip, mirroring
+  # `Consolidate.unanswered_tool_uses/1` in the real `ClaudeManagedAgents` provider.
+  defmodule PendingRecoveryStreaming do
+    @moduledoc false
+    @behaviour ReqManagedAgents.Provider
+    alias ReqManagedAgents.ToolUse
+
+    @impl true
+    def mode, do: :streaming
+    @impl true
+    def provision(_spec, _opts), do: {:error, :not_implemented}
+    @impl true
+    def open(opts, subscriber) do
+      {:ok, agent} = Agent.start_link(fn -> %{turns: opts[:turns] || [], stash: []} end)
+      ref = make_ref()
+      send(subscriber, {:managed_agents, ref, :connected})
+      {:ok, %{agent: agent, subscriber: subscriber, ref: ref}}
+    end
+
+    @impl true
+    def kickoff_input(_opts), do: :kickoff
+    @impl true
+    def user_input(text), do: {:user, text}
+    @impl true
+    def resume_input(_uses, results),
+      do: for(r <- results, do: %{"type" => "tool_result", "id" => r.tool_use_id})
+
+    @impl true
+    def push_input(conn, input) do
+      # Only the FIRST echo of a multi-result resume is delivered on this push; the rest are
+      # held back and flushed on the NEXT push — reproducing the real defect's shape, where a
+      # multi-result resume's answers don't all land before the server re-notifies on the
+      # still-outstanding ones (a `requires_action` batch resolving to zero `custom_tool_uses`).
+      echoed = if is_list(input), do: input, else: []
+
+      {send_now, held_back} =
+        case echoed do
+          [first | rest] when rest != [] -> {[first], rest}
+          other -> {other, []}
+        end
+
+      {to_send, turn} =
+        Agent.get_and_update(conn.agent, fn %{turns: turns, stash: stash} ->
+          {t, turns2} =
+            case turns do
+              [t | r] -> {t, r}
+              [] -> {[%{"type" => "stop", "terminal" => :end_turn}], []}
+            end
+
+          {{stash ++ send_now, t}, %{turns: turns2, stash: held_back}}
+        end)
+
+      Enum.each(to_send ++ turn, fn ev ->
+        send(conn.subscriber, {:managed_agents, conn.ref, {:event, ev}})
+      end)
+
+      :ok
+    end
+
+    @impl true
+    def turn_boundary?(%{"type" => "stop"}), do: true
+    def turn_boundary?(_), do: false
+    @impl true
+    defdelegate normalize(events), to: Shared
+
+    @impl true
+    def pending_tool_uses(events) do
+      answered = for %{"type" => "tool_result", "id" => id} <- events, into: MapSet.new(), do: id
+
+      for %{"type" => "tool", "id" => id, "name" => name, "input" => input} <- events,
+          not MapSet.member?(answered, id),
+          do: %ToolUse{id: id, name: name, input: input}
+    end
+  end
 end

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.7.1 (2026-07-12)
+
+### Fixed
+- `Session` no longer drives an empty resume on `ClaudeManagedAgents` when a
+  `requires_action` turn's batch resolves to zero `custom_tool_uses`. The batch a
+  `session.status_idle` arrives in doesn't always carry the `agent.custom_tool_use`
+  events its own `stop_reason.event_ids` reference — they can live in an earlier,
+  already-processed batch (observed: a stale/premature idle re-notifying on tool
+  calls whose results were already in flight in the same resume). Driving
+  `resume_input([], [])` in that case posted `{"events": []}`, which the API
+  rejects with a 400 (`"events: value must contain at least 1 item"`).
+  `Session` now recovers via a new optional `Provider.pending_tool_uses/1`
+  callback — keyed off the session's own accumulated event history, no extra
+  round trip — the same recovery `reconnect/3` already does across a stream
+  drop; `ClaudeManagedAgents` implements it via the same
+  `Consolidate.unanswered_tool_uses/1` helper `reconnect/3` uses. An empty
+  resume is now impossible: if nothing is recoverable, the session surfaces a
+  loud `{:error, {:unresolved_requires_action, stop_reason}}` instead. Fixes #61.
+
 ## v0.7.0 (2026-07-05)
 
 ### Added

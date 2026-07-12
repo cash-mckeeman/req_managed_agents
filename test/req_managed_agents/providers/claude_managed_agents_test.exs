@@ -440,6 +440,58 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     assert [%ReqManagedAgents.ToolUse{id: "e1", name: "lookup", input: %{"q" => 1}}] = pending
   end
 
+  describe "pending_tool_uses/1 (issue #61 recovery)" do
+    test "recovers agent.custom_tool_use events with no matching user.custom_tool_result" do
+      history = [
+        use_event("e1", "lookup", %{"q" => 1}),
+        use_event("e2", "search", %{"q" => 2}),
+        use_event("e3", "search", %{"q" => 3}),
+        idle("requires_action", ["e1", "e2", "e3"]),
+        %{"type" => "user.custom_tool_result", "custom_tool_use_id" => "e1"},
+        # A stale intermediate idle re-referencing e2/e3 — the same shape as the
+        # real defect: its OWN batch carries no agent.custom_tool_use event.
+        idle("requires_action", ["e2", "e3"])
+      ]
+
+      assert [
+               %ReqManagedAgents.ToolUse{id: "e2", name: "search", input: %{"q" => 2}},
+               %ReqManagedAgents.ToolUse{id: "e3", name: "search", input: %{"q" => 3}}
+             ] = ManagedAgents.pending_tool_uses(history)
+    end
+
+    test "returns [] once every custom_tool_use has a matching result" do
+      history = [
+        use_event("e1", "lookup", %{}),
+        idle("requires_action", ["e1"]),
+        %{"type" => "user.custom_tool_result", "custom_tool_use_id" => "e1"}
+      ]
+
+      assert ManagedAgents.pending_tool_uses(history) == []
+    end
+
+    test "agrees with reconnect/3's recovery mapping on the same history (shared helper)" do
+      history = [
+        use_event("e1", "lookup", %{"q" => 1}),
+        idle("requires_action", ["e1"])
+      ]
+
+      client = claude_client(__MODULE__.PendingVsReconnect)
+
+      Req.Test.stub(__MODULE__.PendingVsReconnect, fn conn ->
+        if conn.request_path == "/v1/sessions/s1/events" do
+          Req.Test.json(conn, %{"data" => history})
+        else
+          Plug.Conn.send_chunked(conn, 200)
+        end
+      end)
+
+      {:ok, _conn, from_reconnect, _seen} =
+        ManagedAgents.reconnect(%{client: client, session_id: "s1"}, self(), MapSet.new())
+
+      assert from_reconnect == ManagedAgents.pending_tool_uses(history)
+    end
+  end
+
   test "turn_boundary?/1 is true only for session status/terminal/error events" do
     assert ManagedAgents.turn_boundary?(%{
              "type" => "session.status_idle",

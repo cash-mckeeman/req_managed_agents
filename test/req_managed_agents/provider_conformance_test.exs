@@ -29,7 +29,9 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
     Code.ensure_loaded!(ClaudeManagedAgents)
     assert ClaudeManagedAgents.mode() == :streaming
 
-    for {f, a} <- @shared ++ [{:push_input, 2}, {:turn_boundary?, 1}, {:reconnect, 3}] do
+    for {f, a} <-
+          @shared ++
+            [{:push_input, 2}, {:turn_boundary?, 1}, {:reconnect, 3}, {:pending_tool_uses, 1}] do
       assert function_exported?(ClaudeManagedAgents, f, a),
              "ClaudeManagedAgents missing #{f}/#{a}"
     end
