@@ -35,7 +35,7 @@ defmodule ReqManagedAgents.SessionRequiresActionRecoveryTest do
     # all — the referenced use lives entirely in turn1's already-processed batch.
     turn2 = [%{"type" => "stop", "terminal" => :requires_action}]
 
-    assert {:ok, %SessionResult{terminal: :end_turn}} =
+    assert {:ok, %SessionResult{terminal: :end_turn, custom_tool_uses: custom_tool_uses}} =
              Session.run(PendingRecoveryStreaming, handler: handler, turns: [turn1, turn2])
 
     assert_received {:tool_ran, "a", %{}}
@@ -43,6 +43,14 @@ defmodule ReqManagedAgents.SessionRequiresActionRecoveryTest do
     # Recovered tool uses are re-run (no cached result to replay from) — the same
     # at-least-once contract `redrive/2` already applies on a reconnect.
     assert_received {:tool_ran, "b", %{}}
+
+    # "b" (t2) was already accumulated when turn1 resolved AND re-appears via
+    # `pending_tool_uses/1` recovery — the public SessionResult must not carry it twice.
+    ids = Enum.map(custom_tool_uses, & &1.id)
+    assert ids -- Enum.uniq(ids) == [], "expected no duplicate tool_use ids, got: #{inspect(ids)}"
+    assert Enum.sort(Enum.uniq(ids)) == ["t1", "t2"]
+    assert Enum.count(ids, &(&1 == "t1")) == 1
+    assert Enum.count(ids, &(&1 == "t2")) == 1
   end
 
   test "emits [:session, :tool_uses] telemetry for recovered tool uses too" do

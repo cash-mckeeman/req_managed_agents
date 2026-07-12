@@ -462,12 +462,8 @@ defmodule ReqManagedAgents.Session do
         notify(s, session_result(s, tr, :terminated))
         stop_error(s, {:max_turns_exceeded, s.max_turns})
 
-      tr.terminal == :requires_action and tr.custom_tool_uses == [] ->
-        handle_empty_requires_action(s, tr)
-
       tr.terminal == :requires_action ->
-        results = run_tools(tr.custom_tool_uses, s)
-        drive(s, s.provider.resume_input(tr.custom_tool_uses, results))
+        handle_requires_action(s, tr)
 
       # Terminal-tool enforcement: an :end_turn that never called the required tool
       # re-drives with a re-prompt; re-prompt turns count against :max_turns.
@@ -481,6 +477,17 @@ defmodule ReqManagedAgents.Session do
       true ->
         finish(s, tr)
     end
+  end
+
+  # A `requires_action` turn either carries custom tool uses to run and resume with,
+  # or resolved to an empty batch — the classic idle-recovery shape handled by
+  # `handle_empty_requires_action/2`.
+  defp handle_requires_action(s, %{custom_tool_uses: []} = tr),
+    do: handle_empty_requires_action(s, tr)
+
+  defp handle_requires_action(s, tr) do
+    results = run_tools(tr.custom_tool_uses, s)
+    drive(s, s.provider.resume_input(tr.custom_tool_uses, results))
   end
 
   # A `requires_action` turn whose batch resolved to zero `custom_tool_uses` (the classic
@@ -499,13 +506,22 @@ defmodule ReqManagedAgents.Session do
       recovered ->
         emit_tool_use_telemetry(s, recovered)
         results = run_tools(recovered, s)
-        s = %{s | custom_tool_uses: s.custom_tool_uses ++ recovered}
+        s = %{s | custom_tool_uses: append_new_tool_uses(s.custom_tool_uses, recovered)}
         drive(s, s.provider.resume_input(recovered, results))
     end
   end
 
+  # `recovered` uses may already have been accumulated when their originating turn
+  # resolved (the issue-61 recovery shape) — append only the ones whose id isn't
+  # already present, so the public `SessionResult.custom_tool_uses` never carries
+  # a duplicate id for a recovered tool use.
+  defp append_new_tool_uses(existing, recovered) do
+    existing_ids = MapSet.new(existing, & &1.id)
+    existing ++ Enum.reject(recovered, &MapSet.member?(existing_ids, &1.id))
+  end
+
   defp recoverable_tool_uses(s) do
-    if function_exported?(s.provider, :pending_tool_uses, 1) do
+    if Code.ensure_loaded?(s.provider) and function_exported?(s.provider, :pending_tool_uses, 1) do
       s.provider.pending_tool_uses(s.events)
     else
       []

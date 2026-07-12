@@ -108,6 +108,11 @@ defmodule ReqManagedAgents.Provider do
   `ReqManagedAgents.Consolidate.unanswered_tool_uses/1`). Return `[]` when nothing
   is recoverable; `Session` then surfaces a loud protocol-state error rather than
   ever POSTing an empty events list.
+
+  Every use returned here is re-run at-least-once: `Session` re-invokes
+  `ReqManagedAgents.Handler.handle_tool_call/3` (or `/4`) for it regardless of
+  whether that `tool_use` id was already dispatched earlier in the session —
+  see `ReqManagedAgents.Handler`'s moduledoc.
   """
   @callback pending_tool_uses([event()]) :: [ReqManagedAgents.ToolUse.t()]
 
