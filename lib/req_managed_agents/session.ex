@@ -49,8 +49,9 @@ defmodule ReqManagedAgents.Session do
   Provider-specific opts (e.g. `:agent_id`/`:environment_id`, `:harness_arn`/`:runtime_session_id`,
   `:session_id` to resume) are forwarded to the provider's `open/2`. `:agent`/`:environment` accept
   the handle returned by `ReqManagedAgents.ensure_agent/3` / `ensure_environment/3`
-  (`%{agent_id:, name:, digest:}` / `%{environment_id:, name:, digest:}`) — the handle is unpacked
-  to `:agent_id`/`:environment_id` before `open/2` runs, so callers pass the handle instead of
+  (a `%ReqManagedAgents.Agent.Handle{}` / `%ReqManagedAgents.Provisioner.Environment.Handle{}`, or a
+  bare map with the same `agent_id:`/`environment_id:` keys) — the handle is unpacked to
+  `:agent_id`/`:environment_id` before `open/2` runs, so callers pass the handle instead of
   hand-threading the raw id; an explicit `:agent_id`/`:environment_id` wins if both are given.
   """
   use GenServer
@@ -249,8 +250,8 @@ defmodule ReqManagedAgents.Session do
 
   defp lift_handle(opts, handle_key, id_key) do
     case {opts[id_key], opts[handle_key]} do
-      {nil, h} when is_map(h) and not is_struct(h) ->
-        Keyword.put(opts, id_key, h[id_key] || h[to_string(id_key)])
+      {nil, h} when is_map(h) ->
+        Keyword.put(opts, id_key, Map.get(h, id_key) || Map.get(h, to_string(id_key)))
 
       _ ->
         opts

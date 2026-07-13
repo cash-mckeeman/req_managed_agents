@@ -10,25 +10,29 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   """
   require Logger
   alias ReqManagedAgents.Provisioner
+  alias ReqManagedAgents.Provisioner.Environment.Handle
   alias ReqManagedAgents.Provisioner.Runtimes
   alias ReqManagedAgents.Provisioner.Store
 
   @default_store {Store.ETS, :req_managed_agents_provisions}
 
   @doc """
-  Build-if-absent for an environment image. Returns
-  `{:ok, %{environment_id: id, name: name, digest: digest}}`.
+  Build-if-absent for an environment image. Returns `{:ok, %Handle{}}`.
 
-  When the spec declares runtimes, the RETURNED handle additionally carries
-  `bootstrap: %{script: ..., instructions: ...}` — DERIVED from the spec on
-  every call (all paths: fresh create, recovery, store hit), never stored.
-  The persisted handle stays exactly three fields. Sessions execute the
-  script via the agent's bash on first need; the library only renders it.
+  When the spec declares runtimes, the RETURNED `%Handle{}` additionally
+  carries `bootstrap: %{script: ..., instructions: ...}` — DERIVED from the
+  spec on every call (all paths: fresh create, recovery, store hit), never
+  stored. The persisted handle stays exactly three fields (`bootstrap` is
+  excluded from the `Jason.Encoder` derivation); only the in-memory struct
+  returned here carries it. Sessions execute the script via the agent's bash
+  on first need; the library only renders it.
 
   Opts: `:name` (repository base, default `"env"`), `:store`
   (`{module, store_opts}`), `:create_fun` / `:list_fun` (test seams; default
   to `ReqManagedAgents.Client` calls on the given client).
   """
+  @spec ensure_environment(term(), map(), keyword()) ::
+          {:ok, Handle.t()} | {:error, term()}
   def ensure_environment(client, env_spec, opts \\ []) do
     runtimes = env_spec[:runtimes] || []
 
@@ -44,15 +48,20 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   end
 
   # Bootstrap is a derived view of the spec, recomputed per call — the stored
-  # handle shape is frozen at three fields, so caches never go stale on
-  # template changes.
+  # handle shape is frozen at three fields (bootstrap is excluded from the
+  # Jason.Encoder derivation), so caches never go stale on template changes.
+  # The return stays a %Handle{} on every path — bootstrap is a struct field,
+  # never a downgrade to a plain map.
   defp attach_bootstrap(handle, []), do: handle
 
-  defp attach_bootstrap(handle, runtimes) do
-    Map.put(handle, :bootstrap, %{
-      script: Runtimes.bootstrap_script(runtimes),
-      instructions: Runtimes.system_prompt_block(runtimes)
-    })
+  defp attach_bootstrap(%Handle{} = handle, runtimes) do
+    %{
+      handle
+      | bootstrap: %{
+          script: Runtimes.bootstrap_script(runtimes),
+          instructions: Runtimes.system_prompt_block(runtimes)
+        }
+    }
   end
 
   defp do_ensure_environment(client, env_spec, opts) do
@@ -115,9 +124,9 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   The split is on the FIRST colon only, so tag names may themselves contain
   colons (`"a:b:c"` resolves tag `"b:c"` under base `"a"`).
 
-  The resolved handle never carries `:bootstrap` — no env spec is in scope
-  here to derive it from; call `ensure_environment/3` with the spec when the
-  bootstrap content is needed.
+  The resolved handle's `:bootstrap` is always `nil` — no env spec is in
+  scope here to derive it from; call `ensure_environment/3` with the spec
+  when the bootstrap content is needed.
   """
   def resolve(ref, opts \\ []) do
     {smod, sopts} = opts[:store] || @default_store
@@ -136,7 +145,7 @@ defmodule ReqManagedAgents.Provisioner.Environments do
          {:tag, digest} when is_binary(digest) <- {:tag, registry[tag]},
          {:handle, _digest, {:ok, handle}} <-
            {:handle, digest, find_handle(smod, sopts, base, digest)} do
-      {:ok, atomize_handle(handle)}
+      {:ok, Handle.new(handle)}
     else
       {:tag, nil} -> {:error, :unknown_tag}
       {:handle, digest, :miss} -> {:error, {:untracked_digest, digest}}
@@ -211,8 +220,12 @@ defmodule ReqManagedAgents.Provisioner.Environments do
         digest = String.replace_prefix(e["name"], base <> "_", "")
         smod.delete(sopts, "digest:" <> base <> ":" <> digest)
 
-        # Values may be stored JSON-normalized (Store.File) or as-written (ETS); delete both shapes.
-        smod.delete_value(sopts, %{environment_id: e["id"], name: e["name"], digest: digest})
+        # Values may be stored JSON-normalized (Store.File, string keys) or as-written
+        # (ETS, the exact %Handle{} struct); delete both shapes.
+        smod.delete_value(
+          sopts,
+          Handle.new(%{environment_id: e["id"], name: e["name"], digest: digest})
+        )
 
         smod.delete_value(sopts, %{
           "environment_id" => e["id"],
@@ -240,19 +253,12 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   defp to_digest(%{"digest" => d}), do: d
   defp to_digest(d) when is_binary(d), do: d
 
-  # Re-atomize the known fields when handles are read back from a JSON-backed
-  # store (Store.File round-trips through string keys).
-  defp atomize_handle(%{environment_id: _} = h), do: h
-
-  defp atomize_handle(%{"environment_id" => id, "name" => n, "digest" => d}),
-    do: %{environment_id: id, name: n, digest: d}
-
   defp build(create_fun, list_fun, env_spec, name, digest) do
     body = %{name: name, config: wire_config(env_spec)}
 
     case create_fun.(body) do
       {:ok, %{"id" => id}} ->
-        {:ok, %{environment_id: id, name: name, digest: digest}}
+        {:ok, Handle.new(%{environment_id: id, name: name, digest: digest})}
 
       {:error, {:http_error, 409, _}} ->
         recover(list_fun, name, digest)
@@ -268,7 +274,7 @@ defmodule ReqManagedAgents.Provisioner.Environments do
       name_match = Enum.find(envs, &(&1["name"] == name))
 
       cond do
-        live -> {:ok, %{environment_id: live["id"], name: name, digest: digest}}
+        live -> {:ok, Handle.new(%{environment_id: live["id"], name: name, digest: digest})}
         name_match -> {:error, {:environment_archived, name}}
         true -> {:error, {:environment_name_conflict, name}}
       end
@@ -312,14 +318,15 @@ defmodule ReqManagedAgents.Provisioner.Environments do
     Map.put(env_spec, :networking, Map.put(networking, hosts_key, merged))
   end
 
-  # Store.File round-trips handles through JSON (string keys) — re-atomize the
-  # three known fields so callers get one shape from either store. Anything
-  # else (foreign store content, missing keys) is treated as a miss and
-  # rebuilt: provisioning truth beats cache truth (loud-but-safe).
-  defp normalize_or_miss(%{environment_id: _, name: _, digest: _} = h), do: {:ok, h}
+  # Store.File round-trips handles through JSON (string keys) — Handle.new/1
+  # absorbs both the atom-keyed (fresh) and string-keyed (post-round-trip)
+  # shapes into one struct. Anything else (foreign store content, missing
+  # keys) is treated as a miss and rebuilt: provisioning truth beats cache
+  # truth (loud-but-safe).
+  defp normalize_or_miss(%{environment_id: _, name: _, digest: _} = h), do: {:ok, Handle.new(h)}
 
-  defp normalize_or_miss(%{"environment_id" => id, "name" => n, "digest" => d}),
-    do: {:ok, %{environment_id: id, name: n, digest: d}}
+  defp normalize_or_miss(%{"environment_id" => _, "name" => _, "digest" => _} = h),
+    do: {:ok, Handle.new(h)}
 
   defp normalize_or_miss(other) do
     Logger.warning(

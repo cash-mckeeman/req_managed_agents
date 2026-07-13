@@ -9,21 +9,20 @@ defmodule ReqManagedAgents.Provisioner.Agents do
   even with an empty store.
   """
   require Logger
-  alias ReqManagedAgents.Agent.Spec
+  alias ReqManagedAgents.Agent.{Handle, Spec}
   alias ReqManagedAgents.Provisioner
   alias ReqManagedAgents.Provisioner.Store
 
   @default_store {Store.ETS, :req_managed_agents_provisions}
 
   @doc """
-  Build-if-absent for an agent. Returns `{:ok, %{agent_id:, name:, digest:}}`.
+  Build-if-absent for an agent. Returns `{:ok, %Handle{}}`.
 
   Opts: `:name` (base, default the spec's `name`), `:store` (`{module, store_opts}`),
   `:create_fun` / `:list_fun` (test seams; default to `ReqManagedAgents.Client`
   calls on the given client).
   """
-  @spec ensure_agent(term(), Spec.t() | map(), keyword()) ::
-          {:ok, %{agent_id: String.t(), name: String.t(), digest: String.t()}} | {:error, term()}
+  @spec ensure_agent(term(), Spec.t() | map(), keyword()) :: {:ok, Handle.t()} | {:error, term()}
   def ensure_agent(client, spec_or_map, opts \\ []) do
     with {:ok, spec} <- Spec.new(spec_or_map) do
       do_ensure_agent(client, spec, opts)
@@ -65,7 +64,7 @@ defmodule ReqManagedAgents.Provisioner.Agents do
     body = %{name: name, model: spec.model_config, system: spec.system_prompt, tools: spec.tools}
 
     case create_fun.(body) do
-      {:ok, %{"id" => id}} -> {:ok, %{agent_id: id, name: name, digest: digest}}
+      {:ok, %{"id" => id}} -> {:ok, Handle.new(%{agent_id: id, name: name, digest: digest})}
       {:error, {:http_error, 409, _}} -> recover(list_fun, name, digest)
       {:error, reason} -> {:error, reason}
     end
@@ -81,7 +80,7 @@ defmodule ReqManagedAgents.Provisioner.Agents do
         name_match = Enum.find(agents, &(&1["name"] == name))
 
         cond do
-          live -> {:ok, %{agent_id: live["id"], name: name, digest: digest}}
+          live -> {:ok, Handle.new(%{agent_id: live["id"], name: name, digest: digest})}
           name_match -> {:error, {:agent_archived, name}}
           true -> {:error, {:agent_name_conflict, name}}
         end
@@ -91,23 +90,19 @@ defmodule ReqManagedAgents.Provisioner.Agents do
     end
   end
 
-  # Store.File round-trips handles through JSON (string keys) — re-atomize the
-  # three known fields so callers get one shape from either store. Anything else
-  # is a miss and rebuilt: provisioning truth beats cache truth (loud-but-safe).
-  defp normalize_or_miss(%{agent_id: _, name: _, digest: _} = h), do: {:ok, h}
+  # Store.File round-trips handles through JSON (string keys) — Handle.new/1
+  # absorbs both the atom-keyed (fresh) and string-keyed (post-round-trip)
+  # shapes into one struct. Anything else is a miss and rebuilt: provisioning
+  # truth beats cache truth (loud-but-safe).
+  defp normalize_or_miss(%{agent_id: _, name: _, digest: _} = h), do: {:ok, Handle.new(h)}
 
-  defp normalize_or_miss(%{"agent_id" => id, "name" => n, "digest" => d}),
-    do: {:ok, %{agent_id: id, name: n, digest: d}}
+  defp normalize_or_miss(%{"agent_id" => _, "name" => _, "digest" => _} = h),
+    do: {:ok, Handle.new(h)}
 
   defp normalize_or_miss(other) do
     Logger.warning("agent store entry has unexpected shape, treating as miss: #{inspect(other)}")
     :miss
   end
-
-  defp atomize_handle(%{agent_id: _} = h), do: h
-
-  defp atomize_handle(%{"agent_id" => id, "name" => n, "digest" => d}),
-    do: %{agent_id: id, name: n, digest: d}
 
   @doc "Point `base:tag` at an agent digest (or a handle's digest). Movable; tagged digests survive prune."
   @spec tag_agent(String.t(), String.t(), map() | String.t(), keyword()) :: :ok
@@ -130,7 +125,7 @@ defmodule ReqManagedAgents.Provisioner.Agents do
   no provision entry (re-`ensure_agent` to heal). Split is on the FIRST colon only.
   """
   @spec resolve_agent(String.t(), keyword()) ::
-          {:ok, map()} | {:error, :unknown_tag} | {:error, {:untracked_digest, String.t()}}
+          {:ok, Handle.t()} | {:error, :unknown_tag} | {:error, {:untracked_digest, String.t()}}
   def resolve_agent(ref, opts \\ []) do
     {smod, sopts} = opts[:store] || @default_store
 
@@ -143,7 +138,7 @@ defmodule ReqManagedAgents.Provisioner.Agents do
     with {:ok, %{} = registry} <- store_get(smod, sopts, "tags:agent:" <> base),
          {:tag, digest} when is_binary(digest) <- {:tag, registry[tag]},
          {:handle, _d, {:ok, handle}} <- {:handle, digest, find_handle(smod, sopts, base, digest)} do
-      {:ok, atomize_handle(handle)}
+      {:ok, Handle.new(handle)}
     else
       {:tag, nil} -> {:error, :unknown_tag}
       {:handle, digest, :miss} -> {:error, {:untracked_digest, digest}}
@@ -226,8 +221,12 @@ defmodule ReqManagedAgents.Provisioner.Agents do
         digest = String.replace_prefix(a["name"], base <> "_", "")
         smod.delete(sopts, "digest:agent:" <> base <> ":" <> digest)
 
-        # Values may be stored JSON-normalized (Store.File) or as-written (ETS); delete both shapes.
-        smod.delete_value(sopts, %{agent_id: a["id"], name: a["name"], digest: digest})
+        # Values may be stored JSON-normalized (Store.File, string keys) or as-written
+        # (ETS, the exact %Handle{} struct); delete both shapes.
+        smod.delete_value(
+          sopts,
+          Handle.new(%{agent_id: a["id"], name: a["name"], digest: digest})
+        )
 
         smod.delete_value(sopts, %{
           "agent_id" => a["id"],

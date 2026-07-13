@@ -457,6 +457,20 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
       assert instructions == Runtimes.system_prompt_block(@runtimes)
     end
 
+    test "runtime-bearing return is a %Handle{} struct, not a bare map (regression, #69)" do
+      create_fun = fn body -> {:ok, %{"id" => "env_1", "name" => body.name}} end
+
+      assert {:ok, handle} =
+               Provisioner.ensure_environment(:c, @rt_spec,
+                 name: "d",
+                 store: fresh_store(),
+                 create_fun: create_fun
+               )
+
+      assert %ReqManagedAgents.Provisioner.Environment.Handle{bootstrap: bootstrap} = handle
+      assert %{script: _, instructions: _} = bootstrap
+    end
+
     test "store HIT still returns bootstrap (no create, no list)" do
       store = fresh_store()
       create_fun = fn body -> {:ok, %{"id" => "env_1", "name" => body.name}} end
@@ -513,12 +527,24 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
       assert_received {:put, "digest:d:" <> _, digest_value}
 
       for value <- [provision_value, digest_value] do
-        refute Map.has_key?(value, :bootstrap)
-        assert Map.keys(value) |> Enum.sort() == [:digest, :environment_id, :name]
+        assert %ReqManagedAgents.Provisioner.Environment.Handle{
+                 environment_id: _,
+                 name: _,
+                 digest: _,
+                 bootstrap: nil
+               } = value
+
+        assert value.bootstrap == nil
+
+        # The persisted shape (what Store.File would actually write) excludes
+        # bootstrap regardless — @derive {Jason.Encoder, only: [...]} keeps
+        # the JSON to exactly the three identity fields.
+        assert Jason.decode!(Jason.encode!(value)) |> Map.keys() |> Enum.sort() ==
+                 ["digest", "environment_id", "name"]
       end
     end
 
-    test "spec without runtimes yields no :bootstrap key" do
+    test "spec without runtimes yields a struct with bootstrap: nil" do
       create_fun = fn body -> {:ok, %{"id" => "env_1", "name" => body.name}} end
 
       assert {:ok, handle} =
@@ -528,7 +554,7 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
                  create_fun: create_fun
                )
 
-      refute Map.has_key?(handle, :bootstrap)
+      assert %ReqManagedAgents.Provisioner.Environment.Handle{bootstrap: nil} = handle
     end
   end
 
