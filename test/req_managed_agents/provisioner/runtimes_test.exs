@@ -2,6 +2,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
   use ExUnit.Case, async: true
 
   alias ReqManagedAgents.Provisioner
+  alias ReqManagedAgents.Provisioner.Runtime
   alias ReqManagedAgents.Provisioner.Runtimes
   alias ReqManagedAgents.Provisioner.Store
 
@@ -63,6 +64,11 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "accepts version containing a hyphen (pre-suffixed OTP build)" do
       assert :ok = Runtimes.validate([%{lang: :elixir, version: "1.20.2-otp-29", via: :mise}])
+    end
+
+    test "accepts a %Runtime{} struct entry" do
+      {:ok, runtime} = Runtime.new(%{lang: :elixir, version: "1.17.0", via: :mise})
+      assert :ok = Runtimes.validate([runtime])
     end
   end
 
@@ -190,6 +196,23 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
       path_export = ~S(export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH")
       assert length(String.split(script, path_export)) == 3
     end
+
+    test "renders byte-identical output for maps vs %Runtime{} structs" do
+      map_runtimes = [
+        %{lang: :erlang, version: "26.2.5", via: :mise},
+        %{lang: :elixir, version: "1.17.0", via: :mise},
+        %{lang: :nodejs, version: "20.0.0", via: :mise}
+      ]
+
+      struct_runtimes =
+        Enum.map(map_runtimes, fn m ->
+          {:ok, r} = Runtime.new(m)
+          r
+        end)
+
+      assert Runtimes.bootstrap_script(map_runtimes) ==
+               Runtimes.bootstrap_script(struct_runtimes)
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -226,6 +249,17 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
       assert Runtimes.system_prompt_block(@block_runtimes) ==
                Runtimes.system_prompt_block(@block_runtimes)
     end
+
+    test "accepts %Runtime{} structs and matches the map-input result" do
+      struct_runtimes =
+        Enum.map(@block_runtimes, fn m ->
+          {:ok, r} = Runtime.new(m)
+          r
+        end)
+
+      assert Runtimes.system_prompt_block(@block_runtimes) ==
+               Runtimes.system_prompt_block(struct_runtimes)
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -255,6 +289,14 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "returns empty list for empty runtimes" do
       assert [] = Runtimes.required_hosts([])
+    end
+
+    test "accepts %Runtime{} structs and matches the map-input result" do
+      map_runtimes = [%{lang: :elixir, version: "1.17.0", via: :mise}]
+      {:ok, struct_runtime} = Runtime.new(hd(map_runtimes))
+
+      assert Runtimes.required_hosts(map_runtimes) ==
+               Runtimes.required_hosts([struct_runtime])
     end
   end
 
