@@ -60,6 +60,7 @@ defmodule ReqManagedAgents.Session do
   alias ReqManagedAgents.{
     Outcome,
     Provider,
+    Session.State,
     SessionInfo,
     SessionResult,
     Tools,
@@ -185,7 +186,7 @@ defmodule ReqManagedAgents.Session do
             model_config_metadata(opts)
           )
 
-        state = %{
+        state = %State{
           provider: provider,
           delta?: exports_text_delta?(provider),
           mode: provider.mode(),
