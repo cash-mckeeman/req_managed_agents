@@ -213,16 +213,30 @@ defmodule ReqManagedAgents.Session do
           turn_guard: opts[:turn_guard],
           enforced_terminal_tool: if(opts[:require_terminal_tool], do: opts[:terminal_tool]),
           max_reprompts: opts[:max_reprompts] || 2,
-          reprompts_left: opts[:max_reprompts] || 2
+          reprompts_left: opts[:max_reprompts] || 2,
+          # A resume (session_id set) that also carries :prompt delivers it as a user.message
+          # once reconnect/3 consolidates to idle with nothing pending (see handle_info(:reconnect,
+          # …) below) — the reattach seam (#66). Gated on resumed?/1 (see pending_user_message/2):
+          # a fresh (non-resume) session must NOT arm this, or a later live reconnect (e.g. after a
+          # post-kickoff stream drop) would reach the same idle branch and redeliver the kickoff
+          # prompt as a spurious second user.message.
+          pending_user_message: pending_user_message(conn, opts)
         }
 
-        {:ok, state, {:continue, if(Map.get(conn, :resume), do: :resume, else: :maybe_kickoff)}}
+        {:ok, state, {:continue, if(resumed?(conn), do: :resume, else: :maybe_kickoff)}}
 
       # Surface the provider's error verbatim (e.g. {:create_session_failed, _}) — no extra wrapping.
       {:error, reason} ->
         {:stop, reason}
     end
   end
+
+  # A provider's open/2 answers `resume: true` in `conn` only when it consolidated an
+  # EXISTING session (session_id set) rather than creating a fresh one.
+  defp resumed?(conn), do: !!Map.get(conn, :resume)
+
+  # Only a resume arms pending_user_message — see the state-build comment above (#66).
+  defp pending_user_message(conn, opts), do: if(resumed?(conn), do: opts[:prompt])
 
   # Managed-entity handles (from ensure_agent/3, ensure_environment/3) unpack to
   # the raw ids providers' open/2 read — callers pass the handle, not the id.
@@ -302,7 +316,26 @@ defmodule ReqManagedAgents.Session do
             turn_events: []
         }
 
-        if pending == [], do: {:noreply, s}, else: redrive(s, pending)
+        cond do
+          pending != [] ->
+            redrive(s, pending)
+
+          # Idle, nothing unanswered: this is the reattach seam (#66) — a resume that also
+          # carries a new :prompt delivers it now, as a fresh user.message, via the same send
+          # path a live follow-up (:message) uses. No prompt → unchanged: park (today's
+          # behavior for a genuinely idle resume). Reset turns/accumulators exactly like a
+          # live follow-up (handle_cast({:message, …})) does — a delivered message starts a
+          # fresh request, so it must not inherit turns/usage accumulated by an earlier
+          # pending-tool-use redrive on the same resume, or max_turns can trip early.
+          s.pending_user_message ->
+            deliver_user_message(
+              reset_acc(%{s | turns: 0, pending_user_message: nil}),
+              s.pending_user_message
+            )
+
+          true ->
+            {:noreply, s}
+        end
 
       # A sync run/2 surfaces a list/reconnect failure; a live session backs off and retries.
       {:error, reason} ->
@@ -365,7 +398,7 @@ defmodule ReqManagedAgents.Session do
   # A follow-up message starts a fresh request: reset the per-request turn counter and accumulators
   # so max_turns bounds a runaway tool loop within one request, not the session's whole lifetime.
   def handle_cast({:message, text}, s),
-    do: drive(reset_acc(%{s | turns: 0}), s.provider.user_input(text))
+    do: deliver_user_message(reset_acc(%{s | turns: 0}), text)
 
   @impl true
   # Session traps exits, so this runs on every stop — including run/2's timeout
@@ -392,6 +425,12 @@ defmodule ReqManagedAgents.Session do
     }
 
   defp kickoff(s), do: drive(%{s | kicked_off: true}, s.provider.kickoff_input(s.opts))
+
+  # The one send path for a plain user-text turn: build the provider's user.message input and
+  # drive a fresh turn with it. Shared by a live follow-up (handle_cast {:message, …}) and a
+  # resume that carries a new :prompt (handle_info(:reconnect, …) — issue #66) — one send path,
+  # not two copies.
+  defp deliver_user_message(s, text), do: drive(s, s.provider.user_input(text))
 
   # ── acquire a turn (the ONLY mode-specific step) ──────────────────────────────
   defp drive(%{mode: :request_response} = s, input) do
