@@ -9,6 +9,7 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   by name is definitionally version-correct even with an empty store.
   """
   require Logger
+  alias ReqManagedAgents.Environment
   alias ReqManagedAgents.Provisioner
   alias ReqManagedAgents.Provisioner.Environment.Handle
   alias ReqManagedAgents.Provisioner.Runtimes
@@ -31,19 +32,13 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   (`{module, store_opts}`), `:create_fun` / `:list_fun` (test seams; default
   to `ReqManagedAgents.Client` calls on the given client).
   """
-  @spec ensure_environment(term(), map(), keyword()) ::
+  @spec ensure_environment(term(), Environment.Spec.t() | map(), keyword()) ::
           {:ok, Handle.t()} | {:error, term()}
   def ensure_environment(client, env_spec, opts \\ []) do
-    runtimes = env_spec[:runtimes] || []
-
-    case Runtimes.validate(runtimes) do
-      {:error, _} = error ->
-        error
-
-      :ok ->
-        with {:ok, handle} <- do_ensure_environment(client, env_spec, opts) do
-          {:ok, attach_bootstrap(handle, runtimes)}
-        end
+    with {:ok, env} <- Environment.Spec.new(env_spec) do
+      with {:ok, handle} <- do_ensure_environment(client, env, opts) do
+        {:ok, attach_bootstrap(handle, env.runtimes)}
+      end
     end
   end
 
@@ -64,12 +59,12 @@ defmodule ReqManagedAgents.Provisioner.Environments do
     }
   end
 
-  defp do_ensure_environment(client, env_spec, opts) do
+  defp do_ensure_environment(client, %Environment.Spec{} = env, opts) do
     base = opts[:name] || "env"
-    digest = env_spec |> Provisioner.hash() |> binary_part(0, 8) |> String.downcase()
+    digest = env |> Environment.Spec.digest() |> binary_part(0, 8) |> String.downcase()
     name = base <> "_" <> digest
     {smod, sopts} = opts[:store] || @default_store
-    key = "provision:env:" <> Provisioner.hash({base, env_spec})
+    key = "provision:env:" <> Provisioner.hash({base, digest})
     digest_key = "digest:" <> base <> ":" <> digest
 
     create_fun =
@@ -84,7 +79,7 @@ defmodule ReqManagedAgents.Provisioner.Environments do
       {:ok, handle}
     else
       :miss ->
-        case build(create_fun, list_fun, env_spec, name, digest) do
+        case build(create_fun, list_fun, env, name, digest) do
           {:ok, handle} ->
             store_put(smod, sopts, key, handle)
             store_put(smod, sopts, digest_key, handle)
@@ -253,8 +248,8 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   defp to_digest(%{"digest" => d}), do: d
   defp to_digest(d) when is_binary(d), do: d
 
-  defp build(create_fun, list_fun, env_spec, name, digest) do
-    body = %{name: name, config: wire_config(env_spec)}
+  defp build(create_fun, list_fun, %Environment.Spec{} = env, name, digest) do
+    body = %{name: name, config: wire_config(env)}
 
     case create_fun.(body) do
       {:ok, %{"id" => id}} ->
@@ -281,31 +276,28 @@ defmodule ReqManagedAgents.Provisioner.Environments do
     end
   end
 
-  # The env spec is opaque beyond hashing; the wire `config` is the spec with
-  # two transformations applied: `runtimes` is STRIPPED (library vocabulary —
-  # realized client-side via the bootstrap, already covered by the digest;
-  # providers must not receive keys they can't know), and when runtimes are
-  # declared with `:limited`/`"limited"` networking, required runtime hosts
-  # are merged into `networking.allowed_hosts` (deduped, order preserved).
-  defp wire_config(env_spec) do
-    runtimes = env_spec[:runtimes] || []
-    networking = env_spec[:networking]
+  # `config` is provider-verbatim and opaque beyond hashing — `runtimes` lives
+  # on the struct, never inside `config`, so it can never leak to the wire
+  # (library vocabulary — realized client-side via the bootstrap, already
+  # covered by the digest; providers must not receive keys they can't know).
+  # When runtimes are declared with `:limited`/`"limited"` networking, required
+  # runtime hosts are merged into `config.networking.allowed_hosts` (deduped,
+  # order preserved).
+  defp wire_config(%Environment.Spec{runtimes: runtimes, config: config}) do
+    networking = config[:networking]
 
-    merged =
-      if runtimes != [] and limited_networking?(networking) do
-        merge_runtime_hosts(env_spec, runtimes, networking)
-      else
-        env_spec
-      end
-
-    Map.delete(merged, :runtimes)
+    if runtimes != [] and limited_networking?(networking) do
+      merge_runtime_hosts(config, runtimes, networking)
+    else
+      config
+    end
   end
 
   defp limited_networking?(%{type: type}) when type in [:limited, "limited"], do: true
   defp limited_networking?(%{"type" => type}) when type in [:limited, "limited"], do: true
   defp limited_networking?(_), do: false
 
-  defp merge_runtime_hosts(env_spec, runtimes, networking) do
+  defp merge_runtime_hosts(config, runtimes, networking) do
     required = Runtimes.required_hosts(runtimes)
 
     existing =
@@ -315,7 +307,7 @@ defmodule ReqManagedAgents.Provisioner.Environments do
 
     # Write back under the key form the networking map already uses.
     hosts_key = if Map.has_key?(networking, "type"), do: "allowed_hosts", else: :allowed_hosts
-    Map.put(env_spec, :networking, Map.put(networking, hosts_key, merged))
+    Map.put(config, :networking, Map.put(networking, hosts_key, merged))
   end
 
   # Store.File round-trips handles through JSON (string keys) — Handle.new/1

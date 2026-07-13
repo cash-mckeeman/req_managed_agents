@@ -348,7 +348,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
       store = fresh_store()
       create_fun = fn body -> {:ok, %{"id" => body.name, "name" => body.name}} end
 
-      spec_without = %{type: :cloud, networking: %{type: :unrestricted}}
+      spec_without = %{config: %{type: :cloud, networking: %{type: :unrestricted}}}
       spec_with = Map.put(spec_without, :runtimes, @runtimes)
 
       {:ok, %{name: name_without}} =
@@ -370,9 +370,12 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "validation error returns before any store/create call" do
       invalid = [%{lang: :elixir, version: "1.17.0", via: :nix}]
-      spec = %{type: :cloud, runtimes: invalid}
+      spec = %{runtimes: invalid, config: %{type: :cloud}}
 
-      assert {:error, {:invalid_runtime, _}} =
+      # v0.9.0 (#72): Environment.Spec.new/1 is the single validation gate now
+      # (Runtimes.validate/1 is no longer called separately), so an invalid
+      # runtime surfaces the spec-level error, not the old {:invalid_runtime, _}.
+      assert {:error, :invalid_environment_spec} =
                Provisioner.ensure_environment(:c, spec,
                  name: "env",
                  store: {SpyStore, self()},
@@ -384,7 +387,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
     end
 
     test "unrestricted networking: create body unchanged (no allowed_hosts injected)" do
-      spec = %{type: :cloud, runtimes: @runtimes, networking: %{type: :unrestricted}}
+      spec = %{runtimes: @runtimes, config: %{type: :cloud, networking: %{type: :unrestricted}}}
 
       {:ok, _} =
         Provisioner.ensure_environment(:c, spec,
@@ -399,9 +402,8 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "limited networking: runtimes' required hosts merged into allowed_hosts" do
       spec = %{
-        type: :cloud,
         runtimes: @runtimes,
-        networking: %{type: :limited, allowed_hosts: ["example.com"]}
+        config: %{type: :cloud, networking: %{type: :limited, allowed_hosts: ["example.com"]}}
       }
 
       {:ok, _} =
@@ -424,9 +426,11 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
       [one_host | _] = runtime_hosts
 
       spec = %{
-        type: :cloud,
         runtimes: @runtimes,
-        networking: %{type: :limited, allowed_hosts: [one_host, "example.com"]}
+        config: %{
+          type: :cloud,
+          networking: %{type: :limited, allowed_hosts: [one_host, "example.com"]}
+        }
       }
 
       {:ok, _} =
@@ -443,9 +447,8 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "limited networking as string type: hosts merged" do
       spec = %{
-        type: :cloud,
         runtimes: @runtimes,
-        networking: %{type: "limited", allowed_hosts: []}
+        config: %{type: :cloud, networking: %{type: "limited", allowed_hosts: []}}
       }
 
       {:ok, _} =
@@ -462,7 +465,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
     end
 
     test "absent networking key: create body unchanged (no networking key added)" do
-      spec = %{type: :cloud, runtimes: @runtimes}
+      spec = %{runtimes: @runtimes, config: %{type: :cloud}}
 
       {:ok, _} =
         Provisioner.ensure_environment(:c, spec,
@@ -477,9 +480,11 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "string-keyed limited networking map: hosts merged under the string key" do
       spec = %{
-        type: :cloud,
         runtimes: @runtimes,
-        networking: %{"type" => "limited", "allowed_hosts" => ["example.com"]}
+        config: %{
+          type: :cloud,
+          networking: %{"type" => "limited", "allowed_hosts" => ["example.com"]}
+        }
       }
 
       {:ok, _} =
@@ -501,7 +506,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "string-keyed unrestricted networking map: create body unchanged" do
       networking = %{"type" => "unrestricted"}
-      spec = %{type: :cloud, runtimes: @runtimes, networking: networking}
+      spec = %{runtimes: @runtimes, config: %{type: :cloud, networking: networking}}
 
       {:ok, _} =
         Provisioner.ensure_environment(:c, spec,
