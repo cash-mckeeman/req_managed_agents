@@ -13,14 +13,17 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.Agent.Spec
-  alias ReqManagedAgents.{Client, Event, Outcome, Stream, ToolUse, TurnResult, Usage}
+  alias ReqManagedAgents.{Client, Environment, Event, Outcome, Stream, ToolUse, TurnResult, Usage}
+
+  @default_env_config %{type: "cloud", networking: %{type: "unrestricted"}}
 
   @impl true
   def mode, do: :streaming
 
   @impl true
   def provision(spec, opts) do
-    with {:ok, spec} <- Spec.new(spec) do
+    with {:ok, spec} <- Spec.new(spec),
+         {:ok, env} <- Environment.Spec.new(opts[:environment]) do
       client = client_from(opts)
       name = opts[:name] || "agent_" <> agent_digest(spec)
 
@@ -31,9 +34,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
         tools: spec.tools
       }
 
-      env_body =
-        opts[:environment] ||
-          %{name: "#{name}_env", config: %{type: "cloud", networking: %{type: "unrestricted"}}}
+      env_body = env_body(env, name)
 
       with {:ok, %{"id" => agent_id}} <- Client.create_agent(client, agent_body) do
         case Client.create_environment(client, env_body) do
@@ -68,6 +69,17 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   defp archive_tag({:ok, _}), do: :ok
   defp archive_tag({:error, reason}), do: {:error, reason}
+
+  # Build the create_environment body from the coerced `Environment.Spec`. A nil environment
+  # (or an empty `config`) preserves the historical default body byte-for-byte, so env-less
+  # provisions are unchanged; a populated `Environment.Spec` drives name + config from it.
+  defp env_body(nil, name), do: %{name: "#{name}_env", config: @default_env_config}
+
+  defp env_body(%Environment.Spec{} = env, name),
+    do: %{name: env.name || "#{name}_env", config: env_config(env.config)}
+
+  defp env_config(config) when config == %{}, do: @default_env_config
+  defp env_config(config), do: config
 
   @doc "The CMA endpoint requires bare model ids; strip a leading `provider:` qualifier."
   @spec normalize_model_id(String.t()) :: String.t()

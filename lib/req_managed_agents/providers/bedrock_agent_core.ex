@@ -5,15 +5,19 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   `toolResult` delta (the harness does not persist the uncommitted tool-use turn). Composes
   the existing `AgentCore.{Client, Converse}` modules. Decoded events are additionally
   delivered live to the session as `{:provider_event, ev}` messages while a turn streams.
-  `provision/2`'s `opts` may carry opaque `environment`/`environment_variables` maps that
-  pass through to CreateHarness verbatim (filesystem mounts, custom containers, env vars —
-  never interpreted by this library). They live in `opts`, not the spec: `Agent.Spec.new/1`
-  (the boundary coercion, #70) drops any key that isn't part of `Agent.Spec`.
+  `provision/2`'s `opts[:environment]` carries an `Environment.Spec` (or a map coerced via
+  `Environment.Spec.new/1`, or `nil`). Its opaque `config` supplies the `environment`/
+  `environment_variables` maps that pass through to CreateHarness verbatim (filesystem
+  mounts, custom containers, env vars — never interpreted by this library). Environment is
+  first-class (#70/#72): it reaches this provider only via `opts[:environment]`, never the
+  spec, and its digest is folded into the harness name so different environments never
+  collide on a name.
   """
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.AgentCore.{Client, Converse}
+  alias ReqManagedAgents.Environment
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
   alias ReqManagedAgents.{ToolUse, TurnResult, Usage}
 
@@ -32,6 +36,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     end
   end
 
+  # Note: `build_spec/2` coerces `opts[:environment]` via `Environment.Spec.new/1` — a
+  # single coercion point per provision that both threads env into the harness name and
+  # sources the CreateHarness `environment`/`environment_variables` payload from it.
+
   @doc """
   Assembles the AgentCore harness-creation spec from an `Agent.Spec`-shaped
   `spec` map and provisioning `opts`. Validates `opts[:execution_role_arn]`
@@ -42,19 +50,26 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   """
   @spec build_spec(map(), keyword()) :: {:ok, HarnessSpec.t()} | {:error, term()}
   def build_spec(spec, opts) do
-    with {:ok, role} <- validate_role_arn(opts[:execution_role_arn]) do
+    with {:ok, role} <- validate_role_arn(opts[:execution_role_arn]),
+         {:ok, env} <- Environment.Spec.new(opts[:environment]) do
       {:ok,
        %HarnessSpec{
-         name: harness_name(spec, opts[:name_prefix]),
+         name: harness_name(spec, opts[:name_prefix], env),
          execution_role_arn: role,
          system_prompt: spec.system_prompt,
          model: spec.model_config,
          tools: spec.tools,
-         environment: opts[:environment],
-         environment_variables: opts[:environment_variables]
+         environment: env_field(env, :environment),
+         environment_variables: env_field(env, :environment_variables)
        }}
     end
   end
+
+  # The opaque, provider-verbatim CreateHarness payload lives under the environment's
+  # `config`: `:environment` / `:environment_variables` map straight onto the two HarnessSpec
+  # fields (byte-identical wire body to the pre-#72 opts-carried values). No environment → both nil.
+  defp env_field(nil, _key), do: nil
+  defp env_field(%Environment.Spec{config: config}, key), do: Map.get(config, key)
 
   defp validate_role_arn(arn) when is_binary(arn) do
     case String.trim(arn) do
@@ -112,42 +127,36 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   end
 
   @doc false
-  def harness_name(spec, prefix) do
-    [prefix, "harness_#{agent_digest(spec)}"] |> Enum.reject(&is_nil/1) |> Enum.join("_")
+  def harness_name(spec, prefix, env \\ nil) do
+    [prefix, "harness_#{agent_digest(spec, env)}"] |> Enum.reject(&is_nil/1) |> Enum.join("_")
   end
 
-  # Same content-address as `Agent.Spec.digest/1` (env-agent naming, Claude Managed Agents'
-  # `spec_digest`) for the identity fields it covers (system_prompt/tools/terminal_tool/
-  # model_config) — this is byte-identical to the pre-0.7.0 digest for specs with no env
-  # fields, so those harnesses keep their names across the upgrade.
+  # The harness content-address is a two-layer fold (#70/#72):
   #
-  # A raw spec map handed directly to `harness_name/2`/`build_spec/2` may additionally
-  # carry opaque `environment`/`environment_variables` keys that pass through to
-  # CreateHarness verbatim (filesystem mounts, custom containers, env vars). `Agent.Spec`
-  # is provider-agnostic and has no field for these, so when they're present we fall back
-  # to the ORIGINAL pre-0.7.0 computation — a full-spec hash — rather than folding them
-  # onto `Agent.Spec.digest/1`. That keeps env-bearing harnesses' names byte-identical to
-  # what shipped in 0.6.x (no re-provision on upgrade), while distinct environment
-  # payloads still produce distinct names (they differ in the hashed spec map).
+  #   * No environment → `Agent.Spec.digest/1` over the identity fields it covers
+  #     (system_prompt/tools/terminal_tool/model_config). This is byte-identical to the
+  #     pre-0.7.0 env-less digest, so env-less harnesses keep their names across the upgrade.
+  #   * An `Environment.Spec` → the same agent digest folded with `Environment.Spec.digest/1`.
+  #     Two provisions of the same `Agent.Spec` into different environments now produce
+  #     different harness names (the collision fix); env-bearing harnesses re-provision once
+  #     on upgrade (documented migration).
   #
-  # NOTE (#70): `provision/2` now coerces its `spec` via `Agent.Spec.new/1` before calling
-  # `build_spec/2`, and `environment`/`environment_variables` now reach Bedrock via `opts`
-  # (see moduledoc), never via `spec`. So through the standard `provision/2` path this
-  # function always sees `{nil, nil}` and takes the identity-only branch, regardless of
-  # `opts[:environment]` — this fallback branch is reachable only when a caller invokes
-  # `harness_name/2`/`build_spec/2` directly with an env-embedded map, bypassing `provision/2`.
-  defp agent_digest(spec) do
-    case {Map.get(spec, :environment), Map.get(spec, :environment_variables)} do
-      {nil, nil} ->
-        {:ok, s} = Spec.new(Map.put_new(spec, :name, "harness"))
-        Spec.digest(s)
+  # Environment reaches this function only via `env` — never off the spec (`Agent.Spec` has
+  # no environment field), so there is no spec-embedded fallback branch to worry about.
+  defp agent_digest(spec, nil), do: Spec.digest(coerce_spec(spec))
 
-      _ ->
-        :sha256
-        |> :crypto.hash(:erlang.term_to_binary(spec, [:deterministic]))
-        |> Base.encode16(case: :lower)
-        |> binary_part(0, 8)
-    end
+  defp agent_digest(spec, %Environment.Spec{} = env) do
+    {Spec.digest(coerce_spec(spec)), Environment.Spec.digest(env)}
+    |> ReqManagedAgents.Provisioner.hash()
+    |> binary_part(0, 8)
+    |> String.downcase()
+  end
+
+  defp coerce_spec(%Spec{} = spec), do: spec
+
+  defp coerce_spec(spec) do
+    {:ok, s} = Spec.new(Map.put_new(spec, :name, "harness"))
+    s
   end
 
   defp recover_existing(create_fun, harness_spec, list_fun, get_fun, name, poll_ms, max_polls) do

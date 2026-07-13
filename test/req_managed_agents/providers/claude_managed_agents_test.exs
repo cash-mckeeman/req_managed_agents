@@ -75,6 +75,38 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
              ManagedAgents.provision(%{system_prompt: "no name here"}, [])
   end
 
+  test "provision/2 sources the create_environment body from opts[:environment] (Environment.Spec) (#72)" do
+    # Environment is first-class: opts[:environment] is an Environment.Spec (or a coercible
+    # map). Its :name and :config drive the create_environment wire body.
+    client = claude_client(__MODULE__.EnvBody)
+
+    Req.Test.stub(__MODULE__.EnvBody, fn conn ->
+      case conn.request_path do
+        "/v1/agents" ->
+          Req.Test.json(conn, %{"id" => "agent_1"})
+
+        "/v1/environments" ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          decoded = Jason.decode!(body)
+          assert decoded["name"] == "custom_env"
+          assert decoded["config"] == %{"type" => "restricted"}
+          Req.Test.json(conn, %{"id" => "env_1"})
+      end
+    end)
+
+    environment = %{name: "custom_env", config: %{type: "restricted"}}
+
+    assert {:ok, %{agent_id: "agent_1", environment_id: "env_1"}} =
+             ManagedAgents.provision(@spec_claude_named, client: client, environment: environment)
+  end
+
+  test "provision/2 surfaces {:error, :invalid_environment_spec} for a bad environment (#72)" do
+    assert {:error, :invalid_environment_spec} =
+             ManagedAgents.provision(@spec_claude_named,
+               environment: %{runtimes: [%{lang: :python}]}
+             )
+  end
+
   test "teardown/2 archives the agent and the environment" do
     client = claude_client(__MODULE__.Teardown)
     {:ok, paths} = Agent.start_link(fn -> [] end)

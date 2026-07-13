@@ -1,6 +1,7 @@
 defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.Agent.Spec
+  alias ReqManagedAgents.Environment.Spec, as: EnvSpec
   alias ReqManagedAgents.Providers.BedrockAgentCore, as: P
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
   alias ReqManagedAgents.{ToolUse, TurnResult}
@@ -589,74 +590,43 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     assert P.harness_name(spec, nil) == "harness_#{new_digest}"
   end
 
-  test "harness_name/2 stays sensitive to environment/environment_variables even though Agent.Spec.digest/1 ignores them" do
-    # Agent.Spec has no field for Bedrock's opaque environment/environment_variables
-    # passthrough (see moduledoc) — routing the whole digest through Agent.Spec.digest/1
-    # would make differently-mounted specs collide on the same harness name. Confirm the
-    # unification did NOT introduce that collision: the digest still differs whenever
-    # environment/environment_variables differ, even though the Agent.Spec-covered content
-    # (system_prompt/tools/terminal_tool/model_config) is identical.
+  test "harness_name/3 env-arg is nil-default and byte-identical to the 2-arg env-less name" do
+    # The env-less path (no environment, or env == nil) MUST stay byte-identical to the
+    # pre-#72 name so already-provisioned env-less harnesses keep their names on upgrade.
     base = %{system_prompt: "x", tools: [], model_config: %{"m" => 1}}
-    with_env = Map.merge(base, %{environment: %{"a" => 1}, environment_variables: %{"A" => "1"}})
-
-    {:ok, agent_spec} = Spec.new(Map.put(base, :name, "harness"))
-    bare_digest = Spec.digest(agent_spec)
-
-    refute P.harness_name(base, "t") == P.harness_name(with_env, "t")
-    refute P.harness_name(with_env, "t") == "t_harness_#{bare_digest}"
+    assert P.harness_name(base, "t") == P.harness_name(base, "t", nil)
   end
 
-  test "harness_name/2 for an env-bearing spec is byte-identical to the pre-0.7.0 full-spec digest (no re-provision on upgrade)" do
-    # Agent.Spec has no field for environment/environment_variables, so env-bearing specs
-    # can't route through Agent.Spec.digest/1 without changing the digest (and thus the
-    # harness name) for anyone already running an env-mounted harness. Instead they fall
-    # back to the ORIGINAL pre-0.7.0 computation: a full-spec :erlang.term_to_binary hash.
-    # This proves that fallback, byte-for-byte, against a spec that predates the unification.
-    env_spec = %{
-      system_prompt: "x",
-      tools: [%{"name" => "t"}],
-      terminal_tool: nil,
-      model_config: %{"m" => 1},
-      environment: %{"agentCoreRuntimeEnvironment" => %{"filesystemConfigurations" => []}},
-      environment_variables: %{"A" => "1"}
-    }
-
-    pre_070_digest =
-      env_spec
-      |> :erlang.term_to_binary([:deterministic])
-      |> then(&:crypto.hash(:sha256, &1))
-      |> Base.encode16(case: :lower)
-      |> binary_part(0, 8)
-
-    assert P.harness_name(env_spec, nil) == "harness_#{pre_070_digest}"
-  end
-
-  test "harness_name/2 stays sensitive to environment/environment_variables regardless of where they're sourced from" do
-    # This exercises harness_name/2 directly (not through provision/2) against raw,
-    # env-bearing maps — the pre-0.7.0 fallback digest it computes is agnostic to
-    # whether a caller assembles that map from a spec, from opts, or by hand.
+  test "harness_name/3 folds the Environment.Spec digest in — different environments → different names (#70/#72)" do
+    # Layer A of the collision fix: the SAME Agent.Spec content provisioned into DIFFERENT
+    # environments must produce DIFFERENT harness names, so they don't clobber each other in
+    # the Bedrock control plane. Environment now reaches naming only via the env arg — never
+    # off the spec (Agent.Spec has no environment field).
     base = %{system_prompt: "x", tools: [], model_config: %{"m" => 1}}
+    {:ok, env_a} = EnvSpec.new(%{config: %{environment: %{"a" => 1}}})
+    {:ok, env_b} = EnvSpec.new(%{config: %{environment: %{"b" => 2}}})
 
-    with_env =
-      Map.merge(base, %{
-        environment: %{
-          "agentCoreRuntimeEnvironment" => %{
-            "filesystemConfigurations" => [%{"sessionStorage" => %{"mountPath" => "/mnt/data"}}]
-          }
-        },
-        environment_variables: %{"A" => "1"}
-      })
+    envless = P.harness_name(base, "t")
 
-    # Differently-mounted specs must provision under different deterministic names —
-    # otherwise they'd collide in the Provisioner cache.
-    refute P.harness_name(base, "t") == P.harness_name(with_env, "t")
+    # An env-bearing name differs from the env-less one...
+    refute P.harness_name(base, "t", env_a) == envless
+    # ...and two distinct environments differ from each other.
+    refute P.harness_name(base, "t", env_a) == P.harness_name(base, "t", env_b)
   end
 
-  test "provision/2 threads opts[:environment]/opts[:environment_variables] into the harness spec (#70)" do
-    # CRITICAL relocation (#70): environment/environment_variables now reach Bedrock via
-    # opts, not the spec map — Agent.Spec.new/1 coercion drops any non-Spec key, so a
-    # spec-embedded environment would silently vanish (Map.get(%Spec{}, :environment) is
-    # always nil). This is the opts-sourced replacement for the old spec-carried test.
+  test "harness_name/3 ignores the environment name (name excluded from the digest)" do
+    base = %{system_prompt: "x", tools: [], model_config: %{"m" => 1}}
+    {:ok, env1} = EnvSpec.new(%{name: "one", config: %{environment: %{"a" => 1}}})
+    {:ok, env2} = EnvSpec.new(%{name: "two", config: %{environment: %{"a" => 1}}})
+
+    assert P.harness_name(base, "t", env1) == P.harness_name(base, "t", env2)
+  end
+
+  test "provision/2 sources the harness spec's environment/environment_variables from opts[:environment] (Environment.Spec) (#70/#72)" do
+    # Environment reaches Bedrock as an Environment.Spec at opts[:environment]; its opaque
+    # `config` supplies the two verbatim CreateHarness fields. Agent.Spec.new/1 coercion
+    # drops any non-Spec key, so a spec-embedded environment would silently vanish — this
+    # confirms the opts-sourced, typed replacement wires them onto the HarnessSpec unchanged.
     spec = %{
       name: "env-harness",
       system_prompt: "x",
@@ -670,6 +640,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
         "filesystemConfigurations" => [%{"sessionStorage" => %{"mountPath" => "/mnt/data"}}]
       }
     }
+
+    environment = %{config: %{environment: env, environment_variables: %{"A" => "1"}}}
 
     test_pid = self()
 
@@ -690,13 +662,13 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     assert {:ok, _} =
              P.provision(spec,
                execution_role_arn: "arn:aws:iam::1:role/r",
-               environment: env,
-               environment_variables: %{"A" => "1"},
+               environment: environment,
                create_fun: create_fun,
                get_fun: get_fun
              )
 
     assert_received {:harness_spec, hs}
+    # Byte-identical wire values to the pre-#72 opts-carried payload.
     assert hs.environment == env
     assert hs.environment_variables == %{"A" => "1"}
   end
