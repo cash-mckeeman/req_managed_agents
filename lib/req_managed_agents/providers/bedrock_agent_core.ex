@@ -13,6 +13,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.AgentCore.{Client, Converse}
+  alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
   alias ReqManagedAgents.{ToolUse, TurnResult, Usage}
 
   @impl true
@@ -38,11 +39,11 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   present-but-blank value) and surface as a cryptic AWS `HTTP 400 "Value null
   at 'executionRoleArn'"` (GitHub #64).
   """
-  @spec build_spec(map(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec build_spec(map(), keyword()) :: {:ok, HarnessSpec.t()} | {:error, term()}
   def build_spec(spec, opts) do
     with {:ok, role} <- validate_role_arn(opts[:execution_role_arn]) do
       {:ok,
-       %{
+       %HarnessSpec{
          name: harness_name(spec, opts[:name_prefix]),
          execution_role_arn: role,
          system_prompt: spec.system_prompt,

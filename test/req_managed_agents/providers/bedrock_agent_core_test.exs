@@ -2,6 +2,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.Providers.BedrockAgentCore, as: P
+  alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
   alias ReqManagedAgents.{ToolUse, TurnResult}
 
   defp start_block(idx, id, name),
@@ -241,6 +242,24 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     test "a well-formed arn passes validation and is preserved in the spec" do
       assert {:ok, %{execution_role_arn: "arn:aws:iam::123:role/R"}} =
                P.build_spec(@spec_bedrock, execution_role_arn: "arn:aws:iam::123:role/R")
+    end
+
+    test "build_spec/2 returns a %HarnessSpec{} with validated fields" do
+      spec = %Spec{name: "h", system_prompt: "hi", model_config: "claude-sonnet-4-6"}
+
+      assert {:ok,
+              %HarnessSpec{
+                execution_role_arn: "arn:aws:iam::000000000000:role/R",
+                model: "claude-sonnet-4-6"
+              }} =
+               P.build_spec(spec, execution_role_arn: "arn:aws:iam::000000000000:role/R")
+    end
+
+    test "blank execution_role_arn is still rejected" do
+      spec = %Spec{name: "h", system_prompt: "hi"}
+
+      assert {:error, {:invalid_opts, :execution_role_arn}} =
+               P.build_spec(spec, execution_role_arn: "  ")
     end
   end
 
