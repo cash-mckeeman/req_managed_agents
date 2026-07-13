@@ -20,33 +20,35 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def provision(spec, opts) do
-    client = client_from(opts)
-    name = opts[:name] || "agent_" <> agent_digest(spec)
+    with {:ok, spec} <- Spec.new(spec) do
+      client = client_from(opts)
+      name = opts[:name] || "agent_" <> agent_digest(spec)
 
-    agent_body = %{
-      name: name,
-      model: normalize_model_id(spec.model_config),
-      system: spec.system_prompt,
-      tools: spec.tools
-    }
+      agent_body = %{
+        name: name,
+        model: normalize_model_id(spec.model_config),
+        system: spec.system_prompt,
+        tools: spec.tools
+      }
 
-    env_body =
-      opts[:environment] ||
-        %{name: "#{name}_env", config: %{type: "cloud", networking: %{type: "unrestricted"}}}
+      env_body =
+        opts[:environment] ||
+          %{name: "#{name}_env", config: %{type: "cloud", networking: %{type: "unrestricted"}}}
 
-    with {:ok, %{"id" => agent_id}} <- Client.create_agent(client, agent_body) do
-      case Client.create_environment(client, env_body) do
-        {:ok, %{"id" => env_id}} ->
-          {:ok, %{agent_id: agent_id, environment_id: env_id}}
+      with {:ok, %{"id" => agent_id}} <- Client.create_agent(client, agent_body) do
+        case Client.create_environment(client, env_body) do
+          {:ok, %{"id" => env_id}} ->
+            {:ok, %{agent_id: agent_id, environment_id: env_id}}
 
-        {:error, reason} ->
-          # Roll back the orphaned agent so nothing leaks and a retry isn't blocked.
-          _ = Client.archive_agent(client, agent_id)
-          {:error, reason}
+          {:error, reason} ->
+            # Roll back the orphaned agent so nothing leaks and a retry isn't blocked.
+            _ = Client.archive_agent(client, agent_id)
+            {:error, reason}
 
-        other ->
-          _ = Client.archive_agent(client, agent_id)
-          {:error, {:unexpected_create_environment_response, other}}
+          other ->
+            _ = Client.archive_agent(client, agent_id)
+            {:error, {:unexpected_create_environment_response, other}}
+        end
       end
     end
   end

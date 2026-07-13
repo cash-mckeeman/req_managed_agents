@@ -21,13 +21,13 @@ defmodule ReqManagedAgents.Provider do
 
   @type terminal :: :end_turn | :requires_action | :terminated
 
-  @typedoc "A provider-agnostic agent definition — the input to provisioning and the cache key."
-  @type spec :: %{
-          system_prompt: String.t(),
-          tools: [map()],
-          terminal_tool: String.t() | nil,
-          model_config: term()
-        }
+  @typedoc """
+  A provider-agnostic agent definition — the input to provisioning and the cache key.
+  `provision/2` coerces its input via `ReqManagedAgents.Agent.Spec.new/1` at the boundary,
+  so any Spec-shaped map is accepted; the callback itself is typed against the validated
+  struct (#70, generalizes #68).
+  """
+  @type spec :: ReqManagedAgents.Agent.Spec.t()
 
   @typedoc "Provider-private handle to a provisioned, reusable server-side resource."
   @type handle :: term()

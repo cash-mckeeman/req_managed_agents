@@ -213,7 +213,11 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
 
   # ── provision / teardown ──────────────────────────────────────────────────────
 
+  # `provision/2` now requires a Spec-shaped map WITH `:name` (Agent.Spec.new/1 coerces
+  # the boundary — see #70); `:name` is excluded from Agent.Spec.digest/1's hashed
+  # content, so its presence here doesn't affect any digest byte-identity assertion.
   @spec_bedrock %{
+    name: "harness",
     system_prompt: "be helpful",
     tools: [%{"name" => "t"}],
     terminal_tool: nil,
@@ -274,6 +278,31 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
 
     assert {:ok, %{harness_arn: "arn:harness/x", harness_id: "h1"}} =
              P.provision(@spec_bedrock, prov_opts(create))
+  end
+
+  test "provision/2 coerces a bare Agent.Spec-shaped map at the boundary (#70)" do
+    create = fn harness_spec ->
+      assert harness_spec.system_prompt == "coerce me"
+      {:ok, %{"harness" => %{"arn" => "arn:harness/x", "harnessId" => "h1"}}}
+    end
+
+    spec = %{
+      name: "coerced-harness",
+      system_prompt: "coerce me",
+      tools: [],
+      terminal_tool: nil,
+      model_config: %{"bedrockModelConfig" => %{"modelId" => "m"}}
+    }
+
+    assert {:ok, %{harness_arn: "arn:harness/x", harness_id: "h1"}} =
+             P.provision(spec, prov_opts(create))
+  end
+
+  test "provision/2 rejects an invalid spec (missing :name) with {:error, :invalid_agent_spec} (#70)" do
+    assert {:error, :invalid_agent_spec} =
+             P.provision(%{system_prompt: "no name here"},
+               execution_role_arn: "arn:aws:iam::1:role/R"
+             )
   end
 
   test "provision/2 recovers an existing harness when CreateHarness 409s" do
@@ -602,7 +631,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     assert P.harness_name(env_spec, nil) == "harness_#{pre_070_digest}"
   end
 
-  test "provision threads environment fields into the harness spec, and the spec-hash covers them" do
+  test "harness_name/2 stays sensitive to environment/environment_variables regardless of where they're sourced from" do
+    # This exercises harness_name/2 directly (not through provision/2) against raw,
+    # env-bearing maps — the pre-0.7.0 fallback digest it computes is agnostic to
+    # whether a caller assembles that map from a spec, from opts, or by hand.
     base = %{system_prompt: "x", tools: [], model_config: %{"m" => 1}}
 
     with_env =
@@ -618,6 +650,26 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     # Differently-mounted specs must provision under different deterministic names —
     # otherwise they'd collide in the Provisioner cache.
     refute P.harness_name(base, "t") == P.harness_name(with_env, "t")
+  end
+
+  test "provision/2 threads opts[:environment]/opts[:environment_variables] into the harness spec (#70)" do
+    # CRITICAL relocation (#70): environment/environment_variables now reach Bedrock via
+    # opts, not the spec map — Agent.Spec.new/1 coercion drops any non-Spec key, so a
+    # spec-embedded environment would silently vanish (Map.get(%Spec{}, :environment) is
+    # always nil). This is the opts-sourced replacement for the old spec-carried test.
+    spec = %{
+      name: "env-harness",
+      system_prompt: "x",
+      tools: [],
+      terminal_tool: nil,
+      model_config: %{"m" => 1}
+    }
+
+    env = %{
+      "agentCoreRuntimeEnvironment" => %{
+        "filesystemConfigurations" => [%{"sessionStorage" => %{"mountPath" => "/mnt/data"}}]
+      }
+    }
 
     test_pid = self()
 
@@ -636,14 +688,16 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     get_fun = fn _ -> {:ok, %{"harness" => %{"status" => "READY"}}} end
 
     assert {:ok, _} =
-             P.provision(with_env,
+             P.provision(spec,
                execution_role_arn: "arn:aws:iam::1:role/r",
+               environment: env,
+               environment_variables: %{"A" => "1"},
                create_fun: create_fun,
                get_fun: get_fun
              )
 
     assert_received {:harness_spec, hs}
-    assert hs.environment == with_env.environment
+    assert hs.environment == env
     assert hs.environment_variables == %{"A" => "1"}
   end
 end

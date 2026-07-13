@@ -5,9 +5,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   `toolResult` delta (the harness does not persist the uncommitted tool-use turn). Composes
   the existing `AgentCore.{Client, Converse}` modules. Decoded events are additionally
   delivered live to the session as `{:provider_event, ev}` messages while a turn streams.
-  The provision spec may carry opaque `environment`/`environment_variables` maps that pass
-  through to CreateHarness verbatim (filesystem mounts, custom containers, env vars — never
-  interpreted by this library).
+  `provision/2`'s `opts` may carry opaque `environment`/`environment_variables` maps that
+  pass through to CreateHarness verbatim (filesystem mounts, custom containers, env vars —
+  never interpreted by this library). They live in `opts`, not the spec: `Agent.Spec.new/1`
+  (the boundary coercion, #70) drops any key that isn't part of `Agent.Spec`.
   """
   @behaviour ReqManagedAgents.Provider
 
@@ -25,9 +26,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   @impl true
   def provision(spec, opts) do
-    case build_spec(spec, opts) do
-      {:ok, harness_spec} -> do_provision(harness_spec, opts)
-      {:error, reason} -> {:error, reason}
+    with {:ok, spec} <- Spec.new(spec),
+         {:ok, harness_spec} <- build_spec(spec, opts) do
+      do_provision(harness_spec, opts)
     end
   end
 
@@ -49,8 +50,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
          system_prompt: spec.system_prompt,
          model: spec.model_config,
          tools: spec.tools,
-         environment: Map.get(spec, :environment),
-         environment_variables: Map.get(spec, :environment_variables)
+         environment: opts[:environment],
+         environment_variables: opts[:environment_variables]
        }}
     end
   end
@@ -120,13 +121,21 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   # model_config) — this is byte-identical to the pre-0.7.0 digest for specs with no env
   # fields, so those harnesses keep their names across the upgrade.
   #
-  # A Bedrock spec may additionally carry opaque `environment`/`environment_variables` maps
-  # (see moduledoc) that pass through to CreateHarness verbatim (filesystem mounts, custom
-  # containers, env vars). `Agent.Spec` is provider-agnostic and has no field for these, so
-  # when they're present we fall back to the ORIGINAL pre-0.7.0 computation — a full-spec hash
-  # — rather than folding them onto `Agent.Spec.digest/1`. That keeps env-bearing harnesses'
-  # names byte-identical to what shipped in 0.6.x (no re-provision on upgrade), while distinct
-  # environment payloads still produce distinct names (they differ in the hashed spec map).
+  # A raw spec map handed directly to `harness_name/2`/`build_spec/2` may additionally
+  # carry opaque `environment`/`environment_variables` keys that pass through to
+  # CreateHarness verbatim (filesystem mounts, custom containers, env vars). `Agent.Spec`
+  # is provider-agnostic and has no field for these, so when they're present we fall back
+  # to the ORIGINAL pre-0.7.0 computation — a full-spec hash — rather than folding them
+  # onto `Agent.Spec.digest/1`. That keeps env-bearing harnesses' names byte-identical to
+  # what shipped in 0.6.x (no re-provision on upgrade), while distinct environment
+  # payloads still produce distinct names (they differ in the hashed spec map).
+  #
+  # NOTE (#70): `provision/2` now coerces its `spec` via `Agent.Spec.new/1` before calling
+  # `build_spec/2`, and `environment`/`environment_variables` now reach Bedrock via `opts`
+  # (see moduledoc), never via `spec`. So through the standard `provision/2` path this
+  # function always sees `{nil, nil}` and takes the identity-only branch, regardless of
+  # `opts[:environment]` — this fallback branch is reachable only when a caller invokes
+  # `harness_name/2`/`build_spec/2` directly with an env-embedded map, bypassing `provision/2`.
   defp agent_digest(spec) do
     case {Map.get(spec, :environment), Map.get(spec, :environment_variables)} do
       {nil, nil} ->
