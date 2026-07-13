@@ -48,6 +48,38 @@ defmodule ReqManagedAgents.Environment.SpecTest do
     test "defaults: empty runtimes and empty config" do
       assert {:ok, %Spec{name: nil, runtimes: [], config: %{}}} = Spec.new(%{})
     end
+
+    test "auto-collects stray top-level keys into config (flat map)" do
+      assert {:ok,
+              %Spec{
+                config: %{networking: %{type: "unrestricted"}, type: "cloud"},
+                runtimes: [%Runtime{lang: :elixir, version: "1.17.0"}]
+              }} =
+               Spec.new(%{
+                 runtimes: [%{lang: :elixir, version: "1.17.0", via: :mise}],
+                 networking: %{type: "unrestricted"},
+                 type: "cloud"
+               })
+    end
+
+    test "explicit config is unchanged when there are no stray keys" do
+      assert {:ok, %Spec{config: %{a: 1}}} = Spec.new(%{config: %{a: 1}})
+    end
+
+    test "explicit :config wins over a colliding stray key" do
+      assert {:ok, %Spec{config: %{k: "explicit"}}} =
+               Spec.new(%{config: %{k: "explicit"}, k: "stray"})
+    end
+
+    test "string-keyed flat map collects stray keys correctly" do
+      assert {:ok, %Spec{config: %{"type" => "cloud"}}} =
+               Spec.new(%{"type" => "cloud"})
+    end
+
+    test "live-smoke shape: flat map with type/networking populates config (guards the silent-drop footgun)" do
+      assert {:ok, %Spec{config: %{type: "cloud", networking: %{type: "unrestricted"}}}} =
+               Spec.new(%{type: "cloud", networking: %{type: "unrestricted"}})
+    end
   end
 
   describe "digest/1" do

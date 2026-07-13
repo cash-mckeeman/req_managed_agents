@@ -7,6 +7,12 @@ defmodule ReqManagedAgents.Environment.Spec do
   `ReqManagedAgents.Provisioner.Runtime.new/1` before it can reach the bootstrap
   renderer.
 
+  `new/1` routes any top-level key that isn't `:name` or `:runtimes` into
+  `config` — a flat map like `%{runtimes: [...], networking: %{...}, type: "cloud"}`
+  is coerced with `config: %{networking: %{...}, type: "cloud"}`, so provider
+  fields at the top level are never silently dropped. An explicit `:config` key
+  wins on collision with a same-named stray key.
+
   `digest/1` folds this identity into the provision content-address at both
   hashing layers (the `Provisioner` cache key and the Bedrock harness name), so
   two provisions of the same `Agent.Spec` into *different* environments no longer
@@ -45,11 +51,15 @@ defmodule ReqManagedAgents.Environment.Spec do
 
   def new(%{} = m) do
     with {:ok, runtimes} <- coerce_runtimes(fetch(m, :runtimes, [])) do
+      explicit = fetch(m, :config, %{})
+      stray = Map.drop(m, ~w(name runtimes config)a ++ ~w(name runtimes config))
+
       {:ok,
        %__MODULE__{
          name: fetch(m, :name, nil),
          runtimes: runtimes,
-         config: fetch(m, :config, %{})
+         # stray top-level keys fill config; explicit :config wins on collision
+         config: Map.merge(stray, explicit)
        }}
     end
   end
