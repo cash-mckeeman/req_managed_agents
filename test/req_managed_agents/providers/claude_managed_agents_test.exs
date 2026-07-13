@@ -356,6 +356,38 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     assert old_digest == new_digest
   end
 
+  describe "normalize_model_id/1 (issue #65)" do
+    test "provider-qualified model id is normalized to bare for the CMA wire" do
+      assert "claude-sonnet-4-6" ==
+               ManagedAgents.normalize_model_id("anthropic:claude-sonnet-4-6")
+    end
+
+    test "bare model id is unchanged" do
+      assert "claude-sonnet-4-6" == ManagedAgents.normalize_model_id("claude-sonnet-4-6")
+    end
+  end
+
+  test "provision/2 normalizes a provider-qualified model id to bare on the wire (issue #65)" do
+    spec = %{@spec_claude | model_config: "anthropic:claude-sonnet-4-6"}
+    client = claude_client(__MODULE__.ProvisionNormalize)
+
+    Req.Test.stub(__MODULE__.ProvisionNormalize, fn conn ->
+      case conn.request_path do
+        "/v1/agents" ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          decoded = Jason.decode!(body)
+          assert decoded["model"] == "claude-sonnet-4-6"
+          Req.Test.json(conn, %{"id" => "agent_1"})
+
+        "/v1/environments" ->
+          Req.Test.json(conn, %{"id" => "env_1"})
+      end
+    end)
+
+    assert {:ok, %{agent_id: "agent_1", environment_id: "env_1"}} =
+             ManagedAgents.provision(spec, client: client)
+  end
+
   test "provision/2 rolls back the agent when environment creation fails" do
     {:ok, calls} = Agent.start_link(fn -> [] end)
     client = Client.new(api_key: "sk-test", req_options: [plug: {Req.Test, __MODULE__.Rollback}])
