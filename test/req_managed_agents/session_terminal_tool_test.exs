@@ -49,6 +49,15 @@ defmodule ReqManagedAgents.SessionTerminalToolTest do
         events: events
       }
     end
+
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   @end_turn [%{"type" => "stop", "terminal" => :end_turn}]

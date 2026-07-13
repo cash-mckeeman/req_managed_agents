@@ -55,6 +55,15 @@ defmodule ReqManagedAgents.SessionInfoTest do
         events: events
       }
     end
+
+    @impl true
+    def session_id(conn), do: conn.session_id
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   # streaming fake whose conn carries a session_id — covers the per-event
@@ -103,6 +112,15 @@ defmodule ReqManagedAgents.SessionInfoTest do
 
     @impl true
     defdelegate normalize(events), to: ReqManagedAgents.FakeProviders.Shared
+
+    @impl true
+    def session_id(conn), do: conn.session_id
+    @impl true
+    def ref(conn), do: conn.ref
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   # streaming fake that drops its first push; reconnect/3 hands back a conn carrying a
@@ -176,6 +194,15 @@ defmodule ReqManagedAgents.SessionInfoTest do
 
     @impl true
     defdelegate normalize(events), to: ReqManagedAgents.FakeProviders.Shared
+
+    @impl true
+    def session_id(conn), do: conn.session_id
+    @impl true
+    def ref(conn), do: conn.ref
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   defmodule FourArityHandler do

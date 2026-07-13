@@ -44,6 +44,15 @@ defmodule ReqManagedAgents.SessionLiveEventsTest do
         events: events
       }
     end
+
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   # Same provider WITHOUT live delivery — the batch path must keep working.
@@ -85,6 +94,15 @@ defmodule ReqManagedAgents.SessionLiveEventsTest do
         events: events
       }
     end
+
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   defmodule CountingHandler do
@@ -174,6 +192,15 @@ defmodule ReqManagedAgents.SessionLiveEventsTest do
         events: events
       }
     end
+
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   test "session survives a non-map live event (envelope_type catch-all)" do

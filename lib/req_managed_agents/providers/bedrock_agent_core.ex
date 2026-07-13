@@ -247,6 +247,21 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     end
   end
 
+  # conn is a map keyed on harness_arn/sid/session_id/… — no live stream Task (request_response,
+  # not streaming), and no resume/reattach concept (a fresh InvokeHarness call every turn), so
+  # ref/consumer/resumed? are always nil/nil/false here.
+  @impl true
+  def session_id(conn), do: Map.get(conn, :session_id)
+
+  @impl true
+  def ref(_conn), do: nil
+
+  @impl true
+  def consumer(_conn), do: nil
+
+  @impl true
+  def resumed?(_conn), do: false
+
   @impl true
   def open(opts, subscriber) do
     {:ok,

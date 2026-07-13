@@ -25,6 +25,15 @@ defmodule ReqManagedAgents.SessionAgentHandleTest do
     @impl true
     def normalize(_e),
       do: %ReqManagedAgents.TurnResult{terminal: :end_turn, stop_reason: "stop", events: []}
+
+    @impl true
+    def session_id(conn), do: conn.session_id
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   test "an :agent / :environment handle is unpacked to ids before open/2" do

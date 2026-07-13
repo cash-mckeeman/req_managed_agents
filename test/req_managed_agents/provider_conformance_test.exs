@@ -10,7 +10,11 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
     {:user_input, 1},
     {:resume_input, 2},
     {:normalize, 1},
-    {:provision, 2}
+    {:provision, 2},
+    {:session_id, 1},
+    {:ref, 1},
+    {:consumer, 1},
+    {:resumed?, 1}
   ]
 
   test "BedrockAgentCore is a complete :request_response provider" do
@@ -50,6 +54,35 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
 
     assert function_exported?(Local, :teardown, 2), "Local missing teardown/2"
     assert function_exported?(Local, :text_delta, 1), "Local missing text_delta/1"
+  end
+
+  test "conn accessors answer for each provider's own conn shape" do
+    ref = make_ref()
+    consumer = self()
+
+    bedrock_conn = %{harness_arn: "arn", sid: "sid-1", session_id: "sid-1"}
+    assert BedrockAgentCore.session_id(bedrock_conn) == "sid-1"
+    assert BedrockAgentCore.ref(bedrock_conn) == nil
+    assert BedrockAgentCore.consumer(bedrock_conn) == nil
+    refute BedrockAgentCore.resumed?(bedrock_conn)
+
+    fresh_claude_conn = %{client: :c, session_id: "sess-1", ref: ref, consumer: consumer}
+    assert ClaudeManagedAgents.session_id(fresh_claude_conn) == "sess-1"
+    assert ClaudeManagedAgents.ref(fresh_claude_conn) == ref
+    assert ClaudeManagedAgents.consumer(fresh_claude_conn) == consumer
+    refute ClaudeManagedAgents.resumed?(fresh_claude_conn)
+
+    resumed_claude_conn = %{client: :c, session_id: "sess-2", ref: nil, resume: true}
+    assert ClaudeManagedAgents.session_id(resumed_claude_conn) == "sess-2"
+    assert ClaudeManagedAgents.ref(resumed_claude_conn) == nil
+    assert ClaudeManagedAgents.consumer(resumed_claude_conn) == nil
+    assert ClaudeManagedAgents.resumed?(resumed_claude_conn)
+
+    local_conn = %Local{session_id: "local-1"}
+    assert Local.session_id(local_conn) == "local-1"
+    assert Local.ref(local_conn) == nil
+    assert Local.consumer(local_conn) == nil
+    refute Local.resumed?(local_conn)
   end
 
   test "all providers normalize to a %TurnResult{}" do

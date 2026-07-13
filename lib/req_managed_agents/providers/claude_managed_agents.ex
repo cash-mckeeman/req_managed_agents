@@ -126,6 +126,21 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     end
   end
 
+  # conn is %{client:, session_id:, ref:, consumer:, resume?} — a fresh open sets ref/consumer
+  # (the stream Task started in open/2); a resume (session_id already known) leaves ref/consumer
+  # unset until reconnect/3 consolidates it, and marks :resume so Session knows to reattach.
+  @impl true
+  def session_id(conn), do: Map.get(conn, :session_id)
+
+  @impl true
+  def ref(conn), do: Map.get(conn, :ref)
+
+  @impl true
+  def consumer(conn), do: Map.get(conn, :consumer)
+
+  @impl true
+  def resumed?(conn), do: !!Map.get(conn, :resume)
+
   @impl true
   def kickoff_input(opts) do
     case opts[:outcome] do

@@ -81,6 +81,31 @@ defmodule ReqManagedAgents.Provider do
               {:ok, conn(), [ReqManagedAgents.ToolUse.t()], MapSet.t()} | {:error, term()}
 
   @doc """
+  The provider-side session id `conn` carries, if any (`Session` surfaces it in
+  `SessionResult`/`SessionInfo`; `nil` when the concept doesn't apply).
+  """
+  @callback session_id(conn()) :: String.t() | nil
+
+  @doc """
+  The live stream's tag `conn` carries, if any — `Session` matches inbound
+  `{:managed_agents, ref, _}` messages against it. `nil` for a :request_response conn or a
+  :streaming conn with no stream open yet (e.g. a not-yet-consolidated resume).
+  """
+  @callback ref(conn()) :: reference() | nil
+
+  @doc """
+  The linked process consuming the stream on `conn`'s behalf, if any. `nil` when there is no
+  live consumer (e.g. :request_response, or a not-yet-consolidated resume).
+  """
+  @callback consumer(conn()) :: pid() | nil
+
+  @doc """
+  Whether `open/2` consolidated an EXISTING session into `conn` (a resume) rather than
+  creating a fresh one. Gates `Session`'s reattach behavior (#66).
+  """
+  @callback resumed?(conn()) :: boolean()
+
+  @doc """
   Optional — map ONE raw event to a normalized text chunk, or `nil`.
 
   When implemented, the `Session` emits `%{"type" => "rma.text_delta", "text" => chunk}`
