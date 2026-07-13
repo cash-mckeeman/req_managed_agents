@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.8.0 (2026-07-13)
+
+### Added
+- `Session.run/2` with a `session_id:` now delivers a new `:prompt` as a user
+  message on resume. Previously a resume consolidated prior server-side state to a
+  terminal but ignored `opts[:prompt]` — there was no way to reattach *and* deliver
+  the next user turn in one call. Now, when a resume lands **idle with no pending
+  tool uses** and a `:prompt` is present, it is sent as a `user.message` and driven
+  to terminal. Mid-`requires_action` resumes are unchanged: pending tool uses are
+  redispatched first and the prompt is never injected into an unfinished turn; a
+  resume without a prompt behaves exactly as before. The delivered turn starts a
+  fresh request (turn count and accumulator reset), and a fresh (non-resume)
+  session never re-delivers its kickoff prompt on a stream-drop reconnect. Additive
+  and backward compatible. #66
+
+### Fixed
+- `BedrockAgentCore` now rejects a blank or nil `:execution_role_arn` with
+  `{:error, {:invalid_opts, :execution_role_arn}}` before calling
+  `CreateAgentRuntime`, instead of forwarding it to AWS and surfacing the cryptic
+  `HTTP 400 "Value null at 'executionRoleArn'"`. `Keyword.fetch!/2` only guarded a
+  missing key, not a present-but-blank value; spec assembly is now routed through a
+  validating `build_spec/2`. #64
+- `ClaudeManagedAgents` normalizes a provider-qualified model id
+  (`"anthropic:claude-sonnet-4-6"`) to the bare id (`"claude-sonnet-4-6"`) the CMA
+  endpoint requires, via `normalize_model_id/1` applied where the model id enters
+  the request body. Already-bare ids pass through unchanged and the change is scoped
+  to the CMA provider only. Fixes the CMA 400 on qualified ids. #65
+
 ## v0.7.1 (2026-07-12)
 
 ### Fixed

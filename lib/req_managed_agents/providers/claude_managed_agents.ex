@@ -25,7 +25,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
     agent_body = %{
       name: name,
-      model: spec.model_config,
+      model: normalize_model_id(spec.model_config),
       system: spec.system_prompt,
       tools: spec.tools
     }
@@ -66,6 +66,15 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   defp archive_tag({:ok, _}), do: :ok
   defp archive_tag({:error, reason}), do: {:error, reason}
+
+  @doc "The CMA endpoint requires bare model ids; strip a leading `provider:` qualifier."
+  @spec normalize_model_id(String.t()) :: String.t()
+  def normalize_model_id(id) when is_binary(id) do
+    case String.split(id, ":", parts: 2) do
+      [_provider, bare] -> bare
+      [bare] -> bare
+    end
+  end
 
   @impl true
   def open(opts, subscriber) do

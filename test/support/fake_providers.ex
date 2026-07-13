@@ -161,6 +161,194 @@ defmodule ReqManagedAgents.FakeProviders do
     defdelegate normalize(events), to: Shared
   end
 
+  # A resumed session (session_id: set → open/2 answers `resume: true`, no :connected —
+  # matching the real providers' resume shape). `reconnect/3` answers `opts[:pending]`
+  # unconditionally (both [] and a non-empty list, so one fake covers the reattach-seam's
+  # idle-no-pending case AND its mid-requires_action case — issue #66). `push_input/2` records
+  # any `user.message`-shaped input it sees (`{:user, text}`) to `opts[:test]`, then always
+  # answers with a single end_turn so the driven turn (message delivery OR pending redrive)
+  # reaches a terminal.
+  defmodule ResumeReattach do
+    @moduledoc false
+    @behaviour ReqManagedAgents.Provider
+    @impl true
+    def mode, do: :streaming
+    @impl true
+    def provision(_spec, _opts), do: {:error, :not_implemented}
+    @impl true
+    def open(opts, subscriber) do
+      {:ok,
+       %{
+         resume: true,
+         subscriber: subscriber,
+         ref: nil,
+         test: opts[:test],
+         pending: opts[:pending] || []
+       }}
+    end
+
+    @impl true
+    def kickoff_input(opts), do: {:user, opts[:prompt] || "Begin."}
+    @impl true
+    def user_input(text), do: {:user, text}
+    @impl true
+    def resume_input(_uses, results), do: {:resume, results}
+
+    @impl true
+    def reconnect(conn, subscriber, seen) do
+      {:ok, %{conn | subscriber: subscriber, ref: make_ref()}, conn.pending, seen}
+    end
+
+    @impl true
+    def push_input(conn, input) do
+      case input do
+        {:user, text} -> send(conn.test, {:delivered, text})
+        _ -> :ok
+      end
+
+      ev = %{"type" => "stop", "terminal" => :end_turn}
+      send(conn.subscriber, {:managed_agents, conn.ref, {:event, ev}})
+      :ok
+    end
+
+    @impl true
+    def turn_boundary?(%{"type" => "stop"}), do: true
+    def turn_boundary?(_), do: false
+    @impl true
+    defdelegate normalize(events), to: Shared
+  end
+
+  # A FRESH (no session_id) live session — open/2 answers no `:resume` key at all,
+  # matching the real providers' fresh-open shape, and emits :connected so kickoff fires
+  # normally. The kickoff turn ends immediately (:end_turn, idle); that same push also
+  # triggers exactly ONE simulated stream drop (an Agent-tracked flag guards against a
+  # second one), forcing the live session's reconnect path to run while genuinely idle —
+  # exercising the reattach seam (#66) on a session that was NEVER a resume. `reconnect/3`
+  # always answers idle/no-pending. `push_input/2` records any `user.message`-shaped input
+  # (`{:user, text}`) to `opts[:test]` — used to prove a fresh session's kickoff prompt is
+  # NOT redelivered once the post-drop reconnect consolidates to idle (defect 1).
+  defmodule FreshLiveThenDrop do
+    @moduledoc false
+    @behaviour ReqManagedAgents.Provider
+    @impl true
+    def mode, do: :streaming
+    @impl true
+    def provision(_spec, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def open(opts, subscriber) do
+      {:ok, dropped?} = Agent.start_link(fn -> false end)
+      ref = make_ref()
+      send(subscriber, {:managed_agents, ref, :connected})
+      {:ok, %{subscriber: subscriber, ref: ref, test: opts[:test], dropped?: dropped?}}
+    end
+
+    @impl true
+    def kickoff_input(opts), do: {:user, opts[:prompt] || "Begin."}
+    @impl true
+    def user_input(text), do: {:user, text}
+    @impl true
+    def resume_input(_uses, results), do: {:resume, results}
+
+    @impl true
+    def reconnect(conn, subscriber, seen) do
+      {:ok, %{conn | subscriber: subscriber, ref: make_ref()}, [], seen}
+    end
+
+    @impl true
+    def push_input(conn, input) do
+      case input do
+        {:user, text} -> send(conn.test, {:delivered, text})
+        _ -> :ok
+      end
+
+      send(
+        conn.subscriber,
+        {:managed_agents, conn.ref, {:event, %{"type" => "stop", "terminal" => :end_turn}}}
+      )
+
+      already_dropped? = Agent.get_and_update(conn.dropped?, fn d -> {d, true} end)
+
+      unless already_dropped?,
+        do: send(conn.subscriber, {:managed_agents, conn.ref, {:error, :dropped}})
+
+      :ok
+    end
+
+    @impl true
+    def turn_boundary?(%{"type" => "stop"}), do: true
+    def turn_boundary?(_), do: false
+    @impl true
+    defdelegate normalize(events), to: Shared
+  end
+
+  # A resume (session_id: set) carrying BOTH pending tool uses and a new prompt. The
+  # first reconnect redrives the pending tool use (turns: 0 -> 1, terminal :end_turn); that
+  # redrive's push ALSO triggers a second simulated stream drop (an Agent tracks whether the
+  # pending batch was already redriven, so the SECOND reconnect answers idle/no-pending). That
+  # second reconnect then runs the reattach seam's idle branch (#66) with a non-zero turn
+  # count already accumulated — exercising defect 2: the resume-deliver branch must reset
+  # turns/accumulators the same way a live follow-up (`handle_cast({:message, …})`) does, or
+  # the delivered turn inherits the redrive's turn count and `max_turns` trips early.
+  defmodule ResumeRedriveThenReattach do
+    @moduledoc false
+    @behaviour ReqManagedAgents.Provider
+    @impl true
+    def mode, do: :streaming
+    @impl true
+    def provision(_spec, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def open(opts, subscriber) do
+      {:ok, agent} = Agent.start_link(fn -> %{pending: opts[:pending] || [], redriven: false} end)
+      {:ok, %{resume: true, subscriber: subscriber, ref: nil, test: opts[:test], agent: agent}}
+    end
+
+    @impl true
+    def kickoff_input(opts), do: {:user, opts[:prompt] || "Begin."}
+    @impl true
+    def user_input(text), do: {:user, text}
+    @impl true
+    def resume_input(_uses, results), do: {:resume, results}
+
+    @impl true
+    def reconnect(conn, subscriber, seen) do
+      pending =
+        Agent.get_and_update(conn.agent, fn st ->
+          if st.redriven, do: {[], st}, else: {st.pending, %{st | redriven: true}}
+        end)
+
+      {:ok, %{conn | subscriber: subscriber, ref: make_ref()}, pending, seen}
+    end
+
+    @impl true
+    def push_input(conn, input) do
+      case input do
+        {:user, text} -> send(conn.test, {:delivered, text})
+        _ -> :ok
+      end
+
+      send(
+        conn.subscriber,
+        {:managed_agents, conn.ref, {:event, %{"type" => "stop", "terminal" => :end_turn}}}
+      )
+
+      # Only the pending-redrive push triggers the second drop — never the message
+      # deliver, or this would loop forever.
+      if match?({:resume, _}, input) do
+        send(conn.subscriber, {:managed_agents, conn.ref, {:error, :dropped}})
+      end
+
+      :ok
+    end
+
+    @impl true
+    def turn_boundary?(%{"type" => "stop"}), do: true
+    def turn_boundary?(_), do: false
+    @impl true
+    defdelegate normalize(events), to: Shared
+  end
+
   # open/2 fails — to assert the Session surfaces the provider error verbatim.
   defmodule FailingOpen do
     @moduledoc false

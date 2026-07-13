@@ -24,18 +24,46 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   @impl true
   def provision(spec, opts) do
-    name = harness_name(spec, opts[:name_prefix])
+    case build_spec(spec, opts) do
+      {:ok, harness_spec} -> do_provision(harness_spec, opts)
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
-    harness_spec = %{
-      name: name,
-      execution_role_arn: Keyword.fetch!(opts, :execution_role_arn),
-      system_prompt: spec.system_prompt,
-      model: spec.model_config,
-      tools: spec.tools,
-      environment: Map.get(spec, :environment),
-      environment_variables: Map.get(spec, :environment_variables)
-    }
+  @doc """
+  Assembles the AgentCore harness-creation spec from an `Agent.Spec`-shaped
+  `spec` map and provisioning `opts`. Validates `opts[:execution_role_arn]`
+  BEFORE it ever reaches `CreateHarness` — a blank/missing value used to pass
+  straight through (`Keyword.fetch!/2` only guards the key being absent, not a
+  present-but-blank value) and surface as a cryptic AWS `HTTP 400 "Value null
+  at 'executionRoleArn'"` (GitHub #64).
+  """
+  @spec build_spec(map(), keyword()) :: {:ok, map()} | {:error, term()}
+  def build_spec(spec, opts) do
+    with {:ok, role} <- validate_role_arn(opts[:execution_role_arn]) do
+      {:ok,
+       %{
+         name: harness_name(spec, opts[:name_prefix]),
+         execution_role_arn: role,
+         system_prompt: spec.system_prompt,
+         model: spec.model_config,
+         tools: spec.tools,
+         environment: Map.get(spec, :environment),
+         environment_variables: Map.get(spec, :environment_variables)
+       }}
+    end
+  end
 
+  defp validate_role_arn(arn) when is_binary(arn) do
+    case String.trim(arn) do
+      "" -> {:error, {:invalid_opts, :execution_role_arn}}
+      trimmed -> {:ok, trimmed}
+    end
+  end
+
+  defp validate_role_arn(_), do: {:error, {:invalid_opts, :execution_role_arn}}
+
+  defp do_provision(harness_spec, opts) do
     create_fun =
       opts[:create_fun] || fn s -> Client.create_harness(opts[:client] || Client.new(), s) end
 
@@ -55,7 +83,15 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
              do: {:ok, %{harness_arn: arn, harness_id: hid}}
 
       {:error, {:http_error, 409, _}} ->
-        recover_existing(create_fun, harness_spec, list_fun, get_fun, name, poll_ms, max_polls)
+        recover_existing(
+          create_fun,
+          harness_spec,
+          list_fun,
+          get_fun,
+          harness_spec.name,
+          poll_ms,
+          max_polls
+        )
 
       {:error, reason} ->
         {:error, reason}

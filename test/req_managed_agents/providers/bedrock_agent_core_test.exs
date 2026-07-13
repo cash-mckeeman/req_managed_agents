@@ -227,6 +227,23 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     ] ++ extra
   end
 
+  describe "build_spec/2" do
+    test "blank execution_role_arn is rejected with a clear message, not passed to AWS" do
+      assert {:error, {:invalid_opts, :execution_role_arn}} =
+               P.build_spec(@spec_bedrock, execution_role_arn: "  ")
+    end
+
+    test "nil execution_role_arn is rejected" do
+      assert {:error, {:invalid_opts, :execution_role_arn}} =
+               P.build_spec(@spec_bedrock, [])
+    end
+
+    test "a well-formed arn passes validation and is preserved in the spec" do
+      assert {:ok, %{execution_role_arn: "arn:aws:iam::123:role/R"}} =
+               P.build_spec(@spec_bedrock, execution_role_arn: "arn:aws:iam::123:role/R")
+    end
+  end
+
   test "provision/2 creates a harness, polls READY, returns {harness_arn, harness_id}" do
     create = fn harness_spec ->
       assert harness_spec.system_prompt == "be helpful"
