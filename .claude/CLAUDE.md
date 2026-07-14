@@ -103,6 +103,14 @@ publishes to Hex immediately and cannot be recalled. Only tag when `@version` in
 `mix.exs` matches the tree and the tree is exactly what should be public. Bump
 `@version` + CHANGELOG in the release commit; tag **after** merge to `main`.
 
+**Close what you shipped.** For every GitHub issue a change resolves, put
+`Closes #<n>` (or `Fixes #<n>`) in the **PR body** so GitHub auto-closes it on
+merge. A bare `(#<n>)` reference — e.g. the `(#66)` attribution style used in the
+CHANGELOG — is attribution only and does **not** auto-close; those issues sit open
+until closed by hand. At release, confirm no issue the release resolved is still
+open. (This is GitHub-issue closing; the Linear `Closes <KEY>`-in-PR-body rule
+under Public-Repo Hygiene is separate — never put a Linear id in a PR title.)
+
 ## Code Quality
 
 ```bash
