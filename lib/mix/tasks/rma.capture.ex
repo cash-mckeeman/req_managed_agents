@@ -24,31 +24,25 @@ defmodule Mix.Tasks.Rma.Capture do
   with orphaned resources. Add more `{name, fun}` tuples to `scenarios/1` for
   more AgentCore reads as they're needed.
 
-  ## Why this duplicates `test/support/conformance/{capture,redaction}.ex`
+  ## Relationship to `test/support/conformance/capture.ex`
 
-  `lib/` compiles under every `MIX_ENV`, but `test/support` only compiles
-  under `:test` (see `elixirc_paths/1` in `mix.exs`) — so this task, which
-  normally runs in `:dev`, cannot call
-  `ReqManagedAgents.Conformance.Capture.write_pair/5` or
-  `ReqManagedAgents.Conformance.Redaction.redact/1`. It reimplements the
-  minimal redact-and-write logic inline instead (mirroring how
-  `mix rma.sync_agentcore_model` resolves `RMA_CORPUS_DIR` directly rather
-  than depending on `ReqManagedAgents.Conformance.Corpus`). The WRITER in
-  `test/support` is the tested/shipped surface —
-  `test/conformance/capture_test.exs` is the source of truth for this
-  behavior; keep this task in sync with it by hand if either changes.
+  Redaction is shared: both this task and the test-support harness call the
+  ReqManagedAgents.Conformance.Redaction module, which lives in `lib/` precisely
+  so a `:dev` mix task can use it (`test/support` isn't compiled in `:dev`).
+  Every written body is redacted and then leak-scanned (scan_string/1) before it
+  touches disk.
+
+  The WRITER itself is still separate — the ReqManagedAgents.Conformance.Capture
+  write_pair/5 (test-support) is the unit-tested reference in
+  `test/conformance/capture_test.exs`; this task's write_pair!/6 mirrors it
+  (plus the leak-scan guard). Keep the two writers in sync by hand if either
+  changes.
   """
   use Mix.Task
 
   alias ReqManagedAgents.AgentCore.{Client, SigV4}
   alias ReqManagedAgents.Client, as: CMAClient
-
-  # Mirrors ReqManagedAgents.Conformance.Redaction — bump alongside it if rules change.
-  @redaction_version 1
-  @bearer_keys ~w(authorization Authorization)
-  @stripped_keys ~w(accessKeyId secretAccessKey sessionToken x-amz-security-token signature)
-  @id_keys ~w(sessionId runtimeSessionId agentId harnessId environmentId)
-  @acct_re ~r/(arn:aws:[^:]*:[^:]*:)[0-9]{6,}(:)/
+  alias ReqManagedAgents.Conformance.Redaction
 
   @impl Mix.Task
   def run(_argv) do
@@ -159,22 +153,47 @@ defmodule Mix.Tasks.Rma.Capture do
       config: %{type: "cloud", networking: %{type: "unrestricted"}}
     }
 
-    with {:ok, %{"id" => agent_id} = agent_resp} <- CMAClient.create_agent(client, agent_body),
-         {:ok, %{"id" => env_id} = env_resp} <- CMAClient.create_environment(client, env_body) do
-      now = DateTime.utc_now()
-      write_pair!(corpus_dir, :cma, "create_agent", agent_body, agent_resp, now)
-      write_pair!(corpus_dir, :cma, "create_environment", env_body, env_resp, now)
-      Mix.shell().info("captured cma/create_agent, cma/create_environment")
+    case CMAClient.create_agent(client, agent_body) do
+      {:ok, %{"id" => agent_id} = agent_resp} ->
+        # The agent now exists in the maintainer's account. Guarantee it gets
+        # archived no matter what follows (env-create failure OR a write raise) —
+        # the `after` runs on every exit path, including exceptions.
+        try do
+          capture_cma_env!(corpus_dir, client, agent_body, agent_resp, env_body)
+        after
+          _ = CMAClient.archive_agent(client, agent_id)
+        end
 
-      _ = CMAClient.archive_agent(client, agent_id)
-      _ = CMAClient.archive_environment(client, env_id)
-    else
-      {:error, reason} -> Mix.shell().info("skipped cma: #{inspect(reason)}")
-      other -> Mix.shell().info("skipped cma: unexpected response #{inspect(other)}")
+      {:error, reason} ->
+        Mix.shell().info("skipped cma: #{inspect(reason)}")
+
+      other ->
+        Mix.shell().info("skipped cma: unexpected response #{inspect(other)}")
     end
   end
 
-  # ---- redact-and-write (kept intentionally minimal — see moduledoc) ----
+  defp capture_cma_env!(corpus_dir, client, agent_body, agent_resp, env_body) do
+    case CMAClient.create_environment(client, env_body) do
+      {:ok, %{"id" => env_id} = env_resp} ->
+        # Same guarantee for the environment: archive it even if a write raises.
+        try do
+          now = DateTime.utc_now()
+          write_pair!(corpus_dir, :cma, "create_agent", agent_body, agent_resp, now)
+          write_pair!(corpus_dir, :cma, "create_environment", env_body, env_resp, now)
+          Mix.shell().info("captured cma/create_agent, cma/create_environment")
+        after
+          _ = CMAClient.archive_environment(client, env_id)
+        end
+
+      {:error, reason} ->
+        Mix.shell().info("skipped cma: environment create failed: #{inspect(reason)}")
+
+      other ->
+        Mix.shell().info("skipped cma: unexpected environment response #{inspect(other)}")
+    end
+  end
+
+  # ---- write (redaction is shared via ReqManagedAgents.Conformance.Redaction) ----
 
   defp write_pair!(corpus_dir, surface, name, req_json, resp_json, captured_at) do
     dir = Path.join(corpus_dir, to_string(surface))
@@ -183,8 +202,8 @@ defmodule Mix.Tasks.Rma.Capture do
     req_rel = Path.join("requests", "#{name}.json")
     resp_rel = Path.join("responses", "#{name}.json")
 
-    req_sha = write_json!(dir, req_rel, redact(req_json))
-    resp_sha = write_json!(dir, resp_rel, redact(resp_json))
+    req_sha = write_json!(dir, req_rel, Redaction.redact(req_json))
+    resp_sha = write_json!(dir, resp_rel, Redaction.redact(resp_json))
 
     update_manifest!(dir, captured_at, %{req_rel => req_sha, resp_rel => resp_sha})
   end
@@ -193,8 +212,20 @@ defmodule Mix.Tasks.Rma.Capture do
     path = Path.join(dir, relpath)
     File.mkdir_p!(Path.dirname(path))
     bytes = Jason.encode!(data, pretty: true) <> "\n"
-    File.write!(path, bytes)
-    sha256(bytes)
+
+    # Last-line guard: never let a secret-shaped value the key-based redactor
+    # missed (a new field, a token in a string value) land in the corpus.
+    case Redaction.scan_string(bytes) do
+      :ok ->
+        File.write!(path, bytes)
+        sha256(bytes)
+
+      {:leak, _hits} ->
+        Mix.raise(
+          "refusing to write #{relpath}: redacted body still matches a secret pattern. " <>
+            "Extend ReqManagedAgents.Conformance.Redaction before capturing this scenario."
+        )
+    end
   end
 
   defp update_manifest!(dir, captured_at, files_delta) do
@@ -204,7 +235,7 @@ defmodule Mix.Tasks.Rma.Capture do
     manifest =
       existing
       |> Map.put("captured_at", DateTime.to_iso8601(captured_at))
-      |> Map.put("redaction_version", @redaction_version)
+      |> Map.put("redaction_version", Redaction.version())
       |> Map.put("files", Map.merge(Map.get(existing, "files", %{}), files_delta))
 
     File.write!(path, Jason.encode!(manifest, pretty: true) <> "\n")
@@ -218,22 +249,6 @@ defmodule Mix.Tasks.Rma.Capture do
       _ -> %{}
     end
   end
-
-  defp redact(m) when is_map(m), do: Map.new(m, fn {k, v} -> {k, redact_kv(k, v)} end)
-  defp redact(list) when is_list(list), do: Enum.map(list, &redact/1)
-
-  defp redact(bin) when is_binary(bin),
-    do: Regex.replace(@acct_re, bin, "\\g{1}000000000000\\g{2}")
-
-  defp redact(other), do: other
-
-  defp redact_kv(k, _v) when k in @bearer_keys, do: "Bearer ***"
-  defp redact_kv(k, _v) when k in @stripped_keys, do: "REDACTED"
-  defp redact_kv(k, _v) when k in @id_keys, do: placeholder_id(k)
-  defp redact_kv(_k, v), do: redact(v)
-
-  defp placeholder_id("sessionId"), do: "sess-REDACTED"
-  defp placeholder_id(_), do: "REDACTED"
 
   defp sha256(bin), do: Base.encode16(:crypto.hash(:sha256, bin), case: :lower)
 end

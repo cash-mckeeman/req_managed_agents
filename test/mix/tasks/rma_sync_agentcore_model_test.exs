@@ -37,5 +37,12 @@ defmodule Mix.Tasks.Rma.SyncAgentcoreModelTest do
     assert Sync.changeset(fetched, local) == %{added: [], changed: [], removed: []}
   end
 
+  test "manifest_json/2 pins the botocore default branch (develop), not a non-existent 'main'" do
+    # Regression guard: boto/botocore has no `main` branch; targeting it 422s and
+    # kills the whole sync on its first API call.
+    local = Jason.decode!(Sync.manifest_json(%{"service-2.json" => "AAA"}, "deadbeef"))
+    assert local["source"]["ref"] == "develop"
+  end
+
   defp sha(b), do: :crypto.hash(:sha256, b) |> Base.encode16(case: :lower)
 end

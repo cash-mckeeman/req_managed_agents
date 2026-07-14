@@ -46,4 +46,21 @@ defmodule ReqManagedAgents.Conformance.SchemaTest do
 
     assert {:unknown, "newFangled"} in v
   end
+
+  test "botocore structure/long types are enforced, not silently accepted" do
+    shape = %{
+      "required" => [],
+      "members" => %{"config" => %{"type" => "structure"}, "n" => %{"type" => "long"}}
+    }
+
+    assert {:error, v} = Schema.validate(%{"config" => 42, "n" => "nope"}, shape)
+    assert {:type, "config", "structure"} in v
+    assert {:type, "n", "long"} in v
+    assert :ok == Schema.validate(%{"config" => %{}, "n" => 5}, shape)
+  end
+
+  test "an unmodeled type in our shape slice is a violation, not a silent pass" do
+    shape = %{"required" => [], "members" => %{"x" => %{"type" => "bogustype"}}}
+    assert {:error, [{:type, "x", "bogustype"}]} = Schema.validate(%{"x" => 1}, shape)
+  end
 end

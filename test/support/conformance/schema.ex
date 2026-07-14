@@ -23,10 +23,23 @@ defmodule ReqManagedAgents.Conformance.Schema do
     end
   end
 
+  # A member declared in the shape with no `type` carries no type constraint.
+  defp type_ok?(_v, nil), do: true
+
   defp type_ok?(v, "string"), do: is_binary(v)
+  defp type_ok?(v, "blob"), do: is_binary(v)
   defp type_ok?(v, "list"), do: is_list(v)
+  # botocore objects are "structure"; treat "map" the same (both decode to a JSON object).
   defp type_ok?(v, "map"), do: is_map(v)
+  defp type_ok?(v, "structure"), do: is_map(v)
   defp type_ok?(v, "integer"), do: is_integer(v)
+  defp type_ok?(v, "long"), do: is_integer(v)
+  defp type_ok?(v, "double"), do: is_number(v)
+  defp type_ok?(v, "float"), do: is_number(v)
   defp type_ok?(v, "boolean"), do: is_boolean(v)
-  defp type_ok?(_v, _unknown_type), do: true
+  defp type_ok?(v, "timestamp"), do: is_binary(v) or is_number(v)
+
+  # An unmodeled type string is an authoring mistake in OUR shape slice (we write
+  # these, not the wire) — surface it as a violation rather than silently passing.
+  defp type_ok?(_v, _unknown_type), do: false
 end

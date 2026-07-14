@@ -29,4 +29,17 @@ defmodule ReqManagedAgents.Conformance.CorpusTest do
     System.delete_env("RMA_CORPUS_DIR")
     refute Corpus.external?(:agentcore)
   end
+
+  test "dir/1 raises when RMA_CORPUS_DIR is set but the surface subdir is absent" do
+    tmp = System.tmp_dir!() |> Path.join("rma_corpus_missing_surface")
+    File.mkdir_p!(tmp)
+    System.put_env("RMA_CORPUS_DIR", tmp)
+
+    # No <tmp>/agentcore — silently falling back to synthetic examples would be a
+    # false "private corpus" pass; the loader must fail loud instead.
+    assert_raise ArgumentError, ~r/does not exist/, fn -> Corpus.dir(:agentcore) end
+  after
+    System.delete_env("RMA_CORPUS_DIR")
+    File.rm_rf!(Path.join(System.tmp_dir!(), "rma_corpus_missing_surface"))
+  end
 end

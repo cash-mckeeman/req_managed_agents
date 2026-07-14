@@ -68,6 +68,15 @@ defmodule ReqManagedAgents.Conformance.Capture do
   end
 
   defp decode(body) when is_map(body), do: body
+
+  # `encode_body` often leaves a JSON request body as an iolist, not a binary —
+  # flatten it before decoding so a real captured request isn't silently lost.
+  defp decode(body) when is_list(body) do
+    decode(IO.iodata_to_binary(body))
+  rescue
+    ArgumentError -> %{}
+  end
+
   defp decode(_other), do: %{}
 
   @doc "Retrieves and clears the request/response pair captured under `name` by `attach/2`."

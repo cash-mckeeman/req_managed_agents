@@ -33,7 +33,13 @@ defmodule ReqManagedAgents.Conformance.CmaOutboundTest do
     # goldens' "example-agent" / "example-agent_env" names byte-for-byte.
     captured = capture_provision_bodies(canonical_spec(), name: "example-agent")
 
-    for %Corpus.Entry{name: name, json: golden} <- Corpus.entries(:cma, :requests) do
+    entries = Corpus.entries(:cma, :requests)
+
+    # Guard against a silently-empty corpus: a `for` over [] asserts nothing and
+    # passes green — a conformance run that verifies zero cases is a false pass.
+    refute Enum.empty?(entries), "no cma request goldens found — corpus is empty"
+
+    for %Corpus.Entry{name: name, json: golden} <- entries do
       wire = Map.fetch!(captured, name)
       assert Redaction.redact(wire) == golden, "golden drift: #{name}"
     end

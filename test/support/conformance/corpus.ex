@@ -24,7 +24,19 @@ defmodule ReqManagedAgents.Conformance.Corpus do
     case System.get_env("RMA_CORPUS_DIR") do
       dir when is_binary(dir) and dir != "" ->
         candidate = Path.join(dir, to_string(surface))
-        if File.dir?(candidate), do: candidate, else: examples_dir(surface)
+
+        # Silently falling back to bundled examples when RMA_CORPUS_DIR is set but
+        # the surface subdir is missing would let a mistyped path or a
+        # half-populated corpus pass as a green "private corpus" run (false
+        # confidence). Fail loud instead — you opted into the external corpus.
+        if File.dir?(candidate) do
+          candidate
+        else
+          raise ArgumentError,
+                "RMA_CORPUS_DIR is set (#{dir}) but #{candidate} does not exist. " <>
+                  "Populate the #{surface} surface, or unset RMA_CORPUS_DIR to use " <>
+                  "the bundled synthetic examples."
+        end
 
       _ ->
         examples_dir(surface)

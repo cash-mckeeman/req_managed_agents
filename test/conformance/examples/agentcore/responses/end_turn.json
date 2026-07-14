@@ -1,7 +1,0 @@
-{
-  "harness": {
-    "status": "READY",
-    "arn": "arn:aws:bedrock-agentcore:us-east-1:000000000000:harness/example",
-    "harnessId": "example"
-  }
-}

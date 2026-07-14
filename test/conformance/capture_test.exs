@@ -56,4 +56,19 @@ defmodule ReqManagedAgents.Conformance.CaptureTest do
     assert resp_json == %{"ok" => true}
     assert Capture.fetch("agentcore_smoke") == :error
   end
+
+  test "attach/2 decodes an iolist request body rather than silently dropping it to %{}" do
+    real_adapter = fn req -> {req, Req.Response.new(status: 200, body: "{}")} end
+    req_options = Capture.attach("iolist_req", adapter: real_adapter)
+
+    # `encode_body` can leave a JSON request body as an iolist, not a binary.
+    {_req, _resp} =
+      [url: "http://example.test", body: ["{", ~s("k":"v"), "}"]]
+      |> Req.new()
+      |> Req.merge(req_options)
+      |> Req.Request.run_request()
+
+    assert {:ok, req_json, _resp} = Capture.fetch("iolist_req")
+    assert req_json == %{"k" => "v"}
+  end
 end

@@ -48,7 +48,13 @@ defmodule ReqManagedAgents.Conformance.AgentcoreOutboundTest do
   end
 
   test "each golden request matches the redacted body RMA builds" do
-    for %Corpus.Entry{name: name, json: golden} <- Corpus.entries(:agentcore, :requests) do
+    entries = Corpus.entries(:agentcore, :requests)
+
+    # Guard against a silently-empty corpus: a `for` over [] asserts nothing and
+    # passes green — a conformance run that verifies zero cases is a false pass.
+    refute Enum.empty?(entries), "no agentcore request goldens found — corpus is empty"
+
+    for %Corpus.Entry{name: name, json: golden} <- entries do
       wire = wire_for(name)
       assert Redaction.redact(wire) == golden, "golden drift: #{name}"
     end

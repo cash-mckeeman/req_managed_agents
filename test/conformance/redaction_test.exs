@@ -19,6 +19,37 @@ defmodule ReqManagedAgents.Conformance.RedactionTest do
     assert out["nested"]["messages"] == [%{"text" => "hi"}]
   end
 
+  test "redact/1 covers extended + case-insensitive credential keys (apiKey, PascalCase AWS, bare id)" do
+    input = %{
+      "apiKey" => "sk-live-abcdef1234567890",
+      "SecretAccessKey" => "wJalrXUtnFEMI",
+      "SessionToken" => "FQoGZ",
+      "id" => "agent_abc123",
+      "modelId" => "anthropic.claude-sonnet-4-6"
+    }
+
+    out = Redaction.redact(input)
+    assert out["apiKey"] == "REDACTED"
+    assert out["SecretAccessKey"] == "REDACTED"
+    assert out["SessionToken"] == "REDACTED"
+    assert out["id"] == "REDACTED"
+    # `modelId` is not an id key — only a whole-key match on "id" redacts.
+    assert out["modelId"] == "anthropic.claude-sonnet-4-6"
+  end
+
+  test "scan/1 flags ASIA temp keys and sk- bearer secrets across any file extension" do
+    dir = Path.join(System.tmp_dir!(), "rma_scan_extended")
+    File.mkdir_p!(dir)
+    File.write!(Path.join(dir, "a.json"), ~s({"blob":"ASIAABCDEFGHIJKLMNOP"}))
+    # A non-{json,bin,sse} extension must still be scanned.
+    File.write!(Path.join(dir, "b.ndjson"), ~s({"t":"sk-ant-abcdefghijklmnopqrstuvwxyz"}))
+
+    assert {:leak, leaks} = Redaction.scan(dir)
+    assert length(leaks) == 2
+  after
+    File.rm_rf!(Path.join(System.tmp_dir!(), "rma_scan_extended"))
+  end
+
   test "scan/1 flags a leaked secret pattern in a committed fixture dir" do
     dir = Path.join(System.tmp_dir!(), "rma_scan_leak")
     File.mkdir_p!(dir)

@@ -24,6 +24,10 @@ defmodule Mix.Tasks.Rma.SyncAgentcoreModel do
   @compile {:no_warn_undefined, :public_key}
 
   @repo "boto/botocore"
+  # botocore's default branch is `develop`, not `main` — it has no `main` branch,
+  # so `commits/main` 422s and the whole sync dies on its first API call. Pin the
+  # real default branch here (used for both the tip lookup and the manifest ref).
+  @ref "develop"
   @data_path "botocore/data"
   @services ["bedrock-agentcore", "bedrock-agentcore-control"]
 
@@ -64,7 +68,7 @@ defmodule Mix.Tasks.Rma.SyncAgentcoreModel do
     {:ok, _} = Application.ensure_all_started(:ssl)
 
     sha =
-      api!("/repos/#{@repo}/commits/main")
+      api!("/repos/#{@repo}/commits/#{@ref}")
       |> Map.fetch!("sha")
 
     service_dirs = discover_service_dirs(sha)
@@ -225,7 +229,7 @@ defmodule Mix.Tasks.Rma.SyncAgentcoreModel do
       {"repo", @repo},
       {"path", @data_path},
       {"services", @services},
-      {"ref", "main"},
+      {"ref", @ref},
       {"commit", commit_sha}
     ]
 
