@@ -16,10 +16,13 @@ defmodule Mix.Tasks.Rma.Capture do
   Not shipped in the hex package (`lib/mix` is excluded from `package.files`)
   and not exercised by CI.
 
-  Ships ONE scenario today — AgentCore `ListHarnesses`, a side-effect-free
-  control-plane read — as the wired extension point; add more `{name, fun}`
-  tuples to `scenarios/1` as they're needed (the CMA scenario lands in
-  Task 8).
+  Ships two surfaces: AgentCore `ListHarnesses` (a side-effect-free
+  control-plane read, gated on AWS credentials) and Claude Managed Agents
+  `create_agent`/`create_environment` (gated on `ANTHROPIC_API_KEY`). The CMA
+  scenario provisions a throwaway agent + environment, captures both create
+  bodies, then best-effort archives both so a maintainer's account isn't left
+  with orphaned resources. Add more `{name, fun}` tuples to `scenarios/1` for
+  more AgentCore reads as they're needed.
 
   ## Why this duplicates `test/support/conformance/{capture,redaction}.ex`
 
@@ -38,6 +41,7 @@ defmodule Mix.Tasks.Rma.Capture do
   use Mix.Task
 
   alias ReqManagedAgents.AgentCore.{Client, SigV4}
+  alias ReqManagedAgents.Client, as: CMAClient
 
   # Mirrors ReqManagedAgents.Conformance.Redaction — bump alongside it if rules change.
   @redaction_version 1
@@ -48,12 +52,34 @@ defmodule Mix.Tasks.Rma.Capture do
 
   @impl Mix.Task
   def run(_argv) do
-    with {:ok, corpus_dir} <- fetch_corpus_dir(),
-         {:ok, credentials} <- fetch_credentials() do
-      client = Client.new(credentials: credentials)
-      Enum.each(scenarios(client), &capture_scenario!(corpus_dir, &1))
-    else
-      {:error, message} -> Mix.shell().info(message)
+    case fetch_corpus_dir() do
+      {:ok, corpus_dir} ->
+        run_agentcore(corpus_dir)
+        run_cma(corpus_dir)
+
+      {:error, message} ->
+        Mix.shell().info(message)
+    end
+  end
+
+  defp run_agentcore(corpus_dir) do
+    case fetch_credentials() do
+      {:ok, credentials} ->
+        client = Client.new(credentials: credentials)
+        Enum.each(scenarios(client), &capture_scenario!(corpus_dir, &1))
+
+      {:error, message} ->
+        Mix.shell().info(message)
+    end
+  end
+
+  defp run_cma(corpus_dir) do
+    case fetch_cma_api_key() do
+      {:ok, api_key} ->
+        capture_cma!(corpus_dir, CMAClient.new(api_key: api_key))
+
+      {:error, message} ->
+        Mix.shell().info(message)
     end
   end
 
@@ -101,6 +127,51 @@ defmodule Mix.Tasks.Rma.Capture do
       {:error,
        "live AWS credentials not found — export AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY " <>
          "(+ AWS_SESSION_TOKEN) and re-run."}
+  end
+
+  defp fetch_cma_api_key do
+    case System.get_env("ANTHROPIC_API_KEY") do
+      key when is_binary(key) and key != "" ->
+        {:ok, key}
+
+      _ ->
+        {:error,
+         "ANTHROPIC_API_KEY is not set — export it and re-run to capture the CMA scenario."}
+    end
+  end
+
+  # Provisions a throwaway agent + environment via the real CMA request bodies
+  # (mirrors ReqManagedAgents.Providers.ClaudeManagedAgents.provision/2's body
+  # shapes — bare model id, verbatim environment config), captures both create
+  # bodies, then best-effort archives both so nothing real is left orphaned.
+  defp capture_cma!(corpus_dir, client) do
+    name = "conformance_agent_" <> Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
+
+    agent_body = %{
+      name: name,
+      model: "claude-sonnet-4-6",
+      system: "You are a helpful assistant.",
+      tools: []
+    }
+
+    env_body = %{
+      name: "#{name}_env",
+      config: %{type: "cloud", networking: %{type: "unrestricted"}}
+    }
+
+    with {:ok, %{"id" => agent_id} = agent_resp} <- CMAClient.create_agent(client, agent_body),
+         {:ok, %{"id" => env_id} = env_resp} <- CMAClient.create_environment(client, env_body) do
+      now = DateTime.utc_now()
+      write_pair!(corpus_dir, :cma, "create_agent", agent_body, agent_resp, now)
+      write_pair!(corpus_dir, :cma, "create_environment", env_body, env_resp, now)
+      Mix.shell().info("captured cma/create_agent, cma/create_environment")
+
+      _ = CMAClient.archive_agent(client, agent_id)
+      _ = CMAClient.archive_environment(client, env_id)
+    else
+      {:error, reason} -> Mix.shell().info("skipped cma: #{inspect(reason)}")
+      other -> Mix.shell().info("skipped cma: unexpected response #{inspect(other)}")
+    end
   end
 
   # ---- redact-and-write (kept intentionally minimal — see moduledoc) ----
