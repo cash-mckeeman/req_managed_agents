@@ -6,8 +6,8 @@
 # change:
 #
 #   * the provider module (first argument)
-#   * its connection opts (`:agent_id`/`:environment_id` for Claude;
-#     `:harness_arn`/`:runtime_session_id` for AgentCore)
+#   * its connection handle (an agent + environment handle for Claude; a
+#     harness ARN for AgentCore) — both come out of `provision/3`
 #
 # Your tool handler, the result shape, the telemetry, and everything you build
 # on top do not change. `result.terminal` is the uniform signal to branch on
@@ -48,20 +48,29 @@ prompt = "What plan is jane@acme.com on, and when was she last billed?"
 
 # ── Backend A: Anthropic Claude Managed Agents (:streaming) ──────────────────
 # A long-lived SSE stream pushes events; the client posts events to drive the
-# loop. Connection opts are the agent + environment ids you provisioned.
+# loop. `provision(ClaudeManagedAgents, spec, ...)` returns a handle carrying
+# both ids; reconstruct that handle shape from the ids the other example
+# printed and pass it as `:agent`/`:environment` (each lifts the id it needs) —
+# thread the handle, not raw ids.
+claude_handle = %{
+  agent_id: System.fetch_env!("AGENT_ID"),
+  environment_id: System.fetch_env!("ENVIRONMENT_ID")
+}
+
 claude_result =
   Session.run(ClaudeManagedAgents,
     client: ReqManagedAgents.new(),
-    agent_id: System.fetch_env!("AGENT_ID"),
-    environment_id: System.fetch_env!("ENVIRONMENT_ID"),
+    agent: claude_handle,
+    environment: claude_handle,
     prompt: prompt,
     handler: Demo.Handler
   )
 
 # ── Backend B: AWS Bedrock AgentCore Harness (:request_response) ─────────────
 # Each turn is one synchronous SigV4-signed invoke; the resume turn re-sends
-# the assistant toolUse + your toolResult. Connection opts are the harness ARN
-# (from provisioning) + a fresh session id (33–100 chars, [a-zA-Z0-9-_]).
+# the assistant toolUse + your toolResult. `provision(BedrockAgentCore, spec, ...)`
+# returns a `%{harness_arn:, harness_id:}` handle; pass its `harness_arn` plus a
+# fresh session id (33–100 chars, [a-zA-Z0-9-_]).
 # The model was fixed at provision time; pass `model:` only to override it.
 bedrock_result =
   Session.run(BedrockAgentCore,

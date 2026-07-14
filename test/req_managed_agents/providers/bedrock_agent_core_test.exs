@@ -1,6 +1,7 @@
 defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.Agent.Spec
+  alias ReqManagedAgents.AgentCore.Client
   alias ReqManagedAgents.Environment.Spec, as: EnvSpec
   alias ReqManagedAgents.Providers.BedrockAgentCore, as: P
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
@@ -622,11 +623,22 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     assert P.harness_name(base, "t", env1) == P.harness_name(base, "t", env2)
   end
 
-  test "provision/2 sources the harness spec's environment/environment_variables from opts[:environment] (Environment.Spec) (#70/#72)" do
-    # Environment reaches Bedrock as an Environment.Spec at opts[:environment]; its opaque
-    # `config` supplies the two verbatim CreateHarness fields. Agent.Spec.new/1 coercion
-    # drops any non-Spec key, so a spec-embedded environment would silently vanish — this
-    # confirms the opts-sourced, typed replacement wires them onto the HarnessSpec unchanged.
+  # The live-canary shape (#70/#72 regression, fixed here): opts[:environment] is a bare
+  # map whose only key is the AgentCore-specific "agentCoreRuntimeEnvironment" wrapper.
+  # Environment.Spec.new/1 has no :name/:runtimes/:config key to match, so the WHOLE map
+  # becomes env.config — this is exactly what build_spec/2 must hand to HarnessSpec.environment
+  # verbatim (no indexing into it).
+  @live_canary_env %{
+    "agentCoreRuntimeEnvironment" => %{
+      "filesystemConfigurations" => [%{"sessionStorage" => %{"mountPath" => "/mnt/data"}}]
+    }
+  }
+
+  test "build_spec/2 maps opts[:environment]'s Environment.Spec.config to HarnessSpec.environment VERBATIM (#70/#72 fix)" do
+    # Root cause of the regression: build_spec/2 used to index config[:environment], but
+    # the config here IS the environment payload (no :environment key inside it) — so the
+    # old code produced environment: nil and the harness got no /mnt/data mount. Bedrock
+    # must be symmetric with ClaudeManagedAgents: config passes through untouched.
     spec = %{
       name: "env-harness",
       system_prompt: "x",
@@ -635,41 +647,73 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       model_config: %{"m" => 1}
     }
 
-    env = %{
-      "agentCoreRuntimeEnvironment" => %{
-        "filesystemConfigurations" => [%{"sessionStorage" => %{"mountPath" => "/mnt/data"}}]
-      }
-    }
-
-    environment = %{config: %{environment: env, environment_variables: %{"A" => "1"}}}
-
-    test_pid = self()
-
-    create_fun = fn harness_spec ->
-      send(test_pid, {:harness_spec, harness_spec})
-
-      {:ok,
-       %{
-         "harness" => %{
-           "arn" => "arn:aws:bedrock-agentcore:us-east-1:1:harness/x",
-           "harnessId" => "x"
-         }
-       }}
-    end
-
-    get_fun = fn _ -> {:ok, %{"harness" => %{"status" => "READY"}}} end
-
-    assert {:ok, _} =
-             P.provision(spec,
+    assert {:ok, %HarnessSpec{environment: env}} =
+             P.build_spec(spec,
                execution_role_arn: "arn:aws:iam::1:role/r",
-               environment: environment,
-               create_fun: create_fun,
-               get_fun: get_fun
+               environment: @live_canary_env
              )
 
-    assert_received {:harness_spec, hs}
-    # Byte-identical wire values to the pre-#72 opts-carried payload.
-    assert hs.environment == env
-    assert hs.environment_variables == %{"A" => "1"}
+    assert env == @live_canary_env
+  end
+
+  test "build_spec/2 with no opts[:environment] leaves HarnessSpec.environment nil" do
+    spec = %{
+      name: "env-less-harness",
+      system_prompt: "x",
+      tools: [],
+      terminal_tool: nil,
+      model_config: %{"m" => 1}
+    }
+
+    assert {:ok, %HarnessSpec{environment: nil}} =
+             P.build_spec(spec, execution_role_arn: "arn:aws:iam::1:role/r")
+  end
+
+  test "provision/2 -> Client.create_harness wire body carries \"environment\" verbatim from opts[:environment] (#70/#72 fix)" do
+    # End-to-end proof the fix reaches the wire: build_spec/2's HarnessSpec.environment,
+    # signed and POSTed by the real AgentCore.Client, must carry the live-canary payload
+    # under wire key "environment" byte-for-byte — this is what makes the
+    # live_smoke_test.exs sessionStorage-mount case pass.
+    bypass = Bypass.open()
+
+    client =
+      Client.new(
+        credentials: %{
+          access_key_id: "AKID",
+          secret_access_key: "secret",
+          region: "us-east-1",
+          security_token: nil
+        },
+        base_url: "http://localhost:#{bypass.port}"
+      )
+
+    Bypass.expect_once(bypass, "POST", "/harnesses", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      decoded = Jason.decode!(body)
+      assert decoded["environment"] == @live_canary_env
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(
+        200,
+        ~s({"harness":{"arn":"arn:aws:bedrock-agentcore:us-east-1:1:harness/x","harnessId":"x-1","status":"CREATING"}})
+      )
+    end)
+
+    spec = %{
+      name: "env-harness",
+      system_prompt: "x",
+      tools: [],
+      terminal_tool: nil,
+      model_config: %{"m" => 1}
+    }
+
+    assert {:ok, %HarnessSpec{} = harness_spec} =
+             P.build_spec(spec,
+               execution_role_arn: "arn:aws:iam::1:role/r",
+               environment: @live_canary_env
+             )
+
+    assert {:ok, _} = Client.create_harness(client, harness_spec)
   end
 end

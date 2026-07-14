@@ -42,19 +42,24 @@ end
 
 {:ok, _} = Application.ensure_all_started(:req_managed_agents)
 
+alias ReqManagedAgents.Agent.Spec
 alias ReqManagedAgents.Providers.BedrockAgentCore
 
 # ── 1. Provision the harness (idempotent; cached per {provider, spec}) ──────
 #
-# The spec is the provider-agnostic shape from `ReqManagedAgents.Provider`:
-# system prompt, tool schemas, and a provider-native model config. The tool
-# entries use AgentCore's wire format (`inline_function`); only the SCHEMA
-# ships — the implementation stays in your Handler.
+# The same shape as the Claude example: build an `%Agent.Spec{}` (name, system
+# prompt, tool schemas, a provider-native model config) and hand it to
+# `ReqManagedAgents.provision/3`. A spec MUST have a `:name` — it is the
+# repository base the harness name is derived from. The tool entries use
+# AgentCore's wire format (`inline_function`); only the SCHEMA ships — the
+# implementation stays in your Handler. (An environment, if any, is passed as
+# the `:environment` option, never on the spec.)
 #
 # `provision/3` is create-or-reuse: it survives name collisions with an
 # existing READY harness and polls until the harness is READY (creation takes
 # a minute or two). Store the returned handle in a real app.
-spec = %{
+spec = %Spec{
+  name: "billing-support",
   system_prompt: "You are a concise billing-support agent. Use tools for customer data.",
   terminal_tool: nil,
   model_config: %{

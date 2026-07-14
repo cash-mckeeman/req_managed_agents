@@ -7,13 +7,14 @@
 #
 # What this script does:
 #
-#   1. creates a versioned agent (model + system prompt + custom-tool schema)
-#   2. creates an environment for it to run in
-#   3. asks it a question that requires the `lookup_customer` tool
-#   4. Claude runs the loop server-side; when it calls the tool, control
+#   1. provisions a versioned agent + its environment in one call
+#      (`provision/3` — model + system prompt + custom-tool schema, plus the
+#      environment the session runs in)
+#   2. asks it a question that requires the `lookup_customer` tool
+#   3. Claude runs the loop server-side; when it calls the tool, control
 #      returns HERE — `Demo.Handler.handle_tool_call/3` runs locally — and the
 #      text result is posted back to resume the loop
-#   5. prints the final `%ReqManagedAgents.SessionResult{}`: assistant text,
+#   4. prints the final `%ReqManagedAgents.SessionResult{}`: assistant text,
 #      terminal, and token usage
 #
 # Run it:
@@ -52,65 +53,75 @@ end
 
 {:ok, _} = Application.ensure_all_started(:req_managed_agents)
 
+alias ReqManagedAgents.Agent.Spec
+alias ReqManagedAgents.Providers.ClaudeManagedAgents
+
 # The control-plane client. Reads ANTHROPIC_API_KEY from the environment by
 # default; see `ReqManagedAgents.Client.new/1` for explicit options.
 client = ReqManagedAgents.new()
 
-# ── 1. Create the agent (one-time; store the id in a real app) ──────────────
+# ── 1. Provision the agent + environment (idempotent; cached per {provider, spec}) ──
 #
-# The agent is a versioned, provider-side resource: model, system prompt, and
-# the SCHEMAS of your custom tools (never their implementations).
-{:ok, %{"id" => agent_id}} =
-  ReqManagedAgents.Client.create_agent(client, %{
-    name: "billing-support",
-    model: "claude-haiku-4-5",
-    system: "You are a concise billing-support agent. Use tools for customer data.",
-    tools: [
-      %{
-        type: "custom",
-        name: "lookup_customer",
-        description:
-          "Look up a customer by email and return plan, status, and last invoice. " <>
-            "Always call this for customer data; never guess.",
-        input_schema: %{
-          "type" => "object",
-          "properties" => %{"email" => %{"type" => "string"}},
-          "required" => ["email"]
-        }
+# The same shape as the Bedrock example: build an `%Agent.Spec{}` — name,
+# system prompt, and the SCHEMAS of your custom tools (never their
+# implementations) — and hand it to `ReqManagedAgents.provision/3`, with the
+# environment passed as the `:environment` option (an `Environment.Spec`, or a
+# flat map that coerces to one — its `config` is passed verbatim to the wire
+# environment field). For Claude Managed Agents the model config is a plain
+# model-id string. `provision/3` creates the versioned agent resource and its
+# environment, returning ONE handle carrying both ids. Store it in a real app.
+agent_spec = %Spec{
+  name: "billing-support",
+  system_prompt: "You are a concise billing-support agent. Use tools for customer data.",
+  model_config: "claude-haiku-4-5",
+  tools: [
+    %{
+      type: "custom",
+      name: "lookup_customer",
+      description:
+        "Look up a customer by email and return plan, status, and last invoice. " <>
+          "Always call this for customer data; never guess.",
+      input_schema: %{
+        "type" => "object",
+        "properties" => %{"email" => %{"type" => "string"}},
+        "required" => ["email"]
       }
-    ]
-  })
+    }
+  ]
+}
 
-IO.puts("created agent #{agent_id}")
+env_spec = %{type: "cloud", networking: %{type: "unrestricted"}}
 
-# ── 2. Create an environment (also one-time; reuse the id) ──────────────────
-{:ok, %{"id" => env_id}} =
-  ReqManagedAgents.Client.create_environment(client, %{
-    name: "billing-support-env",
-    config: %{type: "cloud", networking: %{type: "unrestricted"}}
-  })
+{:ok, handle} =
+  ReqManagedAgents.provision(ClaudeManagedAgents, agent_spec,
+    client: client,
+    environment: env_spec
+  )
 
-# ── 3. Run a session to completion ──────────────────────────────────────────
+# handle == %{agent_id: "agent_id_…", environment_id: "env_id_…"}
+IO.puts("provisioned agent #{handle.agent_id}")
+
+# ── 2. Run a session to completion ──────────────────────────────────────────
 #
-# `run_to_completion/1` blocks until the agent reaches a terminal state and
-# returns `{:ok, %ReqManagedAgents.SessionResult{}}`. It is the Claude
-# convenience form of the provider-agnostic call:
-#
-#     ReqManagedAgents.Session.run(ReqManagedAgents.Providers.ClaudeManagedAgents, opts)
+# `Session.run/2` blocks until the agent reaches a terminal state and returns
+# `{:ok, %ReqManagedAgents.SessionResult{}}`. The provision handle carries both
+# ids; `:agent`/`:environment` accept it directly (each lifts the id it needs),
+# so you never hand-thread raw ids.
 #
 # For a long-lived, supervised, reconnecting session (a chat), use
 # `ReqManagedAgents.start_session/1` + `ReqManagedAgents.Session.message/2`
-# instead — same opts, same handler.
+# instead — same opts, same handler. `ReqManagedAgents.run_to_completion/1` is
+# the Claude convenience alias for `Session.run(ClaudeManagedAgents, opts)`.
 {:ok, result} =
-  ReqManagedAgents.run_to_completion(
+  ReqManagedAgents.Session.run(ClaudeManagedAgents,
     client: client,
-    agent_id: agent_id,
-    environment_id: env_id,
+    agent: handle,
+    environment: handle,
     prompt: "What plan is jane@acme.com on, and when was she last billed?",
     handler: Demo.Handler
   )
 
-# ── 4. The result: one canonical shape, whatever the provider ───────────────
+# ── 3. The result: one canonical shape, whatever the provider ───────────────
 #
 #   result.terminal  — :end_turn | :requires_action | :terminated
 #   result.text      — the assistant's accumulated text

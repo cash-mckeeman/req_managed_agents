@@ -26,6 +26,10 @@ gateway's internals. Direct-to-provider `chat_fun`s remain available for dev and
   )
 ```
 
+(`Providers.Local` reads the bare-map `spec` keys directly and never coerces to
+`%Agent.Spec{}`, so it takes no `:name`; the managed providers do — see "Provision
+once, run anywhere".)
+
 ## Install
 
 ```elixir
@@ -97,20 +101,24 @@ shape for every provider:
 alias ReqManagedAgents.Session
 alias ReqManagedAgents.Providers.{ClaudeManagedAgents, BedrockAgentCore}
 
-# Claude Managed Agents (streaming)
+# `handle` is what `provision/3` returns — see "Provision once, run anywhere" below.
+
+# Claude Managed Agents (streaming) — `agent:`/`environment:` take the handle
+# (each lifts the id it needs); no hand-threaded raw ids.
 {:ok, %ReqManagedAgents.SessionResult{} = result} =
   Session.run(ClaudeManagedAgents,
-    client: ReqManagedAgents.new(), agent_id: agent_id, environment_id: env_id,
+    client: ReqManagedAgents.new(), agent: handle, environment: handle,
     prompt: "…", handler: MyHandler)
 
 result.terminal   # :end_turn | :requires_action | :terminated — uniform across providers
 result.text       # the assistant's accumulated text
 result.usage      # %ReqManagedAgents.Usage{input_tokens:, output_tokens:, …}
 
-# AWS Bedrock AgentCore (request/response) — same handler, same result struct
+# AWS Bedrock AgentCore (request/response) — same handler, same result struct;
+# its handle carries a `harness_arn`.
 {:ok, %ReqManagedAgents.SessionResult{}} =
   Session.run(BedrockAgentCore,
-    harness_arn: arn, runtime_session_id: sid,
+    harness_arn: handle.harness_arn, runtime_session_id: sid,
     prompt: "…", handler: MyHandler)
 ```
 
@@ -155,38 +163,63 @@ end
 Three runnable, heavily-commented examples ship with the package:
 
 - [`examples/claude_managed_agents.exs`](examples/claude_managed_agents.exs) — the full Claude
-  lifecycle: agent + environment setup, a local tool handler, and the
+  lifecycle: `provision/3` (agent + environment in one call), a local tool handler, and the
   `%SessionResult{}` (text, terminal, token usage).
 - [`examples/bedrock_agent_core.exs`](examples/bedrock_agent_core.exs) — AgentCore Harness:
-  `provision/3` (idempotent, READY-polled), `Session.run/2`, `teardown/2`, and the AWS
+  the same `provision/3` → `Session.run/2` → `teardown/2` shape, plus the AWS
   gotchas (session-id contract, cross-region model profiles, async deletion).
 - [`examples/provider_agnostic.exs`](examples/provider_agnostic.exs) — the core claim: one
   handler, one loop, two providers, same result shape.
 
-## The Claude pattern (setup)
+## Provision once, run anywhere
 
-1. Create a versioned agent once (model, system prompt, custom-tool definitions); store its id.
-2. Create an environment once with `Client.create_environment/2` and reuse its id (a session needs
-   an `environment_id`).
-3. Start a session; the provider drives the loop and emits `agent.custom_tool_use`. The library
-   runs your tool via the `Handler` callback and posts the result back. On `end_turn`, you're done.
+Both managed providers speak **one vocabulary**: build an `%ReqManagedAgents.Agent.Spec{}`
+(a `:name` is required — `Agent.Spec.new/1` rejects a nameless spec), provision it — passing
+any environment as the `:environment` option (an `Environment.Spec`, or a flat map that coerces
+to one; its `config` is handed **verbatim** to the provider's wire environment field, no per-key
+indexing) — and thread the returned handle into `Session.run/2`. The provider module is the only
+thing you change.
 
-## The Bedrock AgentCore pattern (setup)
+```elixir
+alias ReqManagedAgents.Agent.Spec
 
-1. Provision a Harness once — CreateHarness + READY-poll, idempotent and cached — via
-   `ReqManagedAgents.provision/3` (`Provisioner.ensure/3` under the hood, built on
-   `ReqManagedAgents.AgentCore.Client`). Store the returned handle; tear down with
-   `ReqManagedAgents.teardown/2`.
-2. `Session.run(BedrockAgentCore, harness_arn: …, runtime_session_id: …, …)`. Each turn is one
-   synchronous signed invoke; resume re-sends the assistant `toolUse` + your `toolResult` delta.
-   (`runtimeSessionId` must be ≥33 chars.)
-   Long runs: pass `idle_timeout:` (inter-chunk liveness guard, default 300s — the turn
-   itself has **no client wall clock**) and the server budgets `timeout_seconds:`,
-   `max_iterations:`, `max_tokens:` (per-invocation overrides of the harness defaults).
-   Note: `Session.run/2`'s `:timeout` must be ≥ the server budget — a client timeout returns
-   `{:error, :timeout}` but does NOT cancel the in-flight invoke; the harness keeps executing
-   (and billing) server-side up to its own `timeoutSeconds`.
-   Events stream to your `Handler.handle_event/2` live as the turn runs.
+spec = %Spec{
+  name: "billing-support",
+  system_prompt: "You are a concise billing-support agent. Use tools for customer data.",
+  model_config: model_config,   # provider-specific wire shape — see the table
+  tools: tools                  # SCHEMAS only; the implementations stay in your Handler
+}
+
+# create-or-reuse, cached in-process per {provider, spec}; `teardown/2` releases it
+{:ok, handle} = ReqManagedAgents.provision(provider, spec, environment: env_spec)
+
+# then thread `handle` into Session.run — the connection opts are the one
+# per-provider difference (see the table below).
+```
+
+What actually differs between the two providers is only this:
+
+| | Claude Managed Agents | Bedrock AgentCore |
+|---|---|---|
+| **mode** | `:streaming` — long-lived SSE, events pushed | `:request_response` — one synchronous signed invoke per turn |
+| **credentials** | `ANTHROPIC_API_KEY` + beta header | AWS SigV4 (`AWS_*`) + an execution-role ARN |
+| **`model_config` wire** | plain model-id string (`"claude-haiku-4-5"`) | `%{"bedrockModelConfig" => %{"modelId" => "us.…"}}` (cross-region inference profile) |
+| **provision creates** | a versioned agent **and** an environment (two resources) | one harness folding in model + tools + environment |
+| **provision handle** | `%{agent_id:, environment_id:}` | `%{harness_arn:, harness_id:}` |
+| **`Session.run` connection** | `agent: handle, environment: handle` | `harness_arn: handle.harness_arn, runtime_session_id: sid` (id ≥33 chars) |
+| **capabilities** | outcomes, server-tool observation, cross-batch tool recovery, resume/reconnect | none of these — a dropped turn just re-invokes |
+
+`:agent`/`:environment` accept a handle (a struct, or a bare map with the same
+`agent_id:`/`environment_id:` keys) and unpack to the raw ids before the provider opens the
+session; an explicit `:agent_id`/`:environment_id` still works and wins if both are given.
+
+Each AgentCore turn is one signed invoke; resume re-sends the assistant `toolUse` + your
+`toolResult` delta. Long runs stream incrementally with **no client wall clock** — only silence
+fails a turn (`idle_timeout:`, inter-chunk guard, default 300s); cost is bounded server-side via
+`timeout_seconds:`/`max_iterations:`/`max_tokens:` (per-invocation overrides of the harness
+defaults). `Session.run/2`'s own `:timeout` must be ≥ the server budget — a client timeout returns
+`{:error, :timeout}` but does NOT cancel the in-flight invoke; the harness keeps executing (and
+billing) up to its `timeoutSeconds`. Events reach `Handler.handle_event/2` live either way.
 
 ## Layers
 
@@ -266,7 +299,8 @@ needs nothing; EFS/S3 mounts need VPC mode) plus direct shell access
 (`AgentCore.Client.invoke_agent_runtime_command/2` — no model loop, no token cost).
 The `sessionStorage` store handles report-scale artifacts (bytes transit the command
 stream as Base64); an S3-mount store (host side = plain S3) is designed for 0.4.
-Declare mounts via the opaque `environment` field on the provision spec.
+Declare mounts via the `:environment` provisioning option (an `Environment.Spec`; its
+`config` is passed verbatim to the provider's wire environment field).
 
 > **The outputs-dir convention (Claude Managed Agents, established live 2026-07-03):**
 > only files the agent writes under **`/mnt/session/outputs/`** become session
@@ -305,7 +339,8 @@ env_spec = %{type: "cloud", packages: %{pip: ["pandas"]}, networking: %{type: "u
 # Build once — next run hits the store and returns the same handle instantly:
 {:ok, handle} =
   ReqManagedAgents.ensure_environment(client, env_spec, name: "data_analysis", store: store)
-# handle == %{environment_id: "env_id_…", name: "data_analysis_3f9a1b2c", digest: "3f9a1b2c"}
+# handle is a %ReqManagedAgents.Provisioner.Environment.Handle{} struct
+# (dot-access + Jason-encodes to %{environment_id: "env_id_…", name: "data_analysis_3f9a1b2c", digest: "3f9a1b2c"})
 
 # Pin the current image as "prod" (movable pointer; retag freely):
 :ok = Provisioner.tag("data_analysis", "prod", handle, store: store)
@@ -347,6 +382,10 @@ a runtime version produces a new image automatically, no extra machinery.
 
 ## Agents as managed entities
 
+`ensure_agent/3` is the content-addressed cousin of `provision/3` ("Provision once, run
+anywhere"): same `%Agent.Spec{}` vocabulary, but Store-backed, digest-named, tag- and
+prune-aware, returning a typed handle you splat straight into `Session.run/2`.
+
 The same content-addressed lifecycle `Provisioner.Environments` gives environments
 applies to agents: `ReqManagedAgents.Agent.Spec` hashes an agent's identity
 (`system_prompt`, `tools`, `terminal_tool`, `model_config` — `name` is the base, not
@@ -363,7 +402,8 @@ agent_spec = %{
 
 # Build once — a second call with the same spec returns the same handle, no re-create:
 {:ok, agent} = ReqManagedAgents.ensure_agent(client, agent_spec, name: "support_bot", store: store)
-# agent == %{agent_id: "agent_id_…", name: "support_bot_3f9a1b2c", digest: "3f9a1b2c"}
+# agent is a %ReqManagedAgents.Agent.Handle{} struct
+# (dot-access + Jason-encodes to %{agent_id: "agent_id_…", name: "support_bot_3f9a1b2c", digest: "3f9a1b2c"})
 
 # Pin the current version as "prod" (movable; retag freely):
 :ok = ReqManagedAgents.tag_agent("support_bot", "prod", agent, store: store)
