@@ -1,0 +1,8 @@
+{
+  "events": [
+    { "contentBlockDelta": { "contentBlockIndex": 0, "delta": { "text": "Hello, " } } },
+    { "contentBlockDelta": { "contentBlockIndex": 0, "delta": { "text": "world!" } } },
+    { "metadata": { "usage": { "inputTokens": 10, "outputTokens": 5 } } },
+    { "messageStop": { "stopReason": "end_turn" } }
+  ]
+}

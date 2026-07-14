@@ -1,0 +1,6 @@
+{
+  "events": [
+    { "contentBlockDelta": { "contentBlockIndex": 0, "delta": { "text": "Partial response cut off" } } },
+    { "messageStop": { "stopReason": "max_tokens" } }
+  ]
+}
