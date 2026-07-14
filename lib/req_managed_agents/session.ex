@@ -49,8 +49,9 @@ defmodule ReqManagedAgents.Session do
   Provider-specific opts (e.g. `:agent_id`/`:environment_id`, `:harness_arn`/`:runtime_session_id`,
   `:session_id` to resume) are forwarded to the provider's `open/2`. `:agent`/`:environment` accept
   the handle returned by `ReqManagedAgents.ensure_agent/3` / `ensure_environment/3`
-  (`%{agent_id:, name:, digest:}` / `%{environment_id:, name:, digest:}`) — the handle is unpacked
-  to `:agent_id`/`:environment_id` before `open/2` runs, so callers pass the handle instead of
+  (a `%ReqManagedAgents.Agent.Handle{}` / `%ReqManagedAgents.Provisioner.Environment.Handle{}`, or a
+  bare map with the same `agent_id:`/`environment_id:` keys) — the handle is unpacked to
+  `:agent_id`/`:environment_id` before `open/2` runs, so callers pass the handle instead of
   hand-threading the raw id; an explicit `:agent_id`/`:environment_id` wins if both are given.
   """
   use GenServer
@@ -59,6 +60,7 @@ defmodule ReqManagedAgents.Session do
   alias ReqManagedAgents.{
     Outcome,
     Provider,
+    Session.State,
     SessionInfo,
     SessionResult,
     Tools,
@@ -184,7 +186,7 @@ defmodule ReqManagedAgents.Session do
             model_config_metadata(opts)
           )
 
-        state = %{
+        state = %State{
           provider: provider,
           delta?: exports_text_delta?(provider),
           mode: provider.mode(),
@@ -196,8 +198,8 @@ defmodule ReqManagedAgents.Session do
           caller: opts[:caller],
           notify: opts[:notify],
           meta: meta,
-          ref: Map.get(conn, :ref),
-          consumer: Map.get(conn, :consumer),
+          ref: provider.ref(conn),
+          consumer: provider.consumer(conn),
           poll_task: nil,
           kicked_off: false,
           seen: MapSet.new(),
@@ -220,10 +222,10 @@ defmodule ReqManagedAgents.Session do
           # a fresh (non-resume) session must NOT arm this, or a later live reconnect (e.g. after a
           # post-kickoff stream drop) would reach the same idle branch and redeliver the kickoff
           # prompt as a spurious second user.message.
-          pending_user_message: pending_user_message(conn, opts)
+          pending_user_message: pending_user_message(provider, conn, opts)
         }
 
-        {:ok, state, {:continue, if(resumed?(conn), do: :resume, else: :maybe_kickoff)}}
+        {:ok, state, {:continue, if(provider.resumed?(conn), do: :resume, else: :maybe_kickoff)}}
 
       # Surface the provider's error verbatim (e.g. {:create_session_failed, _}) — no extra wrapping.
       {:error, reason} ->
@@ -231,12 +233,9 @@ defmodule ReqManagedAgents.Session do
     end
   end
 
-  # A provider's open/2 answers `resume: true` in `conn` only when it consolidated an
-  # EXISTING session (session_id set) rather than creating a fresh one.
-  defp resumed?(conn), do: !!Map.get(conn, :resume)
-
   # Only a resume arms pending_user_message — see the state-build comment above (#66).
-  defp pending_user_message(conn, opts), do: if(resumed?(conn), do: opts[:prompt])
+  defp pending_user_message(provider, conn, opts),
+    do: if(provider.resumed?(conn), do: opts[:prompt])
 
   # Managed-entity handles (from ensure_agent/3, ensure_environment/3) unpack to
   # the raw ids providers' open/2 read — callers pass the handle, not the id.
@@ -249,8 +248,8 @@ defmodule ReqManagedAgents.Session do
 
   defp lift_handle(opts, handle_key, id_key) do
     case {opts[id_key], opts[handle_key]} do
-      {nil, h} when is_map(h) and not is_struct(h) ->
-        Keyword.put(opts, id_key, h[id_key] || h[to_string(id_key)])
+      {nil, h} when is_map(h) ->
+        Keyword.put(opts, id_key, Map.get(h, id_key) || Map.get(h, to_string(id_key)))
 
       _ ->
         opts
@@ -310,8 +309,8 @@ defmodule ReqManagedAgents.Session do
           s
           | conn: conn,
             info: build_info(s.provider, conn, s.meta),
-            ref: Map.get(conn, :ref),
-            consumer: Map.get(conn, :consumer),
+            ref: s.provider.ref(conn),
+            consumer: s.provider.consumer(conn),
             seen: seen,
             turn_events: []
         }
@@ -722,10 +721,10 @@ defmodule ReqManagedAgents.Session do
 
   defp forward_raw(_s, _ev), do: :ok
 
-  # Session identity for handler callbacks: providers standardize a :session_id
-  # conn key (Claude mints it at open; Bedrock echoes the caller-supplied id).
+  # Session identity for handler callbacks: every provider answers session_id/1
+  # (Claude mints it at open; Bedrock echoes the caller-supplied id).
   defp build_info(provider, conn, meta),
-    do: %SessionInfo{session_id: Map.get(conn, :session_id), provider: provider, metadata: meta}
+    do: %SessionInfo{session_id: provider.session_id(conn), provider: provider, metadata: meta}
 
   # Metadata passthrough: correlation ids minted by a routing layer (request ids,
   # decision ids, …) ride model_config into telemetry AND handle_event's

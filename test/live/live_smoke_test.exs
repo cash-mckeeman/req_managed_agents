@@ -179,6 +179,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     # proof for `ClaudeManagedAgents.provision/2` + `teardown/2`, which the
     # unit suite covers only against stubs.
     spec = %{
+      name: "rma-live-cma-provision",
       system_prompt: "When asked to echo, call the echo tool with the user's text.",
       terminal_tool: nil,
       model_config: System.get_env("CMA_LIVE_MODEL", "claude-haiku-4-5"),
@@ -238,6 +239,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     role = System.fetch_env!("HARNESS_EXECUTION_ROLE_ARN")
 
     spec = %{
+      name: "rma-live-bedrock-harness",
       system_prompt: "You are a terse assistant. Reply in a few words.",
       tools: [],
       terminal_tool: nil,
@@ -374,6 +376,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     role = System.fetch_env!("HARNESS_EXECUTION_ROLE_ARN")
 
     spec = %{
+      name: "rma-live-bedrock-command",
       system_prompt: "You are a terse assistant.",
       tools: [],
       terminal_tool: nil,
@@ -434,6 +437,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     role = System.fetch_env!("HARNESS_EXECUTION_ROLE_ARN")
 
     spec = %{
+      name: "rma-live-bedrock-mount",
       system_prompt: "You are a terse assistant.",
       tools: [],
       terminal_tool: nil,
@@ -441,19 +445,23 @@ defmodule ReqManagedAgents.LiveSmokeTest do
         "bedrockModelConfig" => %{
           "modelId" => System.get_env("BEDROCK_LIVE_MODEL_ID", "nvidia.nemotron-super-3-120b")
         }
-      },
-      # The opaque environment pass-through, sessionStorage = the no-VPC mount.
-      environment: %{
-        "agentCoreRuntimeEnvironment" => %{
-          "filesystemConfigurations" => [%{"sessionStorage" => %{"mountPath" => "/mnt/data"}}]
-        }
+      }
+    }
+
+    # The opaque environment pass-through, sessionStorage = the no-VPC mount. Relocated to
+    # opts (#70) — Agent.Spec.new/1's boundary coercion drops any non-Spec key, so this can
+    # no longer live on the spec map.
+    environment = %{
+      "agentCoreRuntimeEnvironment" => %{
+        "filesystemConfigurations" => [%{"sessionStorage" => %{"mountPath" => "/mnt/data"}}]
       }
     }
 
     {:ok, handle} =
       ReqManagedAgents.provision(BedrockAgentCore, spec,
         execution_role_arn: role,
-        name_prefix: "rma_live"
+        name_prefix: "rma_live",
+        environment: environment
       )
 
     try do

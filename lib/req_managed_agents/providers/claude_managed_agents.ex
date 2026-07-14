@@ -13,40 +13,43 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.Agent.Spec
-  alias ReqManagedAgents.{Client, Event, Outcome, Stream, ToolUse, TurnResult, Usage}
+  alias ReqManagedAgents.{Client, Environment, Event, Outcome, Stream, ToolUse, TurnResult, Usage}
+
+  @default_env_config %{type: "cloud", networking: %{type: "unrestricted"}}
 
   @impl true
   def mode, do: :streaming
 
   @impl true
   def provision(spec, opts) do
-    client = client_from(opts)
-    name = opts[:name] || "agent_" <> agent_digest(spec)
+    with {:ok, spec} <- Spec.new(spec),
+         {:ok, env} <- Environment.Spec.new(opts[:environment]) do
+      client = client_from(opts)
+      name = opts[:name] || "agent_" <> agent_digest(spec)
 
-    agent_body = %{
-      name: name,
-      model: normalize_model_id(spec.model_config),
-      system: spec.system_prompt,
-      tools: spec.tools
-    }
+      agent_body = %{
+        name: name,
+        model: normalize_model_id(spec.model_config),
+        system: spec.system_prompt,
+        tools: spec.tools
+      }
 
-    env_body =
-      opts[:environment] ||
-        %{name: "#{name}_env", config: %{type: "cloud", networking: %{type: "unrestricted"}}}
+      env_body = env_body(env, name)
 
-    with {:ok, %{"id" => agent_id}} <- Client.create_agent(client, agent_body) do
-      case Client.create_environment(client, env_body) do
-        {:ok, %{"id" => env_id}} ->
-          {:ok, %{agent_id: agent_id, environment_id: env_id}}
+      with {:ok, %{"id" => agent_id}} <- Client.create_agent(client, agent_body) do
+        case Client.create_environment(client, env_body) do
+          {:ok, %{"id" => env_id}} ->
+            {:ok, %{agent_id: agent_id, environment_id: env_id}}
 
-        {:error, reason} ->
-          # Roll back the orphaned agent so nothing leaks and a retry isn't blocked.
-          _ = Client.archive_agent(client, agent_id)
-          {:error, reason}
+          {:error, reason} ->
+            # Roll back the orphaned agent so nothing leaks and a retry isn't blocked.
+            _ = Client.archive_agent(client, agent_id)
+            {:error, reason}
 
-        other ->
-          _ = Client.archive_agent(client, agent_id)
-          {:error, {:unexpected_create_environment_response, other}}
+          other ->
+            _ = Client.archive_agent(client, agent_id)
+            {:error, {:unexpected_create_environment_response, other}}
+        end
       end
     end
   end
@@ -66,6 +69,17 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   defp archive_tag({:ok, _}), do: :ok
   defp archive_tag({:error, reason}), do: {:error, reason}
+
+  # Build the create_environment body from the coerced `Environment.Spec`. A nil environment
+  # (or an empty `config`) preserves the historical default body byte-for-byte, so env-less
+  # provisions are unchanged; a populated `Environment.Spec` drives name + config from it.
+  defp env_body(nil, name), do: %{name: "#{name}_env", config: @default_env_config}
+
+  defp env_body(%Environment.Spec{} = env, name),
+    do: %{name: env.name || "#{name}_env", config: env_config(env.config)}
+
+  defp env_config(config) when config == %{}, do: @default_env_config
+  defp env_config(config), do: config
 
   @doc "The CMA endpoint requires bare model ids; strip a leading `provider:` qualifier."
   @spec normalize_model_id(String.t()) :: String.t()
@@ -111,6 +125,21 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
         {:ok, %{client: client, session_id: sid, ref: nil, resume: true}}
     end
   end
+
+  # conn is %{client:, session_id:, ref:, consumer:, resume?} — a fresh open sets ref/consumer
+  # (the stream Task started in open/2); a resume (session_id already known) leaves ref/consumer
+  # unset until reconnect/3 consolidates it, and marks :resume so Session knows to reattach.
+  @impl true
+  def session_id(conn), do: Map.get(conn, :session_id)
+
+  @impl true
+  def ref(conn), do: Map.get(conn, :ref)
+
+  @impl true
+  def consumer(conn), do: Map.get(conn, :consumer)
+
+  @impl true
+  def resumed?(conn), do: !!Map.get(conn, :resume)
 
   @impl true
   def kickoff_input(opts) do

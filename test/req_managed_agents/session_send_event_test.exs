@@ -67,6 +67,15 @@ defmodule ReqManagedAgents.SessionSendEventTest do
         events: events
       }
     end
+
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(conn), do: conn.ref
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   # Streaming fake that records pushed inputs instead of scripting turns.
@@ -100,6 +109,15 @@ defmodule ReqManagedAgents.SessionSendEventTest do
     def turn_boundary?(_), do: false
     @impl true
     def normalize(events), do: %ReqManagedAgents.TurnResult{terminal: :terminated, events: events}
+
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(conn), do: conn.ref
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   test "send_event/2 pushes the raw event on a streaming session" do

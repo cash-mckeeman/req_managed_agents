@@ -7,6 +7,7 @@ defmodule ReqManagedAgents.Provisioner do
   default, or a persistent store (e.g. `Store.File`) for reuse across OS processes.
   """
   require Logger
+  alias ReqManagedAgents.Environment
   alias ReqManagedAgents.Provider
   alias ReqManagedAgents.Provisioner.Store
 
@@ -16,23 +17,34 @@ defmodule ReqManagedAgents.Provisioner do
           {:ok, Provider.handle()} | {:error, term()}
   def ensure(provider, spec, opts \\ []) do
     {mod, sopts} = opts[:store] || @default_store
-    key = "provision:" <> hash({provider, spec})
 
-    case safe_get(mod, sopts, key) do
-      {:ok, handle} ->
-        {:ok, handle}
+    # Fold the environment identity into the cache key — but ONLY when an
+    # environment is present, so env-less keys stay byte-identical to pre-#70
+    # (no forced re-provision on upgrade). An invalid environment surfaces as an
+    # error rather than caching under a corrupt key.
+    with {:ok, env} <- Environment.Spec.new(opts[:environment]) do
+      key = "provision:" <> hash(key_term(provider, spec, env))
 
-      :miss ->
-        case provider.provision(spec, opts) do
-          {:ok, handle} ->
-            safe_put(mod, sopts, key, handle)
-            {:ok, handle}
-
-          {:error, reason} ->
-            {:error, {:provision_failed, reason}}
-        end
+      case safe_get(mod, sopts, key) do
+        {:ok, handle} -> {:ok, handle}
+        :miss -> provision_and_cache(provider, spec, opts, mod, sopts, key)
+      end
     end
   end
+
+  defp provision_and_cache(provider, spec, opts, mod, sopts, key) do
+    case provider.provision(spec, opts) do
+      {:ok, handle} ->
+        safe_put(mod, sopts, key, handle)
+        {:ok, handle}
+
+      {:error, reason} ->
+        {:error, {:provision_failed, reason}}
+    end
+  end
+
+  defp key_term(provider, spec, nil), do: {provider, spec}
+  defp key_term(provider, spec, env), do: {provider, spec, Environment.Spec.digest(env)}
 
   @doc """
   Drop any cache entry whose value is `handle` (called after teardown). With a

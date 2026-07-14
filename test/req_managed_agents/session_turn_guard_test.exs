@@ -50,6 +50,15 @@ defmodule ReqManagedAgents.SessionTurnGuardTest do
         events: events
       }
     end
+
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   @tool_turn [

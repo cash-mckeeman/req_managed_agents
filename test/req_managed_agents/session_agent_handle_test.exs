@@ -25,6 +25,15 @@ defmodule ReqManagedAgents.SessionAgentHandleTest do
     @impl true
     def normalize(_e),
       do: %ReqManagedAgents.TurnResult{terminal: :end_turn, stop_reason: "stop", events: []}
+
+    @impl true
+    def session_id(conn), do: conn.session_id
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   test "an :agent / :environment handle is unpacked to ids before open/2" do
@@ -49,5 +58,31 @@ defmodule ReqManagedAgents.SessionAgentHandleTest do
     )
 
     assert_received {:opened, "explicit_a", "explicit_e"}
+  end
+
+  # Regression for #69: `ensure_agent/3` / `ensure_environment/3` now return
+  # `%Agent.Handle{}` / `%Environment.Handle{}` structs. The OLD lift_handle
+  # guard was `is_map(h) and not is_struct(h)` — that guard EXCLUDES a struct
+  # handle, so opts[:agent_id] would never be lifted and this test would fail
+  # (session never receives an id, EchoOpts.open/2 crashes matching nil out of
+  # the handle) against the pre-fix code. It must pass once lift_handle
+  # consumes struct handles too.
+  test "a struct %Agent.Handle{} / %Environment.Handle{} is unpacked to ids before open/2" do
+    Session.run(EchoOpts,
+      handler: fn _, _, _ -> {:ok, ""} end,
+      test_pid: self(),
+      agent: %ReqManagedAgents.Agent.Handle{
+        agent_id: "a1",
+        name: "x_deadbeef",
+        digest: "deadbeef"
+      },
+      environment: %ReqManagedAgents.Provisioner.Environment.Handle{
+        environment_id: "e1",
+        name: "y",
+        digest: "abcd1234"
+      }
+    )
+
+    assert_received {:opened, "a1", "e1"}
   end
 end

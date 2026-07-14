@@ -128,6 +128,21 @@ defmodule ReqManagedAgents.Providers.Local do
     }
   end
 
+  # The conn is a struct, not a bag of keys — the concepts a live stream needs (ref/consumer)
+  # don't apply to this in-process, request_response provider; :resume isn't a Local concept
+  # either (there's no server-side session to consolidate into).
+  @impl true
+  def session_id(conn), do: conn.session_id
+
+  @impl true
+  def ref(_conn), do: nil
+
+  @impl true
+  def consumer(_conn), do: nil
+
+  @impl true
+  def resumed?(_conn), do: false
+
   @impl true
   def kickoff_input(opts),
     do: {:messages, [%{"role" => "user", "content" => opts[:prompt] || "Begin."}]}

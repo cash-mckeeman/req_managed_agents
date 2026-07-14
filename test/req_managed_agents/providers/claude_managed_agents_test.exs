@@ -4,12 +4,17 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   alias ReqManagedAgents.Client
   alias ReqManagedAgents.Providers.ClaudeManagedAgents, as: ManagedAgents
 
+  # Deliberately name-less: this is the exact identity content Agent.Spec.digest/1 hashes
+  # (system_prompt/tools/terminal_tool/model_config), used verbatim as the byte-identity
+  # fixture below. `provision/2` now requires a Spec-shaped map WITH `:name` (Agent.Spec.new/1
+  # coerces the boundary — see #70), so provision-calling tests use `@spec_claude_named`.
   @spec_claude %{
     system_prompt: "sys",
     tools: [%{"name" => "t"}],
     terminal_tool: nil,
     model_config: "claude-opus-4-8"
   }
+  @spec_claude_named Map.put(@spec_claude, :name, "agent")
 
   defp claude_client(name),
     do: Client.new(api_key: "sk-test", req_options: [plug: {Req.Test, name}])
@@ -32,7 +37,74 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     end)
 
     assert {:ok, %{agent_id: "agent_1", environment_id: "env_1"}} =
-             ManagedAgents.provision(@spec_claude, client: client)
+             ManagedAgents.provision(@spec_claude_named, client: client)
+  end
+
+  test "provision/2 coerces a bare Agent.Spec-shaped map at the boundary (#70)" do
+    # Not a %Spec{} — a loose, Spec-shaped map. provision/2 must run it through
+    # Agent.Spec.new/1 and drive the create body off the coerced struct.
+    spec = %{
+      name: "coerced-agent",
+      system_prompt: "coerce me",
+      tools: [%{"name" => "t"}],
+      terminal_tool: nil,
+      model_config: "claude-opus-4-8"
+    }
+
+    client = claude_client(__MODULE__.Coerce)
+
+    Req.Test.stub(__MODULE__.Coerce, fn conn ->
+      case conn.request_path do
+        "/v1/agents" ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          decoded = Jason.decode!(body)
+          assert decoded["system"] == "coerce me"
+          Req.Test.json(conn, %{"id" => "agent_1"})
+
+        "/v1/environments" ->
+          Req.Test.json(conn, %{"id" => "env_1"})
+      end
+    end)
+
+    assert {:ok, %{agent_id: "agent_1", environment_id: "env_1"}} =
+             ManagedAgents.provision(spec, client: client)
+  end
+
+  test "provision/2 rejects an invalid spec (missing :name) with {:error, :invalid_agent_spec} (#70)" do
+    assert {:error, :invalid_agent_spec} =
+             ManagedAgents.provision(%{system_prompt: "no name here"}, [])
+  end
+
+  test "provision/2 sources the create_environment body from opts[:environment] (Environment.Spec) (#72)" do
+    # Environment is first-class: opts[:environment] is an Environment.Spec (or a coercible
+    # map). Its :name and :config drive the create_environment wire body.
+    client = claude_client(__MODULE__.EnvBody)
+
+    Req.Test.stub(__MODULE__.EnvBody, fn conn ->
+      case conn.request_path do
+        "/v1/agents" ->
+          Req.Test.json(conn, %{"id" => "agent_1"})
+
+        "/v1/environments" ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          decoded = Jason.decode!(body)
+          assert decoded["name"] == "custom_env"
+          assert decoded["config"] == %{"type" => "restricted"}
+          Req.Test.json(conn, %{"id" => "env_1"})
+      end
+    end)
+
+    environment = %{name: "custom_env", config: %{type: "restricted"}}
+
+    assert {:ok, %{agent_id: "agent_1", environment_id: "env_1"}} =
+             ManagedAgents.provision(@spec_claude_named, client: client, environment: environment)
+  end
+
+  test "provision/2 surfaces {:error, :invalid_environment_spec} for a bad environment (#72)" do
+    assert {:error, :invalid_environment_spec} =
+             ManagedAgents.provision(@spec_claude_named,
+               environment: %{runtimes: [%{lang: :python}]}
+             )
   end
 
   test "teardown/2 archives the agent and the environment" do
@@ -368,7 +440,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
   end
 
   test "provision/2 normalizes a provider-qualified model id to bare on the wire (issue #65)" do
-    spec = %{@spec_claude | model_config: "anthropic:claude-sonnet-4-6"}
+    spec = %{@spec_claude_named | model_config: "anthropic:claude-sonnet-4-6"}
     client = claude_client(__MODULE__.ProvisionNormalize)
 
     Req.Test.stub(__MODULE__.ProvisionNormalize, fn conn ->
@@ -409,7 +481,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
       end
     end)
 
-    assert {:error, _} = ManagedAgents.provision(@spec_claude, client: client)
+    assert {:error, _} = ManagedAgents.provision(@spec_claude_named, client: client)
     assert "/v1/agents/agent_1/archive" in Agent.get(calls, & &1)
   end
 

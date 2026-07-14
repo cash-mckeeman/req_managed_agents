@@ -3,15 +3,21 @@ defmodule ReqManagedAgents.Provisioner.Runtimes do
   Runtime declarations for environment specs: validation, bootstrap script
   rendering, and host allowlist queries.
 
-  A runtime entry is a map with three required keys:
+  A runtime entry is a map (or `ReqManagedAgents.Provisioner.Runtime.t()`
+  struct) with three keys:
 
   - `:lang` — atom identifying the language (e.g. `:elixir`, `:erlang`)
   - `:version` — binary version string (e.g. `"1.17.0"`)
   - `:via` — installation mechanism; only `:mise` is currently supported
 
+  Shape and version-charset validation lives in `Runtime.new/1`, the single
+  gate every entry passes through before it can reach rendering.
+
   The runtimes list lives inside the env spec and is therefore covered by the
   spec digest — different runtimes produce a different image name automatically.
   """
+
+  alias ReqManagedAgents.Provisioner.Runtime
 
   @doc """
   Validates a runtimes list. Non-list input is rejected with the same error
@@ -21,10 +27,12 @@ defmodule ReqManagedAgents.Provisioner.Runtimes do
   """
   @spec validate(term()) :: :ok | {:error, {:invalid_runtime, term()}}
   def validate(runtimes) when is_list(runtimes) do
-    case Enum.find(runtimes, &(not valid_entry?(&1))) do
-      nil -> :ok
-      entry -> {:error, {:invalid_runtime, entry}}
-    end
+    Enum.reduce_while(runtimes, :ok, fn entry, :ok ->
+      case Runtime.new(entry) do
+        {:ok, _runtime} -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
   end
 
   def validate(input), do: {:error, {:invalid_runtime, input}}
@@ -41,9 +49,9 @@ defmodule ReqManagedAgents.Provisioner.Runtimes do
 
   Output is deterministic: the same input always produces an identical binary.
   """
-  @spec bootstrap_script([map()]) :: binary()
+  @spec bootstrap_script([map() | Runtime.t()]) :: binary()
   def bootstrap_script(runtimes) do
-    entries = ordered_specs(runtimes)
+    entries = runtimes |> coerce() |> ordered_specs()
     template = Path.join([priv_dir(), "runtime_bootstrap", "mise_install.sh.eex"])
     EEx.eval_file(template, entries: entries)
   end
@@ -58,9 +66,10 @@ defmodule ReqManagedAgents.Provisioner.Runtimes do
 
   Output is deterministic: the same input always produces an identical binary.
   """
-  @spec system_prompt_block([map()]) :: binary()
+  @spec system_prompt_block([map() | Runtime.t()]) :: binary()
   def system_prompt_block(runtimes) do
-    declared = Enum.map_join(runtimes, ", ", &"#{&1[:lang]} #{&1[:version]}")
+    structs = coerce(runtimes)
+    declared = Enum.map_join(structs, ", ", &"#{&1.lang} #{&1.version}")
 
     """
     ## Runtime bootstrap
@@ -72,7 +81,7 @@ defmodule ReqManagedAgents.Provisioner.Runtimes do
     runtimes, and persists PATH + locale to ~/.bashrc for subsequent commands.
 
     ```bash
-    #{String.trim_trailing(bootstrap_script(runtimes))}
+    #{String.trim_trailing(bootstrap_script(structs))}
     ```
     """
   end
@@ -83,11 +92,13 @@ defmodule ReqManagedAgents.Provisioner.Runtimes do
   Reads `priv/runtime_bootstrap/allowed_hosts.json` at runtime. Returns `[]`
   for an empty runtimes list.
   """
-  @spec required_hosts([map()]) :: [binary()]
+  @spec required_hosts([map() | Runtime.t()]) :: [binary()]
   def required_hosts([]), do: []
 
   def required_hosts(runtimes) do
-    if Enum.any?(runtimes, &(&1[:via] == :mise)) do
+    structs = coerce(runtimes)
+
+    if Enum.any?(structs, &(&1.via == :mise)) do
       mise_hosts()
     else
       []
@@ -98,20 +109,27 @@ defmodule ReqManagedAgents.Provisioner.Runtimes do
   # Private
   # ---------------------------------------------------------------------------
 
-  # Shape check in the guard; version format in the body (regex is not
-  # guard-safe). The charset closes shell injection through the rendered
-  # script (no whitespace/`;`/quotes) and rejects the empty string.
-  defp valid_entry?(%{lang: lang, version: version, via: :mise})
-       when is_atom(lang) and is_binary(version),
-       do: version =~ ~r/\A[0-9A-Za-z.\-+]+\z/
+  # Coerces a list of maps/structs to %Runtime{} structs, re-running the
+  # shape+charset gate in `Runtime.new/1` for every entry (idempotent on an
+  # already-valid struct). Every render path funnels through this — entries
+  # reaching here are expected to have already passed `validate/1`.
+  defp coerce(runtimes) do
+    Enum.map(runtimes, fn entry ->
+      case Runtime.new(entry) do
+        {:ok, runtime} ->
+          runtime
 
-  defp valid_entry?(_), do: false
+        {:error, _reason} = error ->
+          raise ArgumentError, "invalid runtime entry: #{inspect(error)}"
+      end
+    end)
+  end
 
   defp ordered_specs(runtimes) do
-    erlang = Enum.find(runtimes, &(&1[:lang] == :erlang))
-    elixir_entry = Enum.find(runtimes, &(&1[:lang] == :elixir))
-    others = Enum.reject(runtimes, &(&1[:lang] in [:erlang, :elixir]))
-    other_specs = Enum.map(others, &"#{&1[:lang]}@#{&1[:version]}")
+    erlang = Enum.find(runtimes, &(&1.lang == :erlang))
+    elixir_entry = Enum.find(runtimes, &(&1.lang == :elixir))
+    others = Enum.reject(runtimes, &(&1.lang in [:erlang, :elixir]))
+    other_specs = Enum.map(others, &"#{&1.lang}@#{&1.version}")
 
     [build_erlang_spec(erlang), build_elixir_spec(elixir_entry, erlang) | other_specs]
     |> Enum.reject(&is_nil/1)

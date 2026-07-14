@@ -1,17 +1,34 @@
 defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
   use ExUnit.Case, async: true
+  alias ReqManagedAgents.Environment.Spec, as: EnvSpec
   alias ReqManagedAgents.Provisioner
+  alias ReqManagedAgents.Provisioner.Runtimes
   alias ReqManagedAgents.Provisioner.Store
 
-  @spec1 %{type: :cloud, packages: %{pip: ["pandas"]}, networking: %{type: :unrestricted}}
+  # v0.9.0 (#72): the env spec is Environment.Spec shape — runtimes stay
+  # top-level, everything else (networking, type, packages, …) moves under
+  # :config.
+  @spec1 %{
+    config: %{type: :cloud, packages: %{pip: ["pandas"]}, networking: %{type: :unrestricted}}
+  }
   @spec2 %{
-    type: :cloud,
-    packages: %{pip: ["pandas", "numpy"]},
-    networking: %{type: :unrestricted}
+    config: %{
+      type: :cloud,
+      packages: %{pip: ["pandas", "numpy"]},
+      networking: %{type: :unrestricted}
+    }
   }
 
   defp fresh_store do
     {Store.ETS, :"env_store_#{System.unique_integer([:positive])}"}
+  end
+
+  # Mirrors do_ensure_environment/3's own digest derivation (8-hex, lowercase)
+  # via the public Environment.Spec API — tests must not reach into the
+  # module's private digest/key computation.
+  defp env_digest(spec) do
+    {:ok, env} = EnvSpec.new(spec)
+    env |> EnvSpec.digest() |> binary_part(0, 8) |> String.downcase()
   end
 
   test "digest-named create on miss; identical spec is a pure cache hit" do
@@ -135,7 +152,7 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
   @tag :capture_log
   test "malformed store entry is treated as a miss: rebuild and overwrite" do
     {smod, sopts} = store = fresh_store()
-    key = "provision:env:" <> Provisioner.hash({"d", @spec1})
+    key = "provision:env:" <> Provisioner.hash({"d", env_digest(@spec1)})
 
     # Pre-seed a malformed entry directly (foreign/corrupt store content).
     :ok = smod.put(sopts, key, %{"environment_id" => "x"})
@@ -326,7 +343,7 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
 
     test "a malformed atom-keyed store entry (missing digest) is rebuilt, not returned" do
       {smod, sopts} = store = fresh_store()
-      key = "provision:env:" <> ReqManagedAgents.Provisioner.hash({"d", @spec1})
+      key = "provision:env:" <> ReqManagedAgents.Provisioner.hash({"d", env_digest(@spec1)})
       :ok = smod.put(sopts, key, %{environment_id: "env_partial"})
 
       create_fun = fn body -> {:ok, %{"id" => "env_rebuilt", "name" => body.name}} end
@@ -413,13 +430,11 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
   end
 
   describe "bootstrap on the returned handle (derived, never stored)" do
-    alias ReqManagedAgents.Provisioner.Runtimes
-
     @runtimes [
       %{lang: :erlang, version: "29.0.2", via: :mise},
       %{lang: :elixir, version: "1.20.2", via: :mise}
     ]
-    @rt_spec %{type: :cloud, runtimes: @runtimes, networking: %{type: :unrestricted}}
+    @rt_spec %{runtimes: @runtimes, config: %{type: :cloud, networking: %{type: :unrestricted}}}
 
     defmodule PutSpyStore do
       @moduledoc false
@@ -457,6 +472,20 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
       assert instructions == Runtimes.system_prompt_block(@runtimes)
     end
 
+    test "runtime-bearing return is a %Handle{} struct, not a bare map (regression, #69)" do
+      create_fun = fn body -> {:ok, %{"id" => "env_1", "name" => body.name}} end
+
+      assert {:ok, handle} =
+               Provisioner.ensure_environment(:c, @rt_spec,
+                 name: "d",
+                 store: fresh_store(),
+                 create_fun: create_fun
+               )
+
+      assert %ReqManagedAgents.Provisioner.Environment.Handle{bootstrap: bootstrap} = handle
+      assert %{script: _, instructions: _} = bootstrap
+    end
+
     test "store HIT still returns bootstrap (no create, no list)" do
       store = fresh_store()
       create_fun = fn body -> {:ok, %{"id" => "env_1", "name" => body.name}} end
@@ -482,7 +511,7 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
 
     test "recovery path (409 -> list) carries bootstrap" do
       create_fun = fn _body -> {:error, {:http_error, 409, %{}}} end
-      digest = @rt_spec |> Provisioner.hash() |> binary_part(0, 8) |> String.downcase()
+      digest = env_digest(@rt_spec)
       name = "d_" <> digest
 
       list_fun = fn ->
@@ -513,12 +542,24 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
       assert_received {:put, "digest:d:" <> _, digest_value}
 
       for value <- [provision_value, digest_value] do
-        refute Map.has_key?(value, :bootstrap)
-        assert Map.keys(value) |> Enum.sort() == [:digest, :environment_id, :name]
+        assert %ReqManagedAgents.Provisioner.Environment.Handle{
+                 environment_id: _,
+                 name: _,
+                 digest: _,
+                 bootstrap: nil
+               } = value
+
+        assert value.bootstrap == nil
+
+        # The persisted shape (what Store.File would actually write) excludes
+        # bootstrap regardless — @derive {Jason.Encoder, only: [...]} keeps
+        # the JSON to exactly the three identity fields.
+        assert Jason.decode!(Jason.encode!(value)) |> Map.keys() |> Enum.sort() ==
+                 ["digest", "environment_id", "name"]
       end
     end
 
-    test "spec without runtimes yields no :bootstrap key" do
+    test "spec without runtimes yields a struct with bootstrap: nil" do
       create_fun = fn body -> {:ok, %{"id" => "env_1", "name" => body.name}} end
 
       assert {:ok, handle} =
@@ -528,7 +569,7 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
                  create_fun: create_fun
                )
 
-      refute Map.has_key?(handle, :bootstrap)
+      assert %ReqManagedAgents.Provisioner.Environment.Handle{bootstrap: nil} = handle
     end
   end
 
@@ -552,5 +593,100 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
 
     assert_received {:wire_body, %{config: config}}
     refute Map.has_key?(config, :runtimes)
+  end
+
+  describe "Environment.Spec coercion (#72)" do
+    test "accepts an %Environment.Spec{} struct directly" do
+      create_fun = fn body -> {:ok, %{"id" => "env_struct", "name" => body.name}} end
+      {:ok, env} = EnvSpec.new(@spec1)
+
+      assert {:ok, %{environment_id: "env_struct"}} =
+               Provisioner.ensure_environment(:c, env,
+                 name: "d",
+                 store: fresh_store(),
+                 create_fun: create_fun
+               )
+    end
+
+    test "an invalid runtime surfaces {:error, :invalid_environment_spec} (was {:invalid_runtime, _})" do
+      spec = %{runtimes: [%{lang: :python}], config: %{}}
+
+      assert {:error, :invalid_environment_spec} =
+               Provisioner.ensure_environment(:c, spec, name: "d", store: fresh_store())
+    end
+
+    test "create_environment wire config is byte-identical to the pre-#72 flat-networking shape (host merge preserved)" do
+      test_pid = self()
+
+      create_fun = fn body ->
+        send(test_pid, {:wire_body, body})
+        {:ok, %{"id" => "env_lh", "name" => body.name}}
+      end
+
+      runtimes = [%{lang: :elixir, version: "1.20.2", via: :mise}]
+
+      # New Environment.Spec shape: runtimes top-level, everything else under
+      # :config — the equivalent of the pre-#72 flat spec
+      # %{type: :cloud, networking: %{type: :limited, allowed_hosts: [...]}, runtimes: [...]}.
+      env_spec = %{
+        runtimes: runtimes,
+        config: %{
+          type: :cloud,
+          networking: %{type: :limited, allowed_hosts: ["custom.example.com"]}
+        }
+      }
+
+      {:ok, _} =
+        Provisioner.ensure_environment(:c, env_spec,
+          name: "d",
+          store: fresh_store(),
+          create_fun: create_fun
+        )
+
+      assert_received {:wire_body, %{config: config}}
+
+      required = Runtimes.required_hosts(runtimes)
+
+      expected = %{
+        type: :cloud,
+        networking: %{
+          type: :limited,
+          allowed_hosts: Enum.uniq(["custom.example.com"] ++ required)
+        }
+      }
+
+      assert config == expected
+    end
+
+    test "content-addressing: specs differing only by config or runtimes get different digests" do
+      base_only_diff_config = %{config: %{type: :cloud}}
+      other_config = %{config: %{type: :sandbox}}
+
+      base_runtimes = %{runtimes: [%{lang: :elixir, version: "1.20.2", via: :mise}], config: %{}}
+      other_runtimes = %{runtimes: [%{lang: :python, version: "3.13.0", via: :mise}], config: %{}}
+
+      refute env_digest(base_only_diff_config) == env_digest(other_config)
+      refute env_digest(base_runtimes) == env_digest(other_runtimes)
+    end
+
+    test "content-addressing: differing only by name (base) shares the digest" do
+      create_fun = fn body -> {:ok, %{"id" => "env_" <> body.name, "name" => body.name}} end
+
+      {:ok, %{digest: d1}} =
+        Provisioner.ensure_environment(:c, @spec1,
+          name: "base_one",
+          store: fresh_store(),
+          create_fun: create_fun
+        )
+
+      {:ok, %{digest: d2}} =
+        Provisioner.ensure_environment(:c, @spec1,
+          name: "base_two",
+          store: fresh_store(),
+          create_fun: create_fun
+        )
+
+      assert d1 == d2
+    end
   end
 end

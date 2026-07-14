@@ -39,6 +39,15 @@ defmodule ReqManagedAgents.SessionTextDeltaTest do
     @impl true
     def text_delta(%{"type" => "say", "text" => t}), do: t
     def text_delta(_), do: nil
+
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   test "synthetic rma.text_delta follows the raw event to the handler, never into events" do

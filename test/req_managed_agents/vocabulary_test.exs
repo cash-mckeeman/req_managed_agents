@@ -18,6 +18,8 @@ defmodule ReqManagedAgents.VocabularyTest do
     assert %TurnResult{terminal: :terminated, custom_tool_uses: [], usage: nil} = %TurnResult{}
     assert %SessionResult{turns: 0, usage: %Usage{}} = %SessionResult{}
 
+    assert %ToolUse{id: nil, name: "echo", input: %{}} = %ToolUse{name: "echo"}
+
     for s <- [
           %Usage{},
           %ToolUse{id: "1", name: "n", input: %{}},
@@ -48,5 +50,15 @@ defmodule ReqManagedAgents.VocabularyTest do
 
     r = %ReqManagedAgents.SessionResult{session_id: "sess_2"}
     assert %{"session_id" => "sess_2"} = Jason.decode!(Jason.encode!(r))
+  end
+
+  test "ToolUse requires :name — a nameless construction raises" do
+    assert_raise ArgumentError, fn ->
+      struct!(ToolUse, [])
+    end
+  end
+
+  test "ToolUse defaults :input to %{}" do
+    assert %ToolUse{name: "echo", input: %{}} = %ToolUse{name: "echo"}
   end
 end

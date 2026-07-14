@@ -15,6 +15,7 @@ defmodule ReqManagedAgents.AgentCore.Client do
   arbitrarily long; only silence fails it.
   """
   alias ReqManagedAgents.AgentCore.{EventStream, SigV4}
+  alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
 
   # AgentCore has two endpoints that BOTH sign with service name "bedrock-agentcore":
   #   - control plane (CreateHarness/GetHarness/DeleteHarness, credential providers)
@@ -39,7 +40,14 @@ defmodule ReqManagedAgents.AgentCore.Client do
     req_options: []
   ]
 
-  @type t :: %__MODULE__{}
+  @type t :: %__MODULE__{
+          credentials: SigV4.creds(),
+          base_url: String.t(),
+          control_base_url: String.t(),
+          service: String.t(),
+          receive_timeout: timeout(),
+          req_options: keyword()
+        }
 
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
@@ -53,7 +61,13 @@ defmodule ReqManagedAgents.AgentCore.Client do
     }
   end
 
-  @spec create_harness(t(), map()) :: {:ok, map()} | {:error, term()}
+  # `spec` is a `HarnessSpec.t()` in production (assembled by `BedrockAgentCore.build_spec/2`)
+  # but the client-level tests exercise this function directly with hand-built plain maps —
+  # including ones that omit :environment/:environment_variables/:timeout_seconds entirely
+  # (opaque passthrough is optional). `Map.get/2` reads a struct field exactly like dot access
+  # when the key is present, and additionally tolerates a bare map where the key is absent —
+  # so these three stay on `Map.get/2` rather than `spec.field` (which raises on a missing key).
+  @spec create_harness(t(), HarnessSpec.t() | map()) :: {:ok, map()} | {:error, term()}
   def create_harness(c, spec) do
     body =
       %{

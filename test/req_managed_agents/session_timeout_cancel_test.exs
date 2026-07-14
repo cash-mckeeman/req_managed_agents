@@ -27,6 +27,14 @@ defmodule ReqManagedAgents.SessionTimeoutCancelTest do
 
     @impl true
     def normalize(_events), do: %ReqManagedAgents.TurnResult{terminal: :end_turn}
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   test "run/2 timeout shuts down the in-flight poll task" do

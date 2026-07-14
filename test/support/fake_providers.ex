@@ -54,6 +54,14 @@ defmodule ReqManagedAgents.FakeProviders do
 
     @impl true
     defdelegate normalize(events), to: Shared
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   defmodule Streaming do
@@ -97,6 +105,14 @@ defmodule ReqManagedAgents.FakeProviders do
     def turn_boundary?(_), do: false
     @impl true
     defdelegate normalize(events), to: Shared
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(conn), do: conn.ref
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   # Streaming fake that drops the very first push (simulating a mid-turn stream loss), then
@@ -159,6 +175,14 @@ defmodule ReqManagedAgents.FakeProviders do
 
     @impl true
     defdelegate normalize(events), to: Shared
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(conn), do: conn.ref
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   # A resumed session (session_id: set → open/2 answers `resume: true`, no :connected —
@@ -216,6 +240,14 @@ defmodule ReqManagedAgents.FakeProviders do
     def turn_boundary?(_), do: false
     @impl true
     defdelegate normalize(events), to: Shared
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(conn), do: conn.ref
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(conn), do: !!conn.resume
   end
 
   # A FRESH (no session_id) live session — open/2 answers no `:resume` key at all,
@@ -280,6 +312,14 @@ defmodule ReqManagedAgents.FakeProviders do
     def turn_boundary?(_), do: false
     @impl true
     defdelegate normalize(events), to: Shared
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(conn), do: conn.ref
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   # A resume (session_id: set) carrying BOTH pending tool uses and a new prompt. The
@@ -347,6 +387,14 @@ defmodule ReqManagedAgents.FakeProviders do
     def turn_boundary?(_), do: false
     @impl true
     defdelegate normalize(events), to: Shared
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(conn), do: conn.ref
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(conn), do: !!conn.resume
   end
 
   # open/2 fails — to assert the Session surfaces the provider error verbatim.
@@ -371,6 +419,14 @@ defmodule ReqManagedAgents.FakeProviders do
     def turn_boundary?(_), do: true
     @impl true
     defdelegate normalize(events), to: Shared
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   # poll_turn/2 RAISES — to assert the Session surfaces it as {:error, _} without killing the caller.
@@ -393,6 +449,14 @@ defmodule ReqManagedAgents.FakeProviders do
     def poll_turn(_conn, _input), do: raise("boom in poll_turn")
     @impl true
     defdelegate normalize(events), to: Shared
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 
   # Streaming fake exercising the `pending_tool_uses/1` recovery seam (issue #61): a
@@ -472,5 +536,14 @@ defmodule ReqManagedAgents.FakeProviders do
           not MapSet.member?(answered, id),
           do: %ToolUse{id: id, name: name, input: input}
     end
+
+    @impl true
+    def session_id(_conn), do: nil
+    @impl true
+    def ref(conn), do: conn.ref
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
   end
 end

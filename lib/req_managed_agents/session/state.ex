@@ -1,0 +1,71 @@
+defmodule ReqManagedAgents.Session.State do
+  @moduledoc false
+
+  alias ReqManagedAgents.{SessionInfo, Tools, ToolUse, Usage}
+
+  defstruct [
+    :provider,
+    :mode,
+    :conn,
+    :info,
+    :opts,
+    :handler,
+    :context,
+    :caller,
+    :notify,
+    :meta,
+    :ref,
+    :consumer,
+    :poll_task,
+    :turn_guard,
+    :enforced_terminal_tool,
+    :pending_user_message,
+    delta?: false,
+    kicked_off: false,
+    seen: nil,
+    reconnect_attempts: 0,
+    events: [],
+    turn_events: [],
+    live_forwarded: 0,
+    turns: 0,
+    max_turns: 50,
+    custom_tool_uses: [],
+    server_tool_uses: [],
+    max_reprompts: 2,
+    reprompts_left: 2,
+    usage: nil
+  ]
+
+  @type t :: %__MODULE__{
+          provider: module(),
+          mode: :streaming | :request_response,
+          conn: term(),
+          info: SessionInfo.t(),
+          opts: keyword(),
+          handler: module() | Tools.handler_fun(),
+          context: term() | nil,
+          caller: pid() | nil,
+          notify: pid() | nil,
+          meta: map(),
+          ref: reference() | nil,
+          consumer: pid() | nil,
+          poll_task: Task.t() | nil,
+          turn_guard: (map() -> :cont | {:halt, term()}) | nil,
+          enforced_terminal_tool: String.t() | nil,
+          pending_user_message: String.t() | nil,
+          delta?: boolean(),
+          kicked_off: boolean(),
+          seen: MapSet.t(),
+          reconnect_attempts: non_neg_integer(),
+          events: [map()],
+          turn_events: [map()],
+          live_forwarded: non_neg_integer(),
+          turns: non_neg_integer(),
+          max_turns: pos_integer(),
+          custom_tool_uses: [ToolUse.t()],
+          server_tool_uses: [ToolUse.t()],
+          max_reprompts: non_neg_integer(),
+          reprompts_left: non_neg_integer(),
+          usage: Usage.t()
+        }
+end

@@ -7,10 +7,10 @@ defmodule ReqManagedAgents.Provisioner.Store.File do
   or corrupt file is treated as empty (with a logged warning) — the durable
   provider resources are recoverable regardless.
 
-  Values must be JSON-encodable (provision handles are plain maps; atom keys
-  round-trip as strings, which is fine for handle maps read back via
-  string-keyed access — store consumers in this library only ever compare
-  whole values or read string keys).
+  Values must be JSON-encodable (provision handles are structs that encode to
+  a plain three-field JSON object; atom keys round-trip as strings, which is
+  fine for handle maps read back via string-keyed access — store consumers in
+  this library only ever compare whole values or read string keys).
   """
   @behaviour ReqManagedAgents.Provisioner.Store
   require Logger

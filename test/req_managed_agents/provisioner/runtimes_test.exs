@@ -2,6 +2,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
   use ExUnit.Case, async: true
 
   alias ReqManagedAgents.Provisioner
+  alias ReqManagedAgents.Provisioner.Runtime
   alias ReqManagedAgents.Provisioner.Runtimes
   alias ReqManagedAgents.Provisioner.Store
 
@@ -63,6 +64,11 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "accepts version containing a hyphen (pre-suffixed OTP build)" do
       assert :ok = Runtimes.validate([%{lang: :elixir, version: "1.20.2-otp-29", via: :mise}])
+    end
+
+    test "accepts a %Runtime{} struct entry" do
+      {:ok, runtime} = Runtime.new(%{lang: :elixir, version: "1.17.0", via: :mise})
+      assert :ok = Runtimes.validate([runtime])
     end
   end
 
@@ -190,6 +196,23 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
       path_export = ~S(export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH")
       assert length(String.split(script, path_export)) == 3
     end
+
+    test "renders byte-identical output for maps vs %Runtime{} structs" do
+      map_runtimes = [
+        %{lang: :erlang, version: "26.2.5", via: :mise},
+        %{lang: :elixir, version: "1.17.0", via: :mise},
+        %{lang: :nodejs, version: "20.0.0", via: :mise}
+      ]
+
+      struct_runtimes =
+        Enum.map(map_runtimes, fn m ->
+          {:ok, r} = Runtime.new(m)
+          r
+        end)
+
+      assert Runtimes.bootstrap_script(map_runtimes) ==
+               Runtimes.bootstrap_script(struct_runtimes)
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -226,6 +249,17 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
       assert Runtimes.system_prompt_block(@block_runtimes) ==
                Runtimes.system_prompt_block(@block_runtimes)
     end
+
+    test "accepts %Runtime{} structs and matches the map-input result" do
+      struct_runtimes =
+        Enum.map(@block_runtimes, fn m ->
+          {:ok, r} = Runtime.new(m)
+          r
+        end)
+
+      assert Runtimes.system_prompt_block(@block_runtimes) ==
+               Runtimes.system_prompt_block(struct_runtimes)
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -255,6 +289,14 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "returns empty list for empty runtimes" do
       assert [] = Runtimes.required_hosts([])
+    end
+
+    test "accepts %Runtime{} structs and matches the map-input result" do
+      map_runtimes = [%{lang: :elixir, version: "1.17.0", via: :mise}]
+      {:ok, struct_runtime} = Runtime.new(hd(map_runtimes))
+
+      assert Runtimes.required_hosts(map_runtimes) ==
+               Runtimes.required_hosts([struct_runtime])
     end
   end
 
@@ -306,7 +348,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
       store = fresh_store()
       create_fun = fn body -> {:ok, %{"id" => body.name, "name" => body.name}} end
 
-      spec_without = %{type: :cloud, networking: %{type: :unrestricted}}
+      spec_without = %{config: %{type: :cloud, networking: %{type: :unrestricted}}}
       spec_with = Map.put(spec_without, :runtimes, @runtimes)
 
       {:ok, %{name: name_without}} =
@@ -328,9 +370,12 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "validation error returns before any store/create call" do
       invalid = [%{lang: :elixir, version: "1.17.0", via: :nix}]
-      spec = %{type: :cloud, runtimes: invalid}
+      spec = %{runtimes: invalid, config: %{type: :cloud}}
 
-      assert {:error, {:invalid_runtime, _}} =
+      # v0.9.0 (#72): Environment.Spec.new/1 is the single validation gate now
+      # (Runtimes.validate/1 is no longer called separately), so an invalid
+      # runtime surfaces the spec-level error, not the old {:invalid_runtime, _}.
+      assert {:error, :invalid_environment_spec} =
                Provisioner.ensure_environment(:c, spec,
                  name: "env",
                  store: {SpyStore, self()},
@@ -342,7 +387,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
     end
 
     test "unrestricted networking: create body unchanged (no allowed_hosts injected)" do
-      spec = %{type: :cloud, runtimes: @runtimes, networking: %{type: :unrestricted}}
+      spec = %{runtimes: @runtimes, config: %{type: :cloud, networking: %{type: :unrestricted}}}
 
       {:ok, _} =
         Provisioner.ensure_environment(:c, spec,
@@ -357,9 +402,8 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "limited networking: runtimes' required hosts merged into allowed_hosts" do
       spec = %{
-        type: :cloud,
         runtimes: @runtimes,
-        networking: %{type: :limited, allowed_hosts: ["example.com"]}
+        config: %{type: :cloud, networking: %{type: :limited, allowed_hosts: ["example.com"]}}
       }
 
       {:ok, _} =
@@ -382,9 +426,11 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
       [one_host | _] = runtime_hosts
 
       spec = %{
-        type: :cloud,
         runtimes: @runtimes,
-        networking: %{type: :limited, allowed_hosts: [one_host, "example.com"]}
+        config: %{
+          type: :cloud,
+          networking: %{type: :limited, allowed_hosts: [one_host, "example.com"]}
+        }
       }
 
       {:ok, _} =
@@ -401,9 +447,8 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "limited networking as string type: hosts merged" do
       spec = %{
-        type: :cloud,
         runtimes: @runtimes,
-        networking: %{type: "limited", allowed_hosts: []}
+        config: %{type: :cloud, networking: %{type: "limited", allowed_hosts: []}}
       }
 
       {:ok, _} =
@@ -420,7 +465,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
     end
 
     test "absent networking key: create body unchanged (no networking key added)" do
-      spec = %{type: :cloud, runtimes: @runtimes}
+      spec = %{runtimes: @runtimes, config: %{type: :cloud}}
 
       {:ok, _} =
         Provisioner.ensure_environment(:c, spec,
@@ -435,9 +480,11 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "string-keyed limited networking map: hosts merged under the string key" do
       spec = %{
-        type: :cloud,
         runtimes: @runtimes,
-        networking: %{"type" => "limited", "allowed_hosts" => ["example.com"]}
+        config: %{
+          type: :cloud,
+          networking: %{"type" => "limited", "allowed_hosts" => ["example.com"]}
+        }
       }
 
       {:ok, _} =
@@ -459,7 +506,7 @@ defmodule ReqManagedAgents.Provisioner.RuntimesTest do
 
     test "string-keyed unrestricted networking map: create body unchanged" do
       networking = %{"type" => "unrestricted"}
-      spec = %{type: :cloud, runtimes: @runtimes, networking: networking}
+      spec = %{runtimes: @runtimes, config: %{type: :cloud, networking: networking}}
 
       {:ok, _} =
         Provisioner.ensure_environment(:c, spec,
