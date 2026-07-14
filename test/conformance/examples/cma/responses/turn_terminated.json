@@ -1,0 +1,10 @@
+{
+  "events": [
+    {
+      "type": "session.status_terminated",
+      "stop_reason": {
+        "type": "error"
+      }
+    }
+  ]
+}

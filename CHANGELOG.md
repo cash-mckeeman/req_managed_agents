@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.9.1 (2026-07-14)
+
+### Added
+- **API-surface conformance harness** (test infrastructure) — golden-corpus + schema
+  conformance for the two provider wire surfaces, against captured ground truth instead
+  of hand-authored fakes. A uniform `Corpus` loader (`RMA_CORPUS_DIR` or bundled synthetic
+  examples), a redaction + secret-scan guard, and a minimal botocore-shape validator;
+  AgentCore outbound (schema-validate + golden-match the `CreateHarness` body, including a
+  guard that `environment` reaches the wire **verbatim**) and inbound (replay turn frames
+  through `normalize/1`); CMA outbound (golden-match `create_agent`/`create_environment`
+  bodies + bare model id) and inbound. No runtime API change — everything is under `test/`,
+  `test/support/`, or maintainer-only `mix` tasks.
+- Two maintainer-only mix tasks: `mix rma.sync_agentcore_model` (mirror the `bedrock-agentcore`
+  botocore model, pin commit + SHA256, exit 2 on drift) and `mix rma.capture` (redacting
+  live-capture into a private `RMA_CORPUS_DIR` corpus). Not exercised in CI.
+
 ## v0.9.0 (2026-07-13)
 
 Struct-vocabulary hardening. The provisioning and session surfaces now speak in

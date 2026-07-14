@@ -1,0 +1,9 @@
+{
+  "name": "example-agent_env",
+  "config": {
+    "type": "cloud",
+    "networking": {
+      "type": "unrestricted"
+    }
+  }
+}

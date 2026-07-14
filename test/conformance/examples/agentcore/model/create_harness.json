@@ -1,0 +1,13 @@
+{
+  "required": ["harnessName", "executionRoleArn", "systemPrompt", "model", "tools"],
+  "members": {
+    "harnessName": { "type": "string" },
+    "executionRoleArn": { "type": "string" },
+    "systemPrompt": { "type": "list" },
+    "model": { "type": "map" },
+    "tools": { "type": "list" },
+    "environment": { "type": "map" },
+    "environmentVariables": { "type": "map" },
+    "timeoutSeconds": { "type": "integer" }
+  }
+}

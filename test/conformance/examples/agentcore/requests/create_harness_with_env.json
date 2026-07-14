@@ -1,0 +1,12 @@
+{
+  "harnessName": "harness_ef46e8e2",
+  "executionRoleArn": "arn:aws:iam::000000000000:role/ConformanceRole",
+  "systemPrompt": [{ "text": "You are a helpful assistant." }],
+  "model": { "bedrockModelConfig": { "modelId": "anthropic.claude-sonnet-4-6" } },
+  "tools": [],
+  "environment": {
+    "agentCoreRuntimeEnvironment": {
+      "filesystemConfigurations": [{ "sessionStorage": { "mountPath": "/mnt/data" } }]
+    }
+  }
+}

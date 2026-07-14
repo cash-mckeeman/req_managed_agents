@@ -1,0 +1,19 @@
+{
+  "events": [
+    {
+      "type": "agent.custom_tool_use",
+      "id": "e1",
+      "name": "get_weather",
+      "input": {
+        "city": "SF"
+      }
+    },
+    {
+      "type": "session.status_idle",
+      "stop_reason": {
+        "type": "requires_action",
+        "event_ids": ["e1"]
+      }
+    }
+  ]
+}
