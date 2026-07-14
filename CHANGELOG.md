@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.9.0 (2026-07-13)
+
+Struct-vocabulary hardening. The provisioning and session surfaces now speak in
+typed structs instead of bare maps, and the runtime environment is a first-class,
+content-addressed spec. Several public contracts change — see **Migration**.
+
+### Added
+- `ReqManagedAgents.Environment.Spec` — a content-addressed environment identity,
+  the environment mirror of `Agent.Spec`: typed `runtimes` (`[Provisioner.Runtime.t()]`)
+  plus an opaque, provider-verbatim `config`. `new/1` validates runtimes and
+  auto-collects any stray top-level keys into `config`; `digest/1` folds the
+  environment into the provision content-address (name excluded). Two agents
+  provisioned into *different* environments no longer collide on one resource. (#70, #72)
+- `ReqManagedAgents.Provisioner.Runtime` — a typed runtime entry (`lang`/`version`/`via`)
+  whose `new/1` is the single shape + version-charset validation gate (the charset
+  closes shell injection into the rendered bootstrap script). (#72)
+- New structs replacing bare-map records: `Agent.Handle` and
+  `Provisioner.Environment.Handle` (provisioner handles — `new/1` owns the store's
+  JSON round-trip), `Providers.BedrockAgentCore.HarnessSpec` (the CreateHarness DTO),
+  and a typed `Session.State` GenServer state. (#68, #69, #71)
+- `Provider` conn accessor callbacks — `session_id/1`, `ref/1`, `consumer/1`,
+  `resumed?/1` — so `Session` treats a provider's `conn` opaquely. (#72)
+
+### Changed
+- **`Provider.provision/2` now takes `Agent.Spec.t()`** and coerces its input via
+  `Agent.Spec.new/1` at the boundary; a spec missing `:name`/`:system_prompt` is
+  rejected with `{:error, :invalid_agent_spec}` instead of failing later. (#70)
+- **Environment configuration moves from the agent spec to a typed `Environment.Spec`**
+  passed as `opts[:environment]`; for AgentCore, `environment`/`environment_variables`
+  live under its `config`. (#70, #72)
+- **`ensure_environment/3` takes an `Environment.Spec`** (networking and other config
+  now under `config`); an invalid runtime surfaces `{:error, :invalid_environment_spec}`. (#72)
+- **`ensure_agent/3` / `ensure_environment/3` return `%Agent.Handle{}` / `%Environment.Handle{}`**
+  structs (were bare maps; dot-access and JSON output are unchanged). (#69)
+- **The `Provider` behaviour gains four required callbacks** (the conn accessors above);
+  external `Provider` implementations must add them. (#72)
+
+### Migration
+- Pass a **named** `Agent.Spec` (or a map with `:name`) to `provision` — a nameless
+  spec is now rejected.
+- Put environment config in `opts[:environment]` as an `Environment.Spec` (a flat map
+  works too — stray keys auto-collect into `config`).
+- `ensure_environment`: pass an `Environment.Spec` (or flat map); top-level `:networking`
+  and friends now live under `:config`.
+- Custom `Provider` modules: implement `session_id/1`, `ref/1`, `consumer/1`, `resumed?/1`.
+- **One-time re-provision:** environment-*bearing* harnesses and environment images
+  re-provision once on upgrade (their content-address digest now includes the typed
+  environment). Environment-*less* provisions are byte-identical and unaffected.
+
 ## v0.8.0 (2026-07-13)
 
 ### Added
