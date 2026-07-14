@@ -33,8 +33,10 @@ content-addressed spec. Several public contracts change — see **Migration**.
   `Agent.Spec.new/1` at the boundary; a spec missing `:name`/`:system_prompt` is
   rejected with `{:error, :invalid_agent_spec}` instead of failing later. (#70)
 - **Environment configuration moves from the agent spec to a typed `Environment.Spec`**
-  passed as `opts[:environment]`; for AgentCore, `environment`/`environment_variables`
-  live under its `config`. (#70, #72)
+  passed as `opts[:environment]`; its `config` is handed **verbatim** to the provider's
+  wire environment field — CMA `create_environment` config, AgentCore `CreateHarness`
+  `environment` — symmetric across providers, with no per-key indexing into `config`.
+  (#70, #72)
 - **`ensure_environment/3` takes an `Environment.Spec`** (networking and other config
   now under `config`); an invalid runtime surfaces `{:error, :invalid_environment_spec}`. (#72)
 - **`ensure_agent/3` / `ensure_environment/3` return `%Agent.Handle{}` / `%Environment.Handle{}`**

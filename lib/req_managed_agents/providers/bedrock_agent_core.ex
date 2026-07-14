@@ -6,9 +6,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   the existing `AgentCore.{Client, Converse}` modules. Decoded events are additionally
   delivered live to the session as `{:provider_event, ev}` messages while a turn streams.
   `provision/2`'s `opts[:environment]` carries an `Environment.Spec` (or a map coerced via
-  `Environment.Spec.new/1`, or `nil`). Its opaque `config` supplies the `environment`/
-  `environment_variables` maps that pass through to CreateHarness verbatim (filesystem
-  mounts, custom containers, env vars — never interpreted by this library). Environment is
+  `Environment.Spec.new/1`, or `nil`). Its opaque `config` is handed to CreateHarness's
+  `environment` field VERBATIM — no per-key indexing, symmetric with how
+  `ClaudeManagedAgents` passes `config` straight to its wire body (filesystem mounts, custom
+  containers, env vars, all opaque and never interpreted by this library). Environment is
   first-class (#70/#72): it reaches this provider only via `opts[:environment]`, never the
   spec, and its digest is folded into the harness name so different environments never
   collide on a name.
@@ -38,7 +39,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   # Note: `build_spec/2` coerces `opts[:environment]` via `Environment.Spec.new/1` — a
   # single coercion point per provision that both threads env into the harness name and
-  # sources the CreateHarness `environment`/`environment_variables` payload from it.
+  # sources the CreateHarness `environment` payload (env.config, verbatim) from it.
 
   @doc """
   Assembles the AgentCore harness-creation spec from an `Agent.Spec`-shaped
@@ -59,17 +60,17 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
          system_prompt: spec.system_prompt,
          model: spec.model_config,
          tools: spec.tools,
-         environment: env_field(env, :environment),
-         environment_variables: env_field(env, :environment_variables)
+         environment: harness_environment(env)
        }}
     end
   end
 
-  # The opaque, provider-verbatim CreateHarness payload lives under the environment's
-  # `config`: `:environment` / `:environment_variables` map straight onto the two HarnessSpec
-  # fields (byte-identical wire body to the pre-#72 opts-carried values). No environment → both nil.
-  defp env_field(nil, _key), do: nil
-  defp env_field(%Environment.Spec{config: config}, key), do: Map.get(config, key)
+  # `env.config` IS the verbatim CreateHarness `environment` payload — no per-key indexing,
+  # symmetric with ClaudeManagedAgents' `env_config/1`. No environment, or an empty config,
+  # → nil (drops the wire field), matching pre-#70's "no environment" behaviour.
+  defp harness_environment(nil), do: nil
+  defp harness_environment(%Environment.Spec{config: config}) when config == %{}, do: nil
+  defp harness_environment(%Environment.Spec{config: config}), do: config
 
   defp validate_role_arn(arn) when is_binary(arn) do
     case String.trim(arn) do
