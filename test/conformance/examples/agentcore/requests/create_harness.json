@@ -1,0 +1,7 @@
+{
+  "harnessName": "example-harness",
+  "executionRoleArn": "arn:aws:iam::000000000000:role/ExampleRole",
+  "systemPrompt": [{ "text": "You are a helpful assistant." }],
+  "model": "claude-sonnet-4-6",
+  "tools": []
+}
