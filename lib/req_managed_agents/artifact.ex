@@ -10,7 +10,7 @@ defmodule ReqManagedAgents.Artifact do
   @type t :: %__MODULE__{
           name: String.t() | nil,
           size: non_neg_integer() | nil,
-          ref: term(),
-          raw: term()
+          ref: String.t() | nil,
+          raw: map() | nil
         }
 end

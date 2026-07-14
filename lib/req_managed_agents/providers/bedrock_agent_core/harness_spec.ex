@@ -16,7 +16,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec do
           name: String.t(),
           execution_role_arn: String.t(),
           system_prompt: String.t(),
-          model: term(),
+          model: String.t() | map() | nil,
           tools: [map()],
           environment: map() | nil,
           environment_variables: map() | nil

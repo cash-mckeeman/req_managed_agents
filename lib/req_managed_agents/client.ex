@@ -31,7 +31,16 @@ defmodule ReqManagedAgents.Client do
     profile: :anthropic
   ]
 
-  @type t :: %__MODULE__{}
+  @type t :: %__MODULE__{
+          api_key: String.t(),
+          base_url: String.t(),
+          beta: String.t(),
+          files_beta: String.t(),
+          anthropic_version: String.t(),
+          receive_timeout: timeout(),
+          req_options: keyword(),
+          profile: atom()
+        }
 
   @doc """
   Build a client. Resolves `:api_key` from the option, then

@@ -40,7 +40,14 @@ defmodule ReqManagedAgents.AgentCore.Client do
     req_options: []
   ]
 
-  @type t :: %__MODULE__{}
+  @type t :: %__MODULE__{
+          credentials: SigV4.creds(),
+          base_url: String.t(),
+          control_base_url: String.t(),
+          service: String.t(),
+          receive_timeout: timeout(),
+          req_options: keyword()
+        }
 
   @spec new(keyword()) :: t()
   def new(opts \\ []) do

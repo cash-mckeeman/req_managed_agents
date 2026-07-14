@@ -12,7 +12,7 @@ defmodule ReqManagedAgents.Agent.Spec do
           name: String.t(),
           system_prompt: String.t(),
           terminal_tool: String.t() | nil,
-          model_config: term(),
+          model_config: String.t() | map() | nil,
           tools: [map()]
         }
 
