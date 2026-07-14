@@ -1,5 +1,5 @@
 defmodule ReqManagedAgents.Conformance.CorpusTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   alias ReqManagedAgents.Conformance.Corpus
 
   test "dir/1 falls back to bundled examples when RMA_CORPUS_DIR is unset" do

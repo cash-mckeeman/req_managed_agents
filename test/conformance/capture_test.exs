@@ -1,5 +1,5 @@
 defmodule ReqManagedAgents.Conformance.CaptureTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   alias ReqManagedAgents.Conformance.{Capture, Redaction}
 
   test "write_pair/5 redacts and writes a provenance-stamped request+response entry" do
