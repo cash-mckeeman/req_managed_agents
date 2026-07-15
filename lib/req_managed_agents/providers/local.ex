@@ -45,7 +45,8 @@ defmodule ReqManagedAgents.Providers.Local do
             max_turns: 50,
             polls: 0,
             seen: MapSet.new(),
-            error_counts: %{}
+            error_counts: %{},
+            resume: false
 
   @type t :: %__MODULE__{
           history: [map()],
@@ -57,7 +58,8 @@ defmodule ReqManagedAgents.Providers.Local do
           max_turns: pos_integer(),
           polls: non_neg_integer(),
           seen: MapSet.t(),
-          error_counts: %{optional(String.t()) => non_neg_integer()}
+          error_counts: %{optional(String.t()) => non_neg_integer()},
+          resume: boolean()
         }
 
   @impl true
@@ -80,7 +82,10 @@ defmodule ReqManagedAgents.Providers.Local do
     retry = build_retry(opts)
 
     %__MODULE__{
-      history: system_history(spec[:system_prompt]),
+      # Reattach seam: injected history (a prior run's transcript) is seeded verbatim —
+      # it already carries the original system message. Fresh opens build from the spec.
+      history: opts[:history] || system_history(spec[:system_prompt]),
+      resume: opts[:history] != nil,
       tools: Enum.map(spec[:tools] || [], &to_function_tool/1),
       terminal_tool: spec[:terminal_tool],
       chat_fun: Retry.wrap(opts[:chat_fun] || default_chat_fun(model_config), retry),
@@ -129,8 +134,7 @@ defmodule ReqManagedAgents.Providers.Local do
   end
 
   # The conn is a struct, not a bag of keys — the concepts a live stream needs (ref/consumer)
-  # don't apply to this in-process, request_response provider; :resume isn't a Local concept
-  # either (there's no server-side session to consolidate into).
+  # don't apply to this in-process, request_response provider.
   @impl true
   def session_id(conn), do: conn.session_id
 
@@ -141,7 +145,10 @@ defmodule ReqManagedAgents.Providers.Local do
   def consumer(_conn), do: nil
 
   @impl true
-  def resumed?(_conn), do: false
+  def resumed?(conn), do: conn.resume
+
+  @impl true
+  def transcript(conn), do: conn.history
 
   @impl true
   def kickoff_input(opts),
