@@ -301,7 +301,7 @@ defmodule ReqManagedAgents.Session do
     do: stop_error(s, reason)
 
   def handle_info(:reconnect, s) do
-    case s.provider.reconnect(s.conn, self(), s.seen) do
+    case safe_reconnect(s) do
       {:ok, conn, pending, seen} ->
         # reconnect_attempts is NOT reset here — only a real terminal (finish/2) resets it — so a
         # connect→drop flap actually escalates the backoff instead of hammering at 500ms.
@@ -637,6 +637,17 @@ defmodule ReqManagedAgents.Session do
   defp redrive(s, pending) do
     results = run_tools(pending, s)
     drive(s, s.provider.resume_input(pending, results))
+  end
+
+  # #79: reconnect/3 is optional. A provider that resumes (resumed?/1 true) but has no
+  # event history to recover (request_response reattach) may omit it — resume proceeds
+  # with the conn as-is, nothing pending, seen-set unchanged.
+  defp safe_reconnect(s) do
+    if Code.ensure_loaded?(s.provider) and function_exported?(s.provider, :reconnect, 3) do
+      s.provider.reconnect(s.conn, self(), s.seen)
+    else
+      {:ok, s.conn, [], s.seen}
+    end
   end
 
   defp backoff_ms(%{reconnect_attempts: n}),

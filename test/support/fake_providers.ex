@@ -546,4 +546,45 @@ defmodule ReqManagedAgents.FakeProviders do
     @impl true
     def resumed?(_conn), do: false
   end
+
+  defmodule ResumeNoReconnect do
+    @moduledoc false
+    # A request_response provider that reports an existing session (resumed? true)
+    # but deliberately omits reconnect/3 — the #79 trap. Session must complete the
+    # resume via the safe-default instead of raising :undef.
+    @behaviour ReqManagedAgents.Provider
+    @impl true
+    def mode, do: :request_response
+    @impl true
+    def provision(_spec, _opts), do: {:error, :not_implemented}
+    @impl true
+    def open(opts, _subscriber), do: {:ok, %{turns: opts[:turns] || [], test: opts[:test]}}
+    @impl true
+    def kickoff_input(_opts), do: :kickoff
+    @impl true
+    def user_input(text), do: {:user, text}
+    @impl true
+    def resume_input(_uses, results), do: {:resume, results}
+    @impl true
+    def poll_turn(%{turns: [t | rest]} = c, input) do
+      if is_pid(c.test), do: send(c.test, {:polled, input})
+      {:ok, t, %{c | turns: rest}}
+    end
+
+    def poll_turn(%{turns: []} = c, input) do
+      if is_pid(c.test), do: send(c.test, {:polled, input})
+      {:ok, [%{"type" => "stop", "terminal" => :end_turn}], c}
+    end
+
+    @impl true
+    defdelegate normalize(events), to: ReqManagedAgents.FakeProviders.Shared
+    @impl true
+    def session_id(_conn), do: "sess-nr"
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: true
+  end
 end

@@ -76,6 +76,11 @@ defmodule ReqManagedAgents.Provider do
   @doc """
   :streaming only — after a stream drop, re-open the stream (delivering to `subscriber`) and
   return any unanswered tool calls to re-drive locally, plus the grown `seen` set.
+
+  Optional: required only for providers that must recover events or unanswered tool
+  calls across a reconnect (streaming drops, or list-events surfaces). A
+  request_response provider that only reattaches may omit it — `Session` defaults to
+  `{:ok, conn, [], seen}`.
   """
   @callback reconnect(conn(), subscriber :: pid(), seen :: MapSet.t()) ::
               {:ok, conn(), [ReqManagedAgents.ToolUse.t()], MapSet.t()} | {:error, term()}
@@ -102,6 +107,10 @@ defmodule ReqManagedAgents.Provider do
   @doc """
   Whether `open/2` consolidated an EXISTING session into `conn` (a resume) rather than
   creating a fresh one. Gates `Session`'s reattach behavior (#66).
+
+  Returning `true` routes `Session` through the `:resume` → `:reconnect` continuation.
+  If the provider does not implement `reconnect/3`, resume proceeds with no event
+  recovery (`{:ok, conn, [], seen}`) — correct for request_response reattach.
   """
   @callback resumed?(conn()) :: boolean()
 
