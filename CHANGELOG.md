@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.10.0 (2026-07-15)
+
+Durability release — uniform host reattach across providers (with
+`req_managed_agents_host` 0.2).
+
+- `Session`: an unimplemented `reconnect/3` now defaults to
+  `{:ok, conn, [], seen}` on resume — reattach-capable request_response
+  providers no longer need boilerplate (#79).
+- New optional Provider callback `transcript/1` + `SessionResult.transcript`:
+  providers with client-held history expose it; `Session` embeds it at
+  terminal (nil for server-held providers).
+- `Providers.Local`: `open/2` accepts `history:` (a prior transcript, seeded
+  verbatim), `resumed?/1` reflects it, `transcript/1` exposes the grown
+  history — local conversations are reattachable.
+- `Providers.BedrockAgentCore`: `session_id:` reattaches to the existing
+  runtime session within AgentCore's session window; `resumed?/1` is honest
+  (#80). Beyond-window re-seed is a named follow-up.
+
 ## v0.9.1 (2026-07-14)
 
 ### Added
