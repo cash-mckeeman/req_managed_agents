@@ -44,6 +44,17 @@ defmodule ReqManagedAgents.LocalTranscriptTest do
     assert Enum.any?(transcript, &(&1["content"] == "first"))
   end
 
+  test "open with history: [] treats it as absent — fresh semantics, system prompt preserved" do
+    {:ok, conn} =
+      Local.open(
+        [history: [], spec: %{system_prompt: "sys"}, chat_fun: echo_chat_fun(self())],
+        self()
+      )
+
+    refute Local.resumed?(conn)
+    assert Enum.any?(Local.transcript(conn), &(&1["role"] == "system" and &1["content"] == "sys"))
+  end
+
   test "open with history: seeds it verbatim and resumed? is true" do
     prior = [
       %{"role" => "user", "content" => "first"},

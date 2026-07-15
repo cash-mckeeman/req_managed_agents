@@ -81,11 +81,18 @@ defmodule ReqManagedAgents.Providers.Local do
   defp build_conn(opts, spec, model_config) do
     retry = build_retry(opts)
 
+    history =
+      case opts[:history] do
+        [_ | _] = h -> h
+        _ -> system_history(spec[:system_prompt])
+      end
+
     %__MODULE__{
       # Reattach seam: injected history (a prior run's transcript) is seeded verbatim —
       # it already carries the original system message. Fresh opens build from the spec.
-      history: opts[:history] || system_history(spec[:system_prompt]),
-      resume: opts[:history] != nil,
+      # An empty list is treated as absent — fresh semantics, system prompt preserved.
+      history: history,
+      resume: match?([_ | _], opts[:history]),
       tools: Enum.map(spec[:tools] || [], &to_function_tool/1),
       terminal_tool: spec[:terminal_tool],
       chat_fun: Retry.wrap(opts[:chat_fun] || default_chat_fun(model_config), retry),

@@ -110,7 +110,9 @@ defmodule ReqManagedAgents.Provider do
 
   Returning `true` routes `Session` through the `:resume` → `:reconnect` continuation.
   If the provider does not implement `reconnect/3`, resume proceeds with no event
-  recovery (`{:ok, conn, [], seen}`) — correct for request_response reattach.
+  recovery (`{:ok, conn, [], seen}`) — correct for request_response reattach. A
+  synchronous `Session.run/2` resume with no `:prompt` has nothing to deliver and
+  parks until the run timeout — reattach callers should always pass `prompt:`.
   """
   @callback resumed?(conn()) :: boolean()
 

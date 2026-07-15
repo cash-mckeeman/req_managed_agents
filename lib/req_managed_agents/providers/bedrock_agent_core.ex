@@ -266,7 +266,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   def open(opts, subscriber) do
     # #80: RMA-canonical session_id: targets an EXISTING runtime session (reattach,
     # within AgentCore's session window); absent, the fresh path requires a
-    # caller-minted :runtime_session_id exactly as before.
+    # caller-minted :runtime_session_id exactly as before. When both are supplied,
+    # session_id: wins and runtime_session_id: is ignored.
     sid = opts[:session_id] || Keyword.fetch!(opts, :runtime_session_id)
 
     {:ok,
