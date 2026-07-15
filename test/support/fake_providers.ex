@@ -587,4 +587,41 @@ defmodule ReqManagedAgents.FakeProviders do
     @impl true
     def resumed?(_conn), do: true
   end
+
+  defmodule WithTranscript do
+    @moduledoc false
+    # RequestResponse plus a transcript/1 — proves Session embeds the provider's
+    # client-held history into SessionResult at terminal.
+    @behaviour ReqManagedAgents.Provider
+    @impl true
+    def mode, do: :request_response
+    @impl true
+    def provision(_spec, _opts), do: {:error, :not_implemented}
+    @impl true
+    def open(opts, _subscriber), do: {:ok, %{turns: opts[:turns] || []}}
+    @impl true
+    def kickoff_input(_opts), do: :kickoff
+    @impl true
+    def user_input(text), do: {:user, text}
+    @impl true
+    def resume_input(_uses, results), do: {:resume, results}
+    @impl true
+    def poll_turn(%{turns: [t | rest]} = c, _input), do: {:ok, t, %{c | turns: rest}}
+
+    def poll_turn(%{turns: []} = c, _input),
+      do: {:ok, [%{"type" => "stop", "terminal" => :end_turn}], c}
+
+    @impl true
+    defdelegate normalize(events), to: ReqManagedAgents.FakeProviders.Shared
+    @impl true
+    def session_id(_conn), do: "sess-wt"
+    @impl true
+    def ref(_conn), do: nil
+    @impl true
+    def consumer(_conn), do: nil
+    @impl true
+    def resumed?(_conn), do: false
+    @impl true
+    def transcript(_conn), do: [%{"role" => "user", "content" => "canned"}]
+  end
 end

@@ -115,6 +115,15 @@ defmodule ReqManagedAgents.Provider do
   @callback resumed?(conn()) :: boolean()
 
   @doc """
+  Optional — the provider's client-held conversation history in its native wire shape
+  (string-keyed message maps), or `nil`. Implemented by providers whose history lives
+  in the conn (e.g. `Local`); server-held providers (CMA, AgentCore) omit it. `Session`
+  embeds the value into `SessionResult.transcript` at terminal. Entries are
+  provider-verbatim — never interpreted by this library.
+  """
+  @callback transcript(conn()) :: [map()] | nil
+
+  @doc """
   Optional — map ONE raw event to a normalized text chunk, or `nil`.
 
   When implemented, the `Session` emits `%{"type" => "rma.text_delta", "text" => chunk}`
@@ -155,6 +164,7 @@ defmodule ReqManagedAgents.Provider do
                       turn_boundary?: 1,
                       reconnect: 3,
                       teardown: 2,
+                      transcript: 1,
                       text_delta: 1,
                       supports_outcomes?: 0,
                       pending_tool_uses: 1
