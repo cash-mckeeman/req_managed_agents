@@ -249,8 +249,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   end
 
   # conn is a map keyed on harness_arn/sid/session_id/… — no live stream Task (request_response,
-  # not streaming), and no resume/reattach concept (a fresh InvokeHarness call every turn), so
-  # ref/consumer/resumed? are always nil/nil/false here.
+  # not streaming), so ref/consumer are always nil here; resumed? reflects a session_id: reattach.
   @impl true
   def session_id(conn), do: Map.get(conn, :session_id)
 
@@ -261,15 +260,21 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   def consumer(_conn), do: nil
 
   @impl true
-  def resumed?(_conn), do: false
+  def resumed?(conn), do: Map.get(conn, :resume, false)
 
   @impl true
   def open(opts, subscriber) do
+    # #80: RMA-canonical session_id: targets an EXISTING runtime session (reattach,
+    # within AgentCore's session window); absent, the fresh path requires a
+    # caller-minted :runtime_session_id exactly as before.
+    sid = opts[:session_id] || Keyword.fetch!(opts, :runtime_session_id)
+
     {:ok,
      %{
        harness_arn: Keyword.fetch!(opts, :harness_arn),
-       sid: Keyword.fetch!(opts, :runtime_session_id),
-       session_id: Keyword.fetch!(opts, :runtime_session_id),
+       sid: sid,
+       session_id: sid,
+       resume: opts[:session_id] != nil,
        model: opts[:model],
        retries: opts[:invoke_retries] || 2,
        subscriber: subscriber,
