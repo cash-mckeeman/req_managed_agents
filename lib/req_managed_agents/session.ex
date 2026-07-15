@@ -650,6 +650,16 @@ defmodule ReqManagedAgents.Session do
     end
   end
 
+  # Transcript seam: embed the provider's client-held history at terminal when the
+  # optional callback exists. nil for server-held providers.
+  defp transcript_of(s) do
+    if Code.ensure_loaded?(s.provider) and function_exported?(s.provider, :transcript, 1) do
+      s.provider.transcript(s.conn)
+    else
+      nil
+    end
+  end
+
   defp backoff_ms(%{reconnect_attempts: n}),
     do: min(500 * Integer.pow(2, min(n, 7)), :timer.minutes(60))
 
@@ -663,7 +673,8 @@ defmodule ReqManagedAgents.Session do
       server_tool_uses: s.server_tool_uses,
       usage: s.usage,
       turns: s.turns,
-      events: s.events
+      events: s.events,
+      transcript: transcript_of(s)
     }
   end
 
