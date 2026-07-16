@@ -78,7 +78,10 @@ defmodule ReqManagedAgents do
   @spec teardown(module(), ReqManagedAgents.Provider.handle(), keyword()) ::
           :ok | {:error, term()}
   def teardown(provider, handle, opts \\ []) do
-    if function_exported?(provider, :teardown, 2) do
+    # ensure_loaded first (same reason as Tools.callback?/3): under lazy loading, a
+    # teardown-first call in a fresh VM would otherwise silently report :not_supported
+    # and leak the provisioned resource.
+    if Code.ensure_loaded?(provider) and function_exported?(provider, :teardown, 2) do
       case provider.teardown(handle, opts) do
         :ok ->
           ReqManagedAgents.Provisioner.evict(handle, opts)

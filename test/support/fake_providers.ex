@@ -624,4 +624,13 @@ defmodule ReqManagedAgents.FakeProviders do
     @impl true
     def transcript(_conn), do: [%{"role" => "user", "content" => "canned"}]
   end
+
+  defmodule TeardownProbe do
+    @moduledoc false
+    # Deliberately NOT a full Provider — exists only to prove the facade's
+    # teardown/3 finds teardown/2 on a not-yet-loaded module (it lives in
+    # test/support so it has a real .beam the code server can reload after a
+    # delete/purge in the test).
+    def teardown(_handle, _opts), do: {:error, :probe}
+  end
 end
