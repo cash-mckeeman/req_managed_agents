@@ -597,4 +597,74 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     assert result.text =~ "rt-canary:1.20",
            "expected 'rt-canary:1.20' in agent output, got: #{inspect(result.text)}"
   end
+
+  @tag timeout: 300_000
+  test "AgentCore Harness: within-window reattach via session_id: continues the conversation" do
+    alias ReqManagedAgents.Providers.BedrockAgentCore
+    {:ok, _} = Application.ensure_all_started(:req_managed_agents)
+
+    role = System.fetch_env!("HARNESS_EXECUTION_ROLE_ARN")
+
+    spec = %{
+      name: "rma-live-bedrock-reattach",
+      system_prompt: "You are a terse assistant. Reply in a few words.",
+      tools: [],
+      terminal_tool: nil,
+      model_config: %{
+        "bedrockModelConfig" => %{
+          "modelId" => System.get_env("BEDROCK_LIVE_MODEL_ID", "nvidia.nemotron-super-3-120b")
+        }
+      }
+    }
+
+    {:ok, handle} =
+      ReqManagedAgents.provision(BedrockAgentCore, spec,
+        execution_role_arn: role,
+        name_prefix: "rma_live"
+      )
+
+    sid = "live-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
+
+    common = [
+      harness_arn: handle.harness_arn,
+      handler: Handler,
+      idle_timeout: 300_000,
+      timeout_seconds: 900,
+      max_iterations: 40,
+      timeout: 300_000
+    ]
+
+    try do
+      {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn}} =
+        ReqManagedAgents.AgentCore.invoke_to_completion(
+          [
+            runtime_session_id: sid,
+            prompt: "Remember this codeword: quokka. Acknowledge with OK."
+          ] ++ common
+        )
+
+      # Within the session window (seconds later): reattach with the RMA-canonical
+      # session_id: — the 0.10 reattach path (open/2 targets the EXISTING runtime
+      # session, resumed?/1 true, :resume rides the reconnect safe-default, and the
+      # prompt is delivered via the #66 seam). Recall proves server-side continuity.
+      {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn, text: text} = r2} =
+        ReqManagedAgents.AgentCore.invoke_to_completion(
+          [
+            session_id: sid,
+            prompt: "What was the codeword? Reply with just the codeword."
+          ] ++ common
+        )
+
+      IO.inspect(text, label: "LIVE Bedrock reattach recall")
+
+      assert text =~ ~r/quokka/i,
+             "expected the reattached session to recall the codeword — got: #{inspect(text)}"
+
+      assert r2.session_id == sid
+    after
+      IO.inspect(ReqManagedAgents.teardown(BedrockAgentCore, handle),
+        label: "LIVE Bedrock reattach teardown"
+      )
+    end
+  end
 end
