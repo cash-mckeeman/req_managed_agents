@@ -8,7 +8,7 @@ One loop, three backends behind a single `Provider` behaviour:
 |---|---|---|
 | **Anthropic Claude Managed Agents** (public beta) | `ReqManagedAgents.Providers.ClaudeManagedAgents` | `:streaming` — long-lived SSE; beta header `managed-agents-2026-04-01` |
 | **AWS Bedrock AgentCore Harness** | `ReqManagedAgents.Providers.BedrockAgentCore` | `:request_response` — synchronous SigV4-signed invoke |
-| **Local (in-process)** | `ReqManagedAgents.Providers.Local` | `:request_response` — in-process loop over a pluggable `chat_fun` (default: ReqLLM via the optional `req_llm` dep); one model call per turn; loop guards for weak-instruction-following local models |
+| **Local (in-process)** | `ReqManagedAgents.Providers.Local` | `:request_response` — in-process loop over a pluggable `chat_fun` (default: ReqLLM via the optional `req_llm` dep); one model call per turn; loop guards for weak-instruction-following local models; reattachable via `history:` |
 
 ### Local + routing
 
@@ -113,6 +113,7 @@ alias ReqManagedAgents.Providers.{ClaudeManagedAgents, BedrockAgentCore}
 result.terminal   # :end_turn | :requires_action | :terminated — uniform across providers
 result.text       # the assistant's accumulated text
 result.usage      # %ReqManagedAgents.Usage{input_tokens:, output_tokens:, …}
+result.transcript # client-held history (Local) for reattach, else nil (server-held providers)
 
 # AWS Bedrock AgentCore (request/response) — same handler, same result struct;
 # its handle carries a `harness_arn`.
@@ -207,7 +208,7 @@ What actually differs between the two providers is only this:
 | **provision creates** | a versioned agent **and** an environment (two resources) | one harness folding in model + tools + environment |
 | **provision handle** | `%{agent_id:, environment_id:}` | `%{harness_arn:, harness_id:}` |
 | **`Session.run` connection** | `agent: handle, environment: handle` | `harness_arn: handle.harness_arn, runtime_session_id: sid` (id ≥33 chars) |
-| **capabilities** | outcomes, server-tool observation, cross-batch tool recovery, resume/reconnect | none of these — a dropped turn just re-invokes |
+| **capabilities** | outcomes, server-tool observation, cross-batch tool recovery, resume/reconnect (stream-level, with `reconnect/3` event recovery) | `session_id:` reattach within the session window (no event recovery — a dropped turn just re-invokes) |
 
 `:agent`/`:environment` accept a handle (a struct, or a bare map with the same
 `agent_id:`/`environment_id:` keys) and unpack to the raw ids before the provider opens the
@@ -220,6 +221,17 @@ fails a turn (`idle_timeout:`, inter-chunk guard, default 300s); cost is bounded
 defaults). `Session.run/2`'s own `:timeout` must be ≥ the server budget — a client timeout returns
 `{:error, :timeout}` but does NOT cancel the in-flight invoke; the harness keeps executing (and
 billing) up to its `timeoutSeconds`. Events reach `Handler.handle_event/2` live either way.
+
+**Reattach (0.10):** pass `session_id:` (the id from a prior `SessionResult.session_id`) instead
+of `runtime_session_id:` to resume an existing AgentCore runtime session within its session
+window — `resumed?/1` reflects the reattach honestly. There's no event-list surface to replay on
+this path, so a custom `Provider.reconnect/3` isn't required for it: `Session` defaults an
+unimplemented `reconnect/3` to `{:ok, conn, [], seen}` and proceeds. Beyond-window re-seed is a
+planned follow-up. `Providers.Local` has its own reattach seam: pass `history:` (a prior
+`SessionResult.transcript`) to `open/2` to seed a conversation verbatim; `resumed?/1` reflects it
+and `transcript/1` exposes the grown history. Any provider whose history lives client-side can
+implement the optional `transcript/1` callback — `Session` embeds it into `SessionResult.transcript`
+at terminal (`nil` for server-held providers like Claude Managed Agents and AgentCore).
 
 ## Layers
 
