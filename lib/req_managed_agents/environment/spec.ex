@@ -38,7 +38,8 @@ defmodule ReqManagedAgents.Environment.Spec do
   each runtime validated/coerced via `Runtime.new/1`; any invalid runtime fails
   the whole coercion with `{:error, :invalid_environment_spec}`, so no unvalidated
   runtime can reach the bootstrap renderer. Both atom- and string-keyed maps are
-  accepted (mirroring `Agent.Spec.new/1`'s tolerance).
+  accepted — more tolerant than `Agent.Spec.new/1`, which matches atom-keyed
+  maps only.
   """
   @spec new(t() | map() | nil) :: {:ok, t() | nil} | {:error, :invalid_environment_spec}
   def new(nil), do: {:ok, nil}
