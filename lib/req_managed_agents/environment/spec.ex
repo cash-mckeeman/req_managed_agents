@@ -71,6 +71,11 @@ defmodule ReqManagedAgents.Environment.Spec do
   (`{runtimes, config}`, `name` excluded), using the same `Provisioner.hash/1`
   helper as the rest of the provisioner. This is what makes an environment
   content-addressable at both provisioning layers.
+
+  Returns the full hex hash — unlike `ReqManagedAgents.Agent.Spec.digest/1`,
+  which returns a lowercased 8-hex prefix. Callers that need the short form
+  (e.g. the `<base>_<digest8>` provider name) truncate and downcase it
+  themselves.
   """
   @spec digest(t()) :: String.t()
   def digest(%__MODULE__{runtimes: runtimes, config: config}),
