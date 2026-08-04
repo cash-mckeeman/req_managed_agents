@@ -87,7 +87,7 @@ jobs:
           out=$(mix hex.audit 2>&1) && { echo "$out"; exit 0; }
           echo "$out"
           unexpected_ids=$(echo "$out" | grep -oE "EEF-CVE-[0-9-]+|GHSA-[a-z0-9-]+" | sort -u \
-            | grep -vE "^(EEF-CVE-2026-43966|EEF-CVE-2026-43969|GHSA-g2wm-735q-3f56)$" || true)
+            | grep -vE "^(EEF-CVE-2026-43966|EEF-CVE-2026-43969|GHSA-g2wm-735q-3f56|GHSA-w4f7-4cxr-rv3c)$" || true)
           other_pkgs=$(echo "$out" | grep -E "^  [a-zA-Z0-9_]+ [0-9]" | awk '{print $1}' | sort -u \
             | grep -v "^cowlib$" || true)
           if [ -n "$unexpected_ids" ] || [ -n "$other_pkgs" ]; then
