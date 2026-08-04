@@ -608,6 +608,11 @@ defmodule ReqManagedAgents.Provisioner.EnvironmentsTest do
                )
     end
 
+    test "a literal nil env spec is rejected with a tagged error" do
+      assert {:error, {:invalid_environment_spec, nil}} =
+               Provisioner.ensure_environment(:c, nil, name: "d", store: fresh_store())
+    end
+
     test "an invalid runtime surfaces {:error, :invalid_environment_spec} (was {:invalid_runtime, _})" do
       spec = %{runtimes: [%{lang: :python}], config: %{}}
 

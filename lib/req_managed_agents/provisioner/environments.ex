@@ -31,10 +31,18 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   Opts: `:name` (repository base, default `"env"`), `:store`
   (`{module, store_opts}`), `:create_fun` / `:list_fun` (test seams; default
   to `ReqManagedAgents.Client` calls on the given client).
+
+  A literal `nil` spec is rejected with
+  `{:error, {:invalid_environment_spec, nil}}` — `Environment.Spec.new/1` maps
+  `nil` to "no environment", and no environment cannot be provisioned.
   """
   @spec ensure_environment(term(), Environment.Spec.t() | map(), keyword()) ::
           {:ok, Handle.t()} | {:error, term()}
-  def ensure_environment(client, env_spec, opts \\ []) do
+  def ensure_environment(client, env_spec, opts \\ [])
+
+  def ensure_environment(_client, nil, _opts), do: {:error, {:invalid_environment_spec, nil}}
+
+  def ensure_environment(client, env_spec, opts) do
     with {:ok, env} <- Environment.Spec.new(env_spec) do
       with {:ok, handle} <- do_ensure_environment(client, env, opts) do
         {:ok, attach_bootstrap(handle, env.runtimes)}
