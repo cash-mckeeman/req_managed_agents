@@ -51,9 +51,9 @@ defmodule ReqManagedAgents.Provisioner.Runtimes do
   """
   @spec bootstrap_script([map() | Runtime.t()]) :: binary()
   def bootstrap_script(runtimes) do
-    entries = runtimes |> coerce() |> ordered_specs()
-    template = Path.join([priv_dir(), "runtime_bootstrap", "mise_install.sh.eex"])
-    EEx.eval_file(template, entries: entries)
+    runtimes
+    |> coerce()
+    |> render_bootstrap()
   end
 
   @doc """
@@ -81,7 +81,7 @@ defmodule ReqManagedAgents.Provisioner.Runtimes do
     runtimes, and persists PATH + locale to ~/.bashrc for subsequent commands.
 
     ```bash
-    #{String.trim_trailing(bootstrap_script(structs))}
+    #{String.trim_trailing(render_bootstrap(structs))}
     ```
     """
   end
@@ -123,6 +123,13 @@ defmodule ReqManagedAgents.Provisioner.Runtimes do
           raise ArgumentError, "invalid runtime entry: #{inspect(error)}"
       end
     end)
+  end
+
+  # Takes already-coerced structs, so callers that coerced for their own use
+  # (system_prompt_block/1) don't pay a second pass through Runtime.new/1.
+  defp render_bootstrap(structs) do
+    template = Path.join([priv_dir(), "runtime_bootstrap", "mise_install.sh.eex"])
+    EEx.eval_file(template, entries: ordered_specs(structs))
   end
 
   defp ordered_specs(runtimes) do

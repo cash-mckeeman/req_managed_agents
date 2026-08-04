@@ -27,13 +27,8 @@ defmodule ReqManagedAgents.Provisioner.Runtime do
   Returns `{:ok, t()}` or `{:error, {:invalid_runtime, term()}}`.
   """
   @spec new(t() | map()) :: {:ok, t()} | {:error, {:invalid_runtime, term()}}
-  def new(%__MODULE__{lang: lang, version: version, via: via} = r)
-      when is_atom(lang) and is_binary(version) do
-    if via == :mise and version =~ @version_re,
-      do: {:ok, r},
-      else: {:error, {:invalid_runtime, r}}
-  end
-
+  # One clause covers both accepted inputs: a %__MODULE__{} matches the map
+  # pattern, and rebuilding it is field-identical to returning it.
   def new(%{lang: lang, version: version} = m) when is_atom(lang) and is_binary(version) do
     via = Map.get(m, :via, :mise)
 
