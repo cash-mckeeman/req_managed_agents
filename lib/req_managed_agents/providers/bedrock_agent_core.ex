@@ -131,8 +131,18 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
         rollback(hid, opts)
         {:error, reason}
     end
+  rescue
+    # A raise is an exit path like any other, and the one where the caller is
+    # least able to clean up: it never sees a handle, so nothing else knows the
+    # harness exists. Roll back, then let the original exception continue.
+    e ->
+      rollback(hid, opts)
+      reraise e, __STACKTRACE__
   end
 
+  # Best-effort by contract: rollback must never replace the failure that caused
+  # it, so a delete that errors, raises, or answers in an unexpected shape is
+  # logged and swallowed.
   defp rollback(hid, opts) do
     delete_fun =
       opts[:delete_fun] || fn id -> Client.delete_harness(opts[:client] || Client.new(), id) end
@@ -141,14 +151,22 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       {:ok, _} ->
         Logger.info("agent_core rolled back harness #{hid} after a failed ready-wait")
 
-      {:error, reason} ->
+      other ->
         Logger.warning(
           "agent_core could not roll back harness #{hid} " <>
-            "(it may be orphaned): #{inspect(reason)}"
+            "(it may be orphaned): #{inspect(other)}"
         )
     end
 
     :ok
+  rescue
+    e ->
+      Logger.warning(
+        "agent_core rollback of harness #{hid} raised " <>
+          "(it may be orphaned): #{inspect(e)}"
+      )
+
+      :ok
   end
 
   @impl true
@@ -289,18 +307,19 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     case list_fun.() do
       {:ok, %{"harnesses" => hs}} ->
         n = poll_n + 1
-        present? = Enum.any?(hs, &(&1["harnessName"] == name))
-        emit_poll(name, :deleted, listed_status(present?), started, n)
+        entry = Enum.find(hs, &(&1["harnessName"] == name))
+        status = observed_status(entry)
+        emit_poll(name, :deleted, status, started, n)
 
         cond do
-          not present? ->
+          is_nil(entry) ->
             {:ok, n}
 
           polls_left > 0 ->
             sleep_and_recheck(list_fun, name, poll_ms, polls_left, started, n)
 
           true ->
-            {{:error, {:harness_still_deleting, ctx(name, :deleted, "DELETING", started, n)}}, n}
+            {{:error, {:harness_still_deleting, ctx(name, :deleted, status, started, n)}}, n}
         end
 
       # A listing failure mid-teardown is not evidence the harness survived; the
@@ -315,8 +334,11 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     deleted_loop(list_fun, name, poll_ms, polls_left - 1, started, poll_n)
   end
 
-  defp listed_status(true), do: "DELETING"
-  defp listed_status(false), do: nil
+  # The status the listing actually returned. A harness whose delete failed sits
+  # in DELETE_FAILED, not DELETING, and reporting the latter would misdirect the
+  # next investigation; absent from the listing at all means gone.
+  defp observed_status(nil), do: nil
+  defp observed_status(entry), do: entry["status"]
 
   defp wait_until_ready(get_fun, hid, poll_ms, max_polls) do
     run_wait(:ready, hid, fn started ->
@@ -412,7 +434,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     duration = elapsed(started)
     tag = result_tag(result)
 
-    Logger.debug(fn ->
+    # The one line worth keeping when a consumer runs above :debug — a failed
+    # provision must not go quiet just because per-poll detail is filtered out.
+    log_stop(tag, fn ->
       "agent_core provision stop harness_id=#{harness_id} phase=#{phase} " <>
         "result=#{inspect(tag)} polls=#{polls} duration_ms=#{duration}"
     end)
@@ -424,10 +448,20 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     )
   end
 
+  defp log_stop(:ok, message), do: Logger.info(message)
+  defp log_stop(_error_tag, message), do: Logger.warning(message)
+
   defp emit_exception(harness_id, phase, started, error) do
+    duration = elapsed(started)
+
+    Logger.warning(fn ->
+      "agent_core provision raised harness_id=#{harness_id} phase=#{phase} " <>
+        "error=#{inspect(error)} duration_ms=#{duration}"
+    end)
+
     :telemetry.execute(
       [:req_managed_agents, :agent_core, :provision, :exception],
-      %{duration_ms: elapsed(started)},
+      %{duration_ms: duration},
       %{harness_id: harness_id, phase: phase, result: {:exception, error.__struct__}}
     )
   end

@@ -35,4 +35,49 @@ defmodule ReqManagedAgents.Provisioner.NameTest do
     cma = Policy.claude_managed_agents()
     assert Name.compose("rma-v02-rtc", "38ca3140", cma) == "rma-v02-rtc_38ca3140"
   end
+
+  describe "at the fit boundary" do
+    # The AgentCore budget for the base is 40 - len(digest) - 1 = 31 bytes: the
+    # last width that survives whole, and the first that must be hashed.
+    test "a base of exactly the budget is kept whole" do
+      base = String.duplicate("a", 31)
+      composed = Name.compose(base, "38ca3140", @ac)
+
+      assert composed == base <> "_38ca3140"
+      assert byte_size(composed) == 40
+    end
+
+    test "a base one byte over the budget is hashed and still fits" do
+      base = String.duplicate("a", 32)
+      composed = Name.compose(base, "38ca3140", @ac)
+
+      refute composed == base <> "_38ca3140"
+      assert byte_size(composed) == 40
+      assert composed =~ ~r/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/
+      assert String.ends_with?(composed, "_38ca3140")
+    end
+
+    test "bases at 31 and 32 do not collapse onto each other" do
+      a = Name.compose(String.duplicate("a", 31), "38ca3140", @ac)
+      b = Name.compose(String.duplicate("a", 32), "38ca3140", @ac)
+      refute a == b
+    end
+  end
+
+  test "a truncated multi-byte base stays valid UTF-8 and inside the byte budget" do
+    # Only reachable on the permissive policy, where the sanitiser does not first
+    # reduce the base to ASCII. Cutting on a raw byte boundary here would split a
+    # character; slicing by grapheme would overrun the limit.
+    cma = Policy.claude_managed_agents()
+
+    # The leading ASCII byte is load-bearing: it makes the byte budget land in the
+    # middle of a two-byte character rather than neatly between two.
+    base = "a" <> String.duplicate("é", 200)
+    refute String.valid?(binary_part(base, 0, 240)), "base must actually straddle the cut"
+
+    composed = Name.compose(base, "38ca3140", cma)
+
+    assert String.valid?(composed)
+    assert byte_size(composed) <= 256
+  end
 end
