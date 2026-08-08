@@ -64,7 +64,9 @@ defmodule ReqManagedAgents.Provisioner.AgentsTest do
           create_fun: counting_create(calls, "a1")
         )
 
-      assert String.length(name) <= 256
+      # byte_size, not String.length: fit/3 budgets in bytes, so a character-count
+      # assertion cannot catch a byte overflow.
+      assert byte_size(name) <= 256
     end
   end
 

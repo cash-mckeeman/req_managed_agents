@@ -59,7 +59,30 @@ defmodule ReqManagedAgents.Provisioner.Name do
         |> String.downcase()
 
       keep = budget - @base_hash_len - 1
-      binary_part(base, 0, keep) <> "_" <> hash
+      truncate_bytes(base, keep) <> "_" <> hash
+    end
+  end
+
+  # The budget is counted in BYTES — the conservative reading of a character cap,
+  # since a byte count is never below a character count. Truncation must still not
+  # end mid-character, or the name is invalid UTF-8. Slicing by grapheme instead
+  # would stay valid but overrun the budget, because one grapheme can be four
+  # bytes; so cut on the byte boundary and give back any partial trailing
+  # character.
+  defp truncate_bytes(base, keep) do
+    base
+    |> binary_part(0, keep)
+    |> drop_partial_codepoint()
+  end
+
+  defp drop_partial_codepoint(""), do: ""
+
+  defp drop_partial_codepoint(bin) do
+    if String.valid?(bin) do
+      bin
+    else
+      dropped = binary_part(bin, 0, byte_size(bin) - 1)
+      drop_partial_codepoint(dropped)
     end
   end
 end

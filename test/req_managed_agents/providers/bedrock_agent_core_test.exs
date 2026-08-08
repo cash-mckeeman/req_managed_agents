@@ -404,6 +404,31 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     assert Agent.get(creates, & &1) == 1
   end
 
+  test "the delete-wait reports the status it actually observed, not an assumed one" do
+    # The realistic shape: the harness is DELETING when recovery first lists it,
+    # then the delete itself fails and it sits in DELETE_FAILED forever. Reporting
+    # "DELETING" here would send the next investigation after a slow delete that
+    # is not happening.
+    name = P.harness_name(@spec_bedrock, nil)
+    {:ok, lists} = Agent.start_link(fn -> 0 end)
+
+    list_fun = fn ->
+      n = Agent.get_and_update(lists, &{&1 + 1, &1 + 1})
+      status = if n == 1, do: "DELETING", else: "DELETE_FAILED"
+      {:ok, %{"harnesses" => [%{"harnessName" => name, "status" => status}]}}
+    end
+
+    assert {:error, {:harness_still_deleting, %WaitContext{last_status: "DELETE_FAILED"}}} =
+             P.provision(@spec_bedrock,
+               execution_role_arn: "role",
+               create_fun: fn _ -> {:error, {:http_error, 409, "exists"}} end,
+               list_fun: list_fun,
+               get_fun: fn _hid -> {:ok, %{"harness" => %{"status" => "READY"}}} end,
+               ready_poll_ms: 0,
+               ready_max_polls: 2
+             )
+  end
+
   test "provision/2 still returns a name conflict when the same-name harness has a *_FAILED status" do
     name = P.harness_name(@spec_bedrock, nil)
     create = fn _ -> {:error, {:http_error, 409, %{}}} end
@@ -529,6 +554,59 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
                )
     end
 
+    test "the recreate path rolls back a harness it created after waiting out a delete" do
+      # deleting -> wait it out -> create -> ready-failure. This create is as much
+      # this call's own as the first one, so it must roll back too.
+      test_pid = self()
+      name = P.harness_name(@spec_bedrock, nil)
+      {:ok, lists} = Agent.start_link(fn -> 0 end)
+
+      list_fun = fn ->
+        n = Agent.get_and_update(lists, &{&1 + 1, &1 + 1})
+        harnesses = if n >= 2, do: [], else: [%{"harnessName" => name, "status" => "DELETING"}]
+        {:ok, %{"harnesses" => harnesses}}
+      end
+
+      {:ok, creates} = Agent.start_link(fn -> 0 end)
+
+      create_fun = fn _ ->
+        case Agent.get_and_update(creates, &{&1 + 1, &1 + 1}) do
+          1 -> {:error, {:http_error, 409, "exists"}}
+          _ -> {:ok, %{"harness" => %{"arn" => "arn:new", "harnessId" => "h_new"}}}
+        end
+      end
+
+      assert {:error, {:harness_failed, %WaitContext{harness_id: "h_new"}}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: create_fun,
+                 list_fun: list_fun,
+                 get_fun: fn _ -> {:ok, %{"harness" => %{"status" => "CREATE_FAILED"}}} end,
+                 delete_fun: fn hid ->
+                   send(test_pid, {:deleted, hid})
+                   {:ok, %{}}
+                 end,
+                 ready_poll_ms: 0
+               )
+
+      assert_receive {:deleted, "h_new"}
+    end
+
+    test "a rollback that raises never masks the original error" do
+      get_fun = fn _ -> {:ok, %{"harness" => %{"status" => "CREATE_FAILED"}}} end
+
+      assert {:error, {:harness_failed, %WaitContext{}}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ ->
+                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}}
+                 end,
+                 get_fun: get_fun,
+                 delete_fun: fn _ -> raise "delete blew up" end,
+                 ready_poll_ms: 0
+               )
+    end
+
     test "an adopted harness this call did not create is never rolled back" do
       # Deleting a harness we merely recovered would destroy a resource another
       # caller owns — rollback covers only what this call created.
@@ -649,12 +727,20 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
           execution_role_arn: "r",
           create_fun: fn _ -> {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}} end,
           get_fun: fn _ -> raise "poll blew up" end,
+          delete_fun: fn hid ->
+            send(test_pid, {:deleted, hid})
+            {:ok, %{}}
+          end,
           ready_poll_ms: 0
         )
       end
 
       assert_receive {:exception, %{duration_ms: _},
                       %{harness_id: "h", phase: :ready, result: {:exception, RuntimeError}}}
+
+      # A raise is an exit path like any other: the harness this call created must
+      # not survive it. Asserting the raise alone would pin the orphan.
+      assert_receive {:deleted, "h"}
     end
 
     test "a failed wait emits a stop event tagged with the failure" do
