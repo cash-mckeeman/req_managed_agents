@@ -38,6 +38,36 @@ defmodule ReqManagedAgents.Provisioner.AgentsTest do
     assert [%{name: ^name, model: "m", system: "s", tools: []}] = Agent.get(calls, & &1)
   end
 
+  describe "name composition under the CMA policy" do
+    test "ordinary CMA names are byte-identical to the inline composition", %{
+      store: store,
+      calls: calls
+    } do
+      # The CMA policy is permissive/any precisely so routing through Name renames
+      # nothing: an existing hyphenated agent must keep the name it already has, or
+      # every live CMA agent silently re-provisions.
+      spec = %{@spec_attrs | name: "rma-v02-rtc"}
+
+      {:ok, %{name: name, digest: digest}} =
+        Agents.ensure_agent(nil, spec, store: store, create_fun: counting_create(calls, "a1"))
+
+      assert name == "rma-v02-rtc_" <> digest
+    end
+
+    test "an over-long CMA base is bounded at the CMA limit", %{store: store, calls: calls} do
+      long = String.duplicate("segment-", 60)
+
+      {:ok, %{name: name}} =
+        Agents.ensure_agent(nil, @spec_attrs,
+          name: long,
+          store: store,
+          create_fun: counting_create(calls, "a1")
+        )
+
+      assert String.length(name) <= 256
+    end
+  end
+
   test "second ensure hits the store — create_fun not called again", %{store: store, calls: calls} do
     create = counting_create(calls, "agent_1")
     {:ok, h1} = Agents.ensure_agent(nil, @spec_attrs, store: store, create_fun: create)
