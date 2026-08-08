@@ -20,6 +20,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   alias ReqManagedAgents.AgentCore.{Client, Converse}
   alias ReqManagedAgents.Environment
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
+  alias ReqManagedAgents.Provisioner.Name
+  alias ReqManagedAgents.Provisioner.Name.Policy
   alias ReqManagedAgents.{ToolUse, TurnResult, Usage}
 
   @impl true
@@ -129,8 +131,21 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   @doc false
   def harness_name(spec, prefix, env \\ nil) do
-    [prefix, "harness_#{agent_digest(spec, env)}"] |> Enum.reject(&is_nil/1) |> Enum.join("_")
+    base =
+      [prefix, spec_name(spec)]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join("_")
+
+    Name.compose(base, agent_digest(spec, env), Policy.agent_core())
   end
+
+  # The spec name is part of the harness BASE, never the digest: `Agent.Spec.digest/1`
+  # is shared across providers and deliberately excludes the name, so folding the name
+  # into the digest here would rotate CMA names too.
+  defp spec_name(%Spec{name: name}), do: name
+  defp spec_name(%{name: name}) when is_binary(name), do: name
+  defp spec_name(%{"name" => name}) when is_binary(name), do: name
+  defp spec_name(_), do: nil
 
   # The harness content-address is a two-layer fold (#70/#72):
   #

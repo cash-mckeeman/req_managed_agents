@@ -568,8 +568,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     # harness_name/2's digest was unified onto Agent.Spec.digest/1 (previously an inline
     # :crypto.hash over the whole spec map). For a spec that only carries the identity
     # fields Agent.Spec knows about (system_prompt/tools/terminal_tool/model_config), the
-    # two computations MUST agree byte-for-byte, or an already-provisioned harness would
-    # silently re-provision under a new name.
+    # two computations MUST agree byte-for-byte. The surrounding name shape is free to
+    # change (the base now carries the spec name); the digest is not, because it is the
+    # content address shared with every other provider.
     spec = %{
       system_prompt: "x",
       tools: [%{"name" => "t"}],
@@ -588,7 +589,53 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     new_digest = Spec.digest(agent_spec)
 
     assert old_digest == new_digest
-    assert P.harness_name(spec, nil) == "harness_#{new_digest}"
+    assert String.ends_with?(P.harness_name(spec, nil), "_#{new_digest}")
+  end
+
+  test "two specs differing only in name produce different harness names" do
+    a = %{
+      name: "rma-live-bedrock-harness",
+      system_prompt: "p",
+      tools: [],
+      terminal_tool: nil,
+      model_config: %{"m" => 1}
+    }
+
+    b = %{a | name: "rma-live-bedrock-reattach"}
+
+    refute P.harness_name(a, "rma_live") == P.harness_name(b, "rma_live")
+  end
+
+  test "harness names satisfy the AWS charset and length constraint" do
+    spec = %{
+      name: "rma-live-bedrock-harness",
+      system_prompt: "p",
+      tools: [],
+      terminal_tool: nil,
+      model_config: %{"m" => 1}
+    }
+
+    assert P.harness_name(spec, "rma_live") =~ ~r/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/
+  end
+
+  test "a nil prefix still produces a valid name" do
+    spec = %{
+      name: "orchestrated-agent",
+      system_prompt: "p",
+      tools: [],
+      terminal_tool: nil,
+      model_config: %{"m" => 1}
+    }
+
+    assert P.harness_name(spec, nil) =~ ~r/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/
+  end
+
+  test "a spec with no name at all still produces a valid name" do
+    # Reachable only by calling harness_name/2 directly — provision/2 coerces through
+    # Agent.Spec.new/1, which requires a binary name. It must still be legal for AWS.
+    spec = %{system_prompt: "p", tools: [], terminal_tool: nil, model_config: %{"m" => 1}}
+
+    assert P.harness_name(spec, nil) =~ ~r/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/
   end
 
   test "harness_name/3 env-arg is nil-default and byte-identical to the 2-arg env-less name" do
