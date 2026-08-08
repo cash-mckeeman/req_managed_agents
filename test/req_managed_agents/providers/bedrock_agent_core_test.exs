@@ -5,6 +5,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   alias ReqManagedAgents.Environment.Spec, as: EnvSpec
   alias ReqManagedAgents.Providers.BedrockAgentCore, as: P
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
+  alias ReqManagedAgents.Providers.BedrockAgentCore.WaitContext
   alias ReqManagedAgents.{ToolUse, TurnResult}
 
   defp start_block(idx, id, name),
@@ -390,7 +391,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
 
     get_fun = fn _hid -> {:ok, %{"harness" => %{"status" => "READY"}}} end
 
-    assert {:error, {:harness_still_deleting, ^name}} =
+    assert {:error, {:harness_still_deleting, %WaitContext{harness_id: ^name, phase: :deleted}}} =
              P.provision(@spec_bedrock,
                execution_role_arn: "role",
                create_fun: create_fun,
@@ -453,27 +454,225 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     create = fn _ -> {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}} end
     get = fn _ -> {:ok, %{"harness" => %{"status" => "CREATE_FAILED"}}} end
 
-    assert {:error, {:harness_failed, "CREATE_FAILED"}} =
+    assert {:error, {:harness_failed, %WaitContext{last_status: "CREATE_FAILED"}}} =
              P.provision(@spec_bedrock,
                execution_role_arn: "r",
                create_fun: create,
                get_fun: get,
+               delete_fun: fn _ -> {:ok, %{}} end,
                ready_poll_ms: 0
              )
   end
 
-  test "provision/2 times out if the harness never becomes READY" do
-    create = fn _ -> {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}} end
-    get = fn _ -> {:ok, %{"harness" => %{"status" => "CREATING"}}} end
+  # ── rollback on a post-create failure ────────────────────────────────────────
 
-    assert {:error, :harness_ready_timeout} =
-             P.provision(@spec_bedrock,
-               execution_role_arn: "r",
-               create_fun: create,
-               get_fun: get,
-               ready_poll_ms: 0,
-               ready_max_polls: 2
-             )
+  describe "rollback" do
+    test "a ready-failure rolls the created harness back" do
+      test_pid = self()
+
+      delete_fun = fn hid ->
+        send(test_pid, {:deleted, hid})
+        {:ok, %{}}
+      end
+
+      get_fun = fn _ -> {:ok, %{"harness" => %{"status" => "CREATE_FAILED"}}} end
+
+      assert {:error, {:harness_failed, %WaitContext{harness_id: "h"}}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ ->
+                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}}
+                 end,
+                 get_fun: get_fun,
+                 delete_fun: delete_fun,
+                 ready_poll_ms: 0
+               )
+
+      assert_receive {:deleted, "h"}
+    end
+
+    test "a ready-timeout rolls the created harness back instead of orphaning it" do
+      test_pid = self()
+
+      delete_fun = fn hid ->
+        send(test_pid, {:deleted, hid})
+        {:ok, %{}}
+      end
+
+      assert {:error, {:harness_ready_timeout, %WaitContext{last_status: "CREATING", polls: 2}}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ ->
+                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}}
+                 end,
+                 get_fun: fn _ -> {:ok, %{"harness" => %{"status" => "CREATING"}}} end,
+                 delete_fun: delete_fun,
+                 ready_poll_ms: 0,
+                 ready_max_polls: 1
+               )
+
+      assert_receive {:deleted, "h"}
+    end
+
+    test "rollback failure never masks the original error" do
+      get_fun = fn _ -> {:ok, %{"harness" => %{"status" => "CREATE_FAILED"}}} end
+
+      assert {:error, {:harness_failed, %WaitContext{}}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ ->
+                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}}
+                 end,
+                 get_fun: get_fun,
+                 delete_fun: fn _ -> {:error, :boom} end,
+                 ready_poll_ms: 0
+               )
+    end
+
+    test "an adopted harness this call did not create is never rolled back" do
+      # Deleting a harness we merely recovered would destroy a resource another
+      # caller owns — rollback covers only what this call created.
+      test_pid = self()
+      name = P.harness_name(@spec_bedrock, nil)
+
+      list = fn ->
+        {:ok,
+         %{
+           "harnesses" => [
+             %{
+               "harnessName" => name,
+               "harnessId" => "h9",
+               "arn" => "arn:harness/exist",
+               "status" => "READY"
+             }
+           ]
+         }}
+      end
+
+      assert {:error, {:harness_failed, %WaitContext{harness_id: "h9"}}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ -> {:error, {:http_error, 409, %{}}} end,
+                 list_fun: list,
+                 get_fun: fn _ -> {:ok, %{"harness" => %{"status" => "CREATE_FAILED"}}} end,
+                 delete_fun: fn hid ->
+                   send(test_pid, {:deleted, hid})
+                   {:ok, %{}}
+                 end,
+                 ready_poll_ms: 0
+               )
+
+      refute_receive {:deleted, _}
+    end
+  end
+
+  # ── instrumentation ──────────────────────────────────────────────────────────
+
+  describe "provision instrumentation" do
+    setup do
+      test_pid = self()
+      handler = "prov-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler,
+        [
+          [:req_managed_agents, :agent_core, :provision, :poll],
+          [:req_managed_agents, :agent_core, :provision, :stop]
+        ],
+        fn event, meas, meta, _ -> send(test_pid, {:telemetry, event, meas, meta}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+      :ok
+    end
+
+    test "every poll emits telemetry naming the harness and its observed status" do
+      {:ok, n} = Agent.start_link(fn -> 0 end)
+
+      get = fn _ ->
+        i = Agent.get_and_update(n, &{&1, &1 + 1})
+
+        if i == 0,
+          do: {:ok, %{"harness" => %{"status" => "CREATING"}}},
+          else: {:ok, %{"harness" => %{"status" => "READY"}}}
+      end
+
+      assert {:ok, _} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ ->
+                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}}
+                 end,
+                 get_fun: get,
+                 ready_poll_ms: 0
+               )
+
+      assert_receive {:telemetry, [:req_managed_agents, :agent_core, :provision, :poll],
+                      %{poll_n: 1, elapsed_ms: _},
+                      %{harness_id: "h", status: "CREATING", phase: :ready}}
+
+      assert_receive {:telemetry, [:req_managed_agents, :agent_core, :provision, :poll],
+                      %{poll_n: 2}, %{harness_id: "h", status: "READY", phase: :ready}}
+    end
+
+    test "a terminal outcome emits a stop event carrying the poll count and result" do
+      assert {:ok, _} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ ->
+                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}}
+                 end,
+                 get_fun: fn _ -> {:ok, %{"harness" => %{"status" => "READY"}}} end,
+                 ready_poll_ms: 0
+               )
+
+      assert_receive {:telemetry, [:req_managed_agents, :agent_core, :provision, :stop],
+                      %{duration_ms: _, polls: 1}, %{harness_id: "h", phase: :ready, result: :ok}}
+    end
+
+    test "a raising poll emits an exception event and does not swallow the raise" do
+      handler = "prov-ex-#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      :telemetry.attach(
+        handler,
+        [:req_managed_agents, :agent_core, :provision, :exception],
+        fn _e, meas, meta, _ -> send(test_pid, {:exception, meas, meta}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      assert_raise RuntimeError, "poll blew up", fn ->
+        P.provision(@spec_bedrock,
+          execution_role_arn: "r",
+          create_fun: fn _ -> {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}} end,
+          get_fun: fn _ -> raise "poll blew up" end,
+          ready_poll_ms: 0
+        )
+      end
+
+      assert_receive {:exception, %{duration_ms: _},
+                      %{harness_id: "h", phase: :ready, result: {:exception, RuntimeError}}}
+    end
+
+    test "a failed wait emits a stop event tagged with the failure" do
+      assert {:error, _} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ ->
+                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}}
+                 end,
+                 get_fun: fn _ -> {:ok, %{"harness" => %{"status" => "DELETING"}}} end,
+                 delete_fun: fn _ -> {:ok, %{}} end,
+                 ready_poll_ms: 0
+               )
+
+      assert_receive {:telemetry, [:req_managed_agents, :agent_core, :provision, :stop],
+                      %{polls: 1},
+                      %{harness_id: "h", phase: :ready, result: {:error, :harness_terminating}}}
+    end
   end
 
   test "provision/2's handle is accepted by open/2 (harness_arn seam)" do

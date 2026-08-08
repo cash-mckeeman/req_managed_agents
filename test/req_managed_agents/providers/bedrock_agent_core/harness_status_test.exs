@@ -3,6 +3,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatusTest do
 
   alias ReqManagedAgents.Providers.BedrockAgentCore, as: P
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatus
+  alias ReqManagedAgents.Providers.BedrockAgentCore.WaitContext
 
   @spec_bedrock %{
     name: "harness",
@@ -41,11 +42,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatusTest do
     create = fn _ -> {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}} end
     get_fun = fn _hid -> {:ok, %{"harness" => %{"status" => "DELETING"}}} end
 
-    assert {:error, {:harness_terminating, _}} =
+    assert {:error, {:harness_terminating, %WaitContext{last_status: "DELETING"}}} =
              P.provision(@spec_bedrock,
                execution_role_arn: "role",
                create_fun: create,
                get_fun: get_fun,
+               delete_fun: fn _ -> {:ok, %{}} end,
                ready_poll_ms: 0,
                ready_max_polls: 3
              )
@@ -55,11 +57,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatusTest do
     create = fn _ -> {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}} end
     get_fun = fn _hid -> {:ok, %{"harness" => %{"status" => "INACTIVE"}}} end
 
-    assert {:error, {:harness_unknown_status, _}} =
+    assert {:error, {:harness_unknown_status, %WaitContext{last_status: "INACTIVE"}}} =
              P.provision(@spec_bedrock,
                execution_role_arn: "role",
                create_fun: create,
                get_fun: get_fun,
+               delete_fun: fn _ -> {:ok, %{}} end,
                ready_poll_ms: 0,
                ready_max_polls: 3
              )

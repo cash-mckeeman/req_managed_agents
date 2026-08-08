@@ -16,10 +16,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   """
   @behaviour ReqManagedAgents.Provider
 
+  require Logger
+
   alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.AgentCore.{Client, Converse}
   alias ReqManagedAgents.Environment
-  alias ReqManagedAgents.Providers.BedrockAgentCore.{HarnessSpec, HarnessStatus}
+  alias ReqManagedAgents.Providers.BedrockAgentCore.{HarnessSpec, HarnessStatus, WaitContext}
   alias ReqManagedAgents.Provisioner.Name
   alias ReqManagedAgents.Provisioner.Name.Policy
   alias ReqManagedAgents.{ToolUse, TurnResult, Usage}
@@ -98,8 +100,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       # CreateHarness returns the created resource wrapped under "harness" (verified live against
       # bedrock-agentcore-control), consistent with GetHarness — NOT a flat "harnessArn".
       {:ok, %{"harness" => %{"arn" => arn, "harnessId" => hid}}} ->
-        with :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls),
-             do: {:ok, %{harness_arn: arn, harness_id: hid}}
+        ready_or_rollback(get_fun, arn, hid, poll_ms, max_polls, opts)
 
       {:error, {:http_error, 409, _}} ->
         recover_existing(
@@ -109,12 +110,45 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
           get_fun,
           harness_spec.name,
           poll_ms,
-          max_polls
+          max_polls,
+          opts
         )
 
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  # A harness this call created and could not bring to READY is a billable resource
+  # nothing else will ever reclaim — the ready-wait's own failure is the last moment
+  # its id is known. Rollback is best-effort and never replaces the original error.
+  defp ready_or_rollback(get_fun, arn, hid, poll_ms, max_polls, opts) do
+    case wait_until_ready(get_fun, hid, poll_ms, max_polls) do
+      :ok ->
+        {:ok, %{harness_arn: arn, harness_id: hid}}
+
+      {:error, reason} ->
+        rollback(hid, opts)
+        {:error, reason}
+    end
+  end
+
+  defp rollback(hid, opts) do
+    delete_fun =
+      opts[:delete_fun] || fn id -> Client.delete_harness(opts[:client] || Client.new(), id) end
+
+    case delete_fun.(hid) do
+      {:ok, _} ->
+        Logger.info("agent_core rolled back harness #{hid} after a failed ready-wait")
+
+      {:error, reason} ->
+        Logger.warning(
+          "agent_core could not roll back harness #{hid} " <>
+            "(it may be orphaned): #{inspect(reason)}"
+        )
+    end
+
+    :ok
   end
 
   @impl true
@@ -174,27 +208,28 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     s
   end
 
-  defp recover_existing(create_fun, harness_spec, list_fun, get_fun, name, poll_ms, max_polls) do
+  defp recover_existing(
+         create_fun,
+         harness_spec,
+         list_fun,
+         get_fun,
+         name,
+         poll_ms,
+         max_polls,
+         opts
+       ) do
     case list_fun.() do
       {:ok, %{"harnesses" => harnesses}} ->
         cond do
           harness = recoverable_harness(harnesses, name) ->
-            case harness do
-              %{"arn" => arn, "harnessId" => hid} ->
-                with :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls),
-                     do: {:ok, %{harness_arn: arn, harness_id: hid}}
-
-              _ ->
-                {:error, {:unexpected_list_response, harness}}
-            end
+            adopt(harness, get_fun, poll_ms, max_polls)
 
           deleting?(harnesses, name) ->
             # A prior same-name harness is still tearing down; wait it out, then re-create.
             with :ok <- wait_until_deleted(list_fun, name, poll_ms, max_polls),
                  {:ok, %{"harness" => %{"arn" => arn, "harnessId" => hid}}} <-
-                   create_fun.(harness_spec),
-                 :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls) do
-              {:ok, %{harness_arn: arn, harness_id: hid}}
+                   create_fun.(harness_spec) do
+              ready_or_rollback(get_fun, arn, hid, poll_ms, max_polls, opts)
             end
 
           true ->
@@ -208,6 +243,16 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
         {:error, {:unexpected_list_response, other}}
     end
   end
+
+  # An adopted harness was created by someone else, so a failed ready-wait here must
+  # NOT delete it — rollback covers only what this call created.
+  defp adopt(%{"arn" => arn, "harnessId" => hid}, get_fun, poll_ms, max_polls) do
+    with :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls),
+         do: {:ok, %{harness_arn: arn, harness_id: hid}}
+  end
+
+  defp adopt(harness, _get_fun, _poll_ms, _max_polls),
+    do: {:error, {:unexpected_list_response, harness}}
 
   defp recoverable_harness(harnesses, name) do
     Enum.find(harnesses, fn h ->
@@ -234,58 +279,166 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   defp terminating?(_), do: false
 
-  defp wait_until_deleted(list_fun, name, poll_ms, max_polls, polls \\ 0)
+  defp wait_until_deleted(list_fun, name, poll_ms, max_polls) do
+    run_wait(:deleted, name, fn started ->
+      deleted_loop(list_fun, name, poll_ms, max_polls, started, 0)
+    end)
+  end
 
-  defp wait_until_deleted(_list_fun, name, _poll_ms, max_polls, polls) when polls >= max_polls,
-    do: {:error, {:harness_still_deleting, name}}
-
-  defp wait_until_deleted(list_fun, name, poll_ms, max_polls, polls) do
+  defp deleted_loop(list_fun, name, poll_ms, polls_left, started, poll_n) do
     case list_fun.() do
       {:ok, %{"harnesses" => hs}} ->
-        if Enum.any?(hs, &(&1["harnessName"] == name)) do
-          Process.sleep(poll_ms)
-          wait_until_deleted(list_fun, name, poll_ms, max_polls, polls + 1)
-        else
-          :ok
+        n = poll_n + 1
+        present? = Enum.any?(hs, &(&1["harnessName"] == name))
+        emit_poll(name, :deleted, listed_status(present?), started, n)
+
+        cond do
+          not present? ->
+            {:ok, n}
+
+          polls_left > 0 ->
+            sleep_and_recheck(list_fun, name, poll_ms, polls_left, started, n)
+
+          true ->
+            {{:error, {:harness_still_deleting, ctx(name, :deleted, "DELETING", started, n)}}, n}
         end
 
+      # A listing failure mid-teardown is not evidence the harness survived; the
+      # subsequent create is the real arbiter and 409s if it did.
       _ ->
-        :ok
+        {:ok, poll_n}
     end
   end
 
-  defp wait_until_ready(get_fun, hid, poll_ms, polls_left) do
+  defp sleep_and_recheck(list_fun, name, poll_ms, polls_left, started, poll_n) do
+    Process.sleep(poll_ms)
+    deleted_loop(list_fun, name, poll_ms, polls_left - 1, started, poll_n)
+  end
+
+  defp listed_status(true), do: "DELETING"
+  defp listed_status(false), do: nil
+
+  defp wait_until_ready(get_fun, hid, poll_ms, max_polls) do
+    run_wait(:ready, hid, fn started ->
+      ready_loop(get_fun, hid, poll_ms, max_polls, started, 0)
+    end)
+  end
+
+  defp ready_loop(get_fun, hid, poll_ms, polls_left, started, poll_n) do
     case get_fun.(hid) do
       {:ok, %{"harness" => %{"status" => status}}} when is_binary(status) ->
-        on_status(HarnessStatus.classify(status), get_fun, hid, poll_ms, polls_left, status)
+        n = poll_n + 1
+        emit_poll(hid, :ready, status, started, n)
+        classified = HarnessStatus.classify(status)
+        on_status(classified, {get_fun, hid, poll_ms, polls_left}, {started, n, status})
 
       {:ok, other} ->
-        {:error, {:unexpected_get_harness_response, other}}
+        {{:error, {:unexpected_get_harness_response, other}}, poll_n}
 
       {:error, reason} ->
-        {:error, reason}
+        {{:error, reason}, poll_n}
     end
   end
 
-  defp on_status(:ready, _get_fun, _hid, _poll_ms, _polls_left, _status), do: :ok
+  defp on_status(:ready, _poll, {_started, n, _status}), do: {:ok, n}
 
-  defp on_status(:creating, get_fun, hid, poll_ms, polls_left, _status) when polls_left > 0 do
+  defp on_status(:creating, {get_fun, hid, poll_ms, polls_left}, {started, n, _status})
+       when polls_left > 0 do
     Process.sleep(poll_ms)
-    wait_until_ready(get_fun, hid, poll_ms, polls_left - 1)
+    ready_loop(get_fun, hid, poll_ms, polls_left - 1, started, n)
   end
 
-  defp on_status(:creating, _get_fun, _hid, _poll_ms, _polls_left, _status),
-    do: {:error, :harness_ready_timeout}
+  defp on_status(:creating, {_get_fun, hid, _poll_ms, _left}, {started, n, status}),
+    do: {{:error, {:harness_ready_timeout, ctx(hid, :ready, status, started, n)}}, n}
 
   # A deleting harness can never become READY, so polling it is always wrong.
-  defp on_status(:terminating, _get_fun, _hid, _poll_ms, _polls_left, status),
-    do: {:error, {:harness_terminating, status}}
+  defp on_status(:terminating, {_get_fun, hid, _poll_ms, _left}, {started, n, status}),
+    do: {{:error, {:harness_terminating, ctx(hid, :ready, status, started, n)}}, n}
 
-  defp on_status({:failed, status}, _get_fun, _hid, _poll_ms, _polls_left, _status),
-    do: {:error, {:harness_failed, status}}
+  defp on_status({:failed, _}, {_get_fun, hid, _poll_ms, _left}, {started, n, status}),
+    do: {{:error, {:harness_failed, ctx(hid, :ready, status, started, n)}}, n}
 
-  defp on_status({:unknown, status}, _get_fun, _hid, _poll_ms, _polls_left, _status),
-    do: {:error, {:harness_unknown_status, status}}
+  defp on_status({:unknown, _}, {_get_fun, hid, _poll_ms, _left}, {started, n, status}),
+    do: {{:error, {:harness_unknown_status, ctx(hid, :ready, status, started, n)}}, n}
+
+  defp ctx(harness_id, phase, status, started, polls) do
+    %WaitContext{
+      harness_id: harness_id,
+      phase: phase,
+      last_status: status,
+      elapsed_ms: elapsed(started),
+      polls: polls
+    }
+  end
+
+  defp elapsed(started), do: System.monotonic_time(:millisecond) - started
+
+  # ── instrumentation ──────────────────────────────────────────────────────────
+  #
+  # The bar is that the next canary failure is diagnosable from the run log
+  # alone, so every poll logs as well as emitting telemetry — an attached
+  # handler must not be a precondition for a readable failure.
+
+  defp run_wait(phase, harness_id, loop) do
+    started = System.monotonic_time(:millisecond)
+
+    try do
+      {result, polls} = loop.(started)
+      emit_stop(harness_id, phase, started, polls, result)
+      result
+    rescue
+      e ->
+        emit_exception(harness_id, phase, started, e)
+        reraise e, __STACKTRACE__
+    end
+  end
+
+  defp emit_poll(harness_id, phase, status, started, poll_n) do
+    elapsed = elapsed(started)
+
+    Logger.debug(fn ->
+      "agent_core provision poll harness_id=#{harness_id} phase=#{phase} " <>
+        "status=#{status || "absent"} poll_n=#{poll_n} elapsed_ms=#{elapsed}"
+    end)
+
+    :telemetry.execute(
+      [:req_managed_agents, :agent_core, :provision, :poll],
+      %{elapsed_ms: elapsed, poll_n: poll_n},
+      %{harness_id: harness_id, status: status, phase: phase}
+    )
+  end
+
+  defp emit_stop(harness_id, phase, started, polls, result) do
+    duration = elapsed(started)
+    tag = result_tag(result)
+
+    Logger.debug(fn ->
+      "agent_core provision stop harness_id=#{harness_id} phase=#{phase} " <>
+        "result=#{inspect(tag)} polls=#{polls} duration_ms=#{duration}"
+    end)
+
+    :telemetry.execute(
+      [:req_managed_agents, :agent_core, :provision, :stop],
+      %{duration_ms: duration, polls: polls},
+      %{harness_id: harness_id, phase: phase, result: tag}
+    )
+  end
+
+  defp emit_exception(harness_id, phase, started, error) do
+    :telemetry.execute(
+      [:req_managed_agents, :agent_core, :provision, :exception],
+      %{duration_ms: elapsed(started)},
+      %{harness_id: harness_id, phase: phase, result: {:exception, error.__struct__}}
+    )
+  end
+
+  # The metadata carries the failure TAG, never the context struct: telemetry
+  # metadata is fanned out to arbitrary handlers, and a stable atom is what a
+  # metric can be grouped by.
+  defp result_tag(:ok), do: :ok
+  defp result_tag({:error, {tag, _ctx}}) when is_atom(tag), do: {:error, tag}
+  defp result_tag({:error, reason}) when is_atom(reason), do: {:error, reason}
+  defp result_tag({:error, _reason}), do: {:error, :provider_error}
 
   # conn is a map keyed on harness_arn/sid/session_id/… — no live stream Task (request_response,
   # not streaming), so ref/consumer are always nil here; resumed? reflects a session_id: reattach.
