@@ -11,6 +11,8 @@ defmodule ReqManagedAgents.Provisioner.Agents do
   require Logger
   alias ReqManagedAgents.Agent.{Handle, Spec}
   alias ReqManagedAgents.Provisioner
+  alias ReqManagedAgents.Provisioner.Name
+  alias ReqManagedAgents.Provisioner.Name.Policy
   alias ReqManagedAgents.Provisioner.Store
 
   @default_store {Store.ETS, :req_managed_agents_provisions}
@@ -32,7 +34,7 @@ defmodule ReqManagedAgents.Provisioner.Agents do
   defp do_ensure_agent(client, %Spec{} = spec, opts) do
     base = opts[:name] || spec.name
     digest = Spec.digest(spec)
-    name = base <> "_" <> digest
+    name = Name.compose(base, digest, Policy.claude_managed_agents())
     {smod, sopts} = opts[:store] || @default_store
     key = "provision:agent:" <> Provisioner.hash({base, digest})
     digest_key = "digest:agent:" <> base <> ":" <> digest
