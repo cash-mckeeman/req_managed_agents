@@ -19,7 +19,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.AgentCore.{Client, Converse}
   alias ReqManagedAgents.Environment
-  alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
+  alias ReqManagedAgents.Providers.BedrockAgentCore.{HarnessSpec, HarnessStatus}
   alias ReqManagedAgents.Provisioner.Name
   alias ReqManagedAgents.Provisioner.Name.Policy
   alias ReqManagedAgents.{ToolUse, TurnResult, Usage}
@@ -29,7 +29,6 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   @ready_poll_ms 5_000
   @ready_max_polls 72
-  @nonreusable_status ~w(DELETING DELETE_FAILED CREATE_FAILED UPDATE_FAILED)
 
   @impl true
   def provision(spec, opts) do
@@ -212,12 +211,28 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   defp recoverable_harness(harnesses, name) do
     Enum.find(harnesses, fn h ->
-      h["harnessName"] == name and h["status"] not in @nonreusable_status
+      h["harnessName"] == name and reusable?(h["status"])
     end)
   end
 
+  # `:creating` is reusable on purpose: under content-addressing a harness carrying
+  # this computed name IS this spec, so adopting one mid-create is what makes 409
+  # recovery version-correct.
+  defp reusable?(status) when is_binary(status),
+    do: HarnessStatus.classify(status) in [:ready, :creating]
+
+  # A listing entry with no status at all is unclassifiable, so it is neither
+  # adopted nor waited on — previously it passed the not-in-blocklist check and
+  # was adopted.
+  defp reusable?(_), do: false
+
   defp deleting?(harnesses, name),
-    do: Enum.any?(harnesses, &(&1["harnessName"] == name and &1["status"] == "DELETING"))
+    do: Enum.any?(harnesses, &(&1["harnessName"] == name and terminating?(&1["status"])))
+
+  defp terminating?(status) when is_binary(status),
+    do: HarnessStatus.classify(status) == :terminating
+
+  defp terminating?(_), do: false
 
   defp wait_until_deleted(list_fun, name, poll_ms, max_polls, polls \\ 0)
 
@@ -241,19 +256,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   defp wait_until_ready(get_fun, hid, poll_ms, polls_left) do
     case get_fun.(hid) do
-      {:ok, %{"harness" => %{"status" => "READY"}}} ->
-        :ok
-
-      {:ok, %{"harness" => %{"status" => s}}}
-      when s in ["CREATE_FAILED", "UPDATE_FAILED", "DELETE_FAILED"] ->
-        {:error, {:harness_failed, s}}
-
-      {:ok, %{"harness" => %{"status" => _}}} when polls_left > 0 ->
-        Process.sleep(poll_ms)
-        wait_until_ready(get_fun, hid, poll_ms, polls_left - 1)
-
-      {:ok, %{"harness" => _}} when polls_left == 0 ->
-        {:error, :harness_ready_timeout}
+      {:ok, %{"harness" => %{"status" => status}}} when is_binary(status) ->
+        on_status(HarnessStatus.classify(status), get_fun, hid, poll_ms, polls_left, status)
 
       {:ok, other} ->
         {:error, {:unexpected_get_harness_response, other}}
@@ -262,6 +266,26 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
         {:error, reason}
     end
   end
+
+  defp on_status(:ready, _get_fun, _hid, _poll_ms, _polls_left, _status), do: :ok
+
+  defp on_status(:creating, get_fun, hid, poll_ms, polls_left, _status) when polls_left > 0 do
+    Process.sleep(poll_ms)
+    wait_until_ready(get_fun, hid, poll_ms, polls_left - 1)
+  end
+
+  defp on_status(:creating, _get_fun, _hid, _poll_ms, _polls_left, _status),
+    do: {:error, :harness_ready_timeout}
+
+  # A deleting harness can never become READY, so polling it is always wrong.
+  defp on_status(:terminating, _get_fun, _hid, _poll_ms, _polls_left, status),
+    do: {:error, {:harness_terminating, status}}
+
+  defp on_status({:failed, status}, _get_fun, _hid, _poll_ms, _polls_left, _status),
+    do: {:error, {:harness_failed, status}}
+
+  defp on_status({:unknown, status}, _get_fun, _hid, _poll_ms, _polls_left, _status),
+    do: {:error, {:harness_unknown_status, status}}
 
   # conn is a map keyed on harness_arn/sid/session_id/… — no live stream Task (request_response,
   # not streaming), so ref/consumer are always nil here; resumed? reflects a session_id: reattach.
