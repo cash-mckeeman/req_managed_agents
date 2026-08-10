@@ -255,10 +255,18 @@ at terminal (`nil` for server-held providers like Claude Managed Agents and Agen
 |---|---|---|
 | `[:req_managed_agents, :request, :start \| :stop \| :exception]` | `duration` | `method`, `path`, `status` |
 | `[:req_managed_agents, :agent_core, :request, :start \| :stop \| :exception]` | `duration` | `operation`, `service`, `method`, `path`, `status` |
+| `[:req_managed_agents, :agent_core, :provision, :poll]` | `elapsed_ms`, `poll_n` | `harness_id`, `status`, `phase` |
+| `[:req_managed_agents, :agent_core, :provision, :stop]` | `duration_ms`, `polls` | `harness_id`, `phase`, `result` |
+| `[:req_managed_agents, :agent_core, :provision, :exception]` | `duration_ms` | `harness_id`, `phase`, `kind`, `result` |
 | `[:req_managed_agents, :stream, :connected \| :event \| :done \| :error]` | — | `session_id`, `type`, `usage`, `reason` |
 | `[:req_managed_agents, :tool, :start \| :stop \| :exception]` | `duration` | `tool`, `session_id`, `is_error` |
 | `[:req_managed_agents, :session, :tool_uses]` | `tool_use_count` | `turn`, `tool_use_ids` |
 | `[:req_managed_agents, :session, :terminal]` | — | `terminal` |
+
+The `:provision` events fire once per poll and once per terminal outcome while a Bedrock
+AgentCore harness is being provisioned; `phase` is `:ready` or `:deleted`, and `result` is
+`:ok` or `{:error, tag}`. The same fields are also written to the log, so a provisioning
+failure is diagnosable without attaching a handler.
 
 All providers run through `Session`, so the `:session` events fire regardless of loop host.
 `:stream` `:event` also fires for **both** providers as events arrive mid-turn — on Claude,
