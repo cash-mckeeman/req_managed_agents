@@ -131,13 +131,20 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
         rollback(hid, opts)
         {:error, reason}
     end
-  rescue
-    # A raise is an exit path like any other, and the one where the caller is
-    # least able to clean up: it never sees a handle, so nothing else knows the
-    # harness exists. Roll back, then let the original exception continue.
-    e ->
+  catch
+    # Any class that unwinds the stack — raise, throw, or exit — skips the case
+    # above entirely, and the caller never receives a handle, so nothing else
+    # knows the harness exists. `rescue` alone would miss two of the three: the
+    # production get_fun runs through :telemetry.span, Req, Finch and NimblePool,
+    # which re-raise the original class.
+    #
+    # This cannot cover a kill from OUTSIDE the process (an ExUnit timeout,
+    # Process.exit/2 with :kill, VM death) — nothing in-process can, which is the
+    # same limit §4.8 records against try/after. PR-4's prefix sweeper is the
+    # compensating control for those.
+    kind, reason ->
       rollback(hid, opts)
-      reraise e, __STACKTRACE__
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   # Best-effort by contract: rollback must never replace the failure that caused
@@ -159,11 +166,11 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     end
 
     :ok
-  rescue
-    e ->
+  catch
+    kind, reason ->
       Logger.warning(
-        "agent_core rollback of harness #{hid} raised " <>
-          "(it may be orphaned): #{inspect(e)}"
+        "agent_core rollback of harness #{hid} failed hard " <>
+          "(it may be orphaned): #{Exception.format_banner(kind, reason)}"
       )
 
       :ok
@@ -408,10 +415,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       {result, polls} = loop.(started)
       emit_stop(harness_id, phase, started, polls, result)
       result
-    rescue
-      e ->
-        emit_exception(harness_id, phase, started, e)
-        reraise e, __STACKTRACE__
+    catch
+      kind, reason ->
+        emit_exception(harness_id, phase, started, kind, reason)
+        :erlang.raise(kind, reason, __STACKTRACE__)
     end
   end
 
@@ -451,20 +458,26 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   defp log_stop(:ok, message), do: Logger.info(message)
   defp log_stop(_error_tag, message), do: Logger.warning(message)
 
-  defp emit_exception(harness_id, phase, started, error) do
+  defp emit_exception(harness_id, phase, started, kind, reason) do
     duration = elapsed(started)
+    tag = exception_tag(kind, reason)
 
     Logger.warning(fn ->
-      "agent_core provision raised harness_id=#{harness_id} phase=#{phase} " <>
-        "error=#{inspect(error)} duration_ms=#{duration}"
+      "agent_core provision failed hard harness_id=#{harness_id} phase=#{phase} " <>
+        "kind=#{kind} error=#{Exception.format_banner(kind, reason)} duration_ms=#{duration}"
     end)
 
     :telemetry.execute(
       [:req_managed_agents, :agent_core, :provision, :exception],
       %{duration_ms: duration},
-      %{harness_id: harness_id, phase: phase, result: {:exception, error.__struct__}}
+      %{harness_id: harness_id, phase: phase, kind: kind, result: {:exception, tag}}
     )
   end
+
+  # A raised Elixir error is named by its struct; a throw or an exit has no
+  # struct, so it is named by its class.
+  defp exception_tag(:error, reason), do: Exception.normalize(:error, reason).__struct__
+  defp exception_tag(kind, _reason), do: kind
 
   # The metadata carries the failure TAG, never the context struct: telemetry
   # metadata is fanned out to arbitrary handlers, and a stable atom is what a
