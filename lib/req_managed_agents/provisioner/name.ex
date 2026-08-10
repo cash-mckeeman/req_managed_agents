@@ -32,6 +32,18 @@ defmodule ReqManagedAgents.Provisioner.Name do
     |> Kernel.<>("_" <> digest)
   end
 
+  @doc """
+  True when `name` still carries `base` verbatim, i.e. the composition did not
+  truncate it.
+
+  Callers that later parse the base back out of a name — to recover the digest,
+  or to test that a name belongs to a base — depend on this. A truncated name
+  cannot be parsed back, so such a caller must refuse it rather than store it.
+  """
+  @spec preserves_base?(String.t(), String.t()) :: boolean()
+  def preserves_base?(name, base) when is_binary(name) and is_binary(base),
+    do: String.starts_with?(name, base <> "_")
+
   defp sanitize(base, %Policy{charset: :permissive}), do: base
 
   defp sanitize(base, %Policy{charset: :alnum_underscore}),

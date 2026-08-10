@@ -54,19 +54,49 @@ defmodule ReqManagedAgents.Provisioner.AgentsTest do
       assert name == "rma-v02-rtc_" <> digest
     end
 
-    test "an over-long CMA base is bounded at the CMA limit", %{store: store, calls: calls} do
+    test "a base too long to compose is refused, never silently provisioned", %{
+      store: store,
+      calls: calls
+    } do
+      # Truncating here would produce a name that prune_agents/3 can never parse
+      # back to {base, digest}, so the agent would be billable and invisible
+      # forever. Refusing is the loud failure CMA itself used to give.
       long = String.duplicate("segment-", 60)
 
-      {:ok, %{name: name}} =
-        Agents.ensure_agent(nil, @spec_attrs,
-          name: long,
-          store: store,
-          create_fun: counting_create(calls, "a1")
-        )
+      assert {:error, {:agent_base_too_long, ^long}} =
+               Agents.ensure_agent(nil, @spec_attrs,
+                 name: long,
+                 store: store,
+                 create_fun: counting_create(calls, "a1")
+               )
 
-      # byte_size, not String.length: fit/3 budgets in bytes, so a character-count
-      # assertion cannot catch a byte overflow.
-      assert byte_size(name) <= 256
+      assert Agent.get(calls, & &1) == [], "no agent may be created for a refused name"
+    end
+
+    test "a refused base is exactly one byte past what composition preserves", %{
+      store: store,
+      calls: calls
+    } do
+      # The boundary is the CMA budget: 256 - len(digest) - 1 = 247 bytes of base.
+      ok_base = String.duplicate("b", 247)
+      too_long = String.duplicate("b", 248)
+
+      assert {:ok, %{name: name}} =
+               Agents.ensure_agent(nil, @spec_attrs,
+                 name: ok_base,
+                 store: store,
+                 create_fun: counting_create(calls, "a1")
+               )
+
+      assert byte_size(name) == 256
+      assert String.starts_with?(name, ok_base <> "_")
+
+      assert {:error, {:agent_base_too_long, _}} =
+               Agents.ensure_agent(nil, @spec_attrs,
+                 name: too_long,
+                 store: store,
+                 create_fun: counting_create(calls, "a2")
+               )
     end
   end
 

@@ -23,6 +23,11 @@ defmodule ReqManagedAgents.Provisioner.Agents do
   Opts: `:name` (base, default the spec's `name`), `:store` (`{module, store_opts}`),
   `:create_fun` / `:list_fun` (test seams; default to `ReqManagedAgents.Client`
   calls on the given client).
+
+  Returns `{:error, {:agent_base_too_long, base}}` when the base is long enough
+  that composing `<base>_<digest>` would have to truncate it. Such a name cannot
+  be parsed back into its base and digest, which `prune_agents/3` requires, so
+  the agent would be unreclaimable.
   """
   @spec ensure_agent(term(), Spec.t() | map(), keyword()) :: {:ok, Handle.t()} | {:error, term()}
   def ensure_agent(client, spec_or_map, opts \\ []) do
@@ -34,7 +39,30 @@ defmodule ReqManagedAgents.Provisioner.Agents do
   defp do_ensure_agent(client, %Spec{} = spec, opts) do
     base = opts[:name] || spec.name
     digest = Spec.digest(spec)
+
+    case agent_name(base, digest) do
+      {:ok, name} -> ensure_by_name(client, spec, opts, {base, digest, name})
+      {:error, _} = error -> error
+    end
+  end
+
+  # `live_versions/2` and `archive_all/7` recover the digest by stripping
+  # `base <> "_"` off the provider-side name, and that membership test is
+  # deliberately strict so one base can never sweep another's versions. A name
+  # the policy had to truncate cannot be parsed back, so it would provision
+  # successfully and then be permanently invisible to `prune_agents/3` — a
+  # silent, unbounded leak. Refuse it instead. The CMA limit is practically
+  # unreachable, and a rejected over-long name is what the provider itself used
+  # to return.
+  defp agent_name(base, digest) do
     name = Name.compose(base, digest, Policy.claude_managed_agents())
+
+    if Name.preserves_base?(name, base),
+      do: {:ok, name},
+      else: {:error, {:agent_base_too_long, base}}
+  end
+
+  defp ensure_by_name(client, %Spec{} = spec, opts, {base, digest, name}) do
     {smod, sopts} = opts[:store] || @default_store
     key = "provision:agent:" <> Provisioner.hash({base, digest})
     digest_key = "digest:agent:" <> base <> ":" <> digest
