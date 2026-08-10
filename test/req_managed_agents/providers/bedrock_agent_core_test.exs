@@ -1,5 +1,7 @@
 defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   use ExUnit.Case, async: true
+  import ExUnit.CaptureLog
+
   alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.AgentCore.Client
   alias ReqManagedAgents.Environment.Spec, as: EnvSpec
@@ -870,6 +872,29 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
 
       # Asserting the raise alone would pin the orphan this PR exists to close.
       assert_receive {:deleted, ^hid}
+    end
+
+    test "the stop line carries the observed status, which lives nowhere else above :debug",
+         %{hid: hid} do
+      log =
+        capture_log([level: :info], fn ->
+          assert {:error, _} =
+                   P.provision(@spec_bedrock,
+                     execution_role_arn: "r",
+                     create_fun: fn _ ->
+                       {:ok, %{"harness" => %{"arn" => "a", "harnessId" => hid}}}
+                     end,
+                     get_fun: fn _ -> {:ok, %{"harness" => %{"status" => "DELETING"}}} end,
+                     delete_fun: fn _ -> {:ok, %{}} end,
+                     ready_poll_ms: 0
+                   )
+        end)
+
+      # At :info the per-poll debug lines are gone, so if the stop line omitted
+      # last_status the 08-06 failure mode would be undiagnosable all over again.
+      assert log =~ "last_status=DELETING"
+      assert log =~ "harness_id=#{hid}"
+      assert log =~ "harness_terminating"
     end
 
     test "a failed wait emits a stop event tagged with the failure", %{hid: hid} do
