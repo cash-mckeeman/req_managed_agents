@@ -489,6 +489,61 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
              )
   end
 
+  describe "create-response drift" do
+    @drifted {:ok, %{"harness" => %{"arn" => "a"}}}
+
+    test "a 2xx create body missing harnessId is an error, not a handle" do
+      assert {:error, {:unexpected_create_response, @drifted}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ -> @drifted end,
+                 ready_poll_ms: 0
+               )
+    end
+
+    test "the recreate path rejects a drifted body instead of returning it as the handle" do
+      # This is the path that could poison the provision cache: its `with` had no
+      # else clause, so a drifted body flowed out of provision/2 as {:ok, ...} and
+      # was stored, and every later ensure/3 served it.
+      name = P.harness_name(@spec_bedrock, nil)
+      {:ok, lists} = Agent.start_link(fn -> 0 end)
+
+      list_fun = fn ->
+        n = Agent.get_and_update(lists, &{&1 + 1, &1 + 1})
+        harnesses = if n >= 2, do: [], else: [%{"harnessName" => name, "status" => "DELETING"}]
+        {:ok, %{"harnesses" => harnesses}}
+      end
+
+      {:ok, creates} = Agent.start_link(fn -> 0 end)
+
+      create_fun = fn _ ->
+        case Agent.get_and_update(creates, &{&1 + 1, &1 + 1}) do
+          1 -> {:error, {:http_error, 409, "exists"}}
+          _ -> @drifted
+        end
+      end
+
+      assert {:error, {:unexpected_create_response, @drifted}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: create_fun,
+                 list_fun: list_fun,
+                 ready_poll_ms: 0
+               )
+    end
+
+    test "a create body with a non-binary id is drift too" do
+      drifted = {:ok, %{"harness" => %{"arn" => "a", "harnessId" => nil}}}
+
+      assert {:error, {:unexpected_create_response, ^drifted}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ -> drifted end,
+                 ready_poll_ms: 0
+               )
+    end
+  end
+
   # ── rollback on a post-create failure ────────────────────────────────────────
 
   describe "rollback" do
