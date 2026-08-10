@@ -13,8 +13,11 @@ defmodule ReqManagedAgents.OpenTelemetry do
   Both backends now run through the unified `ReqManagedAgents.Session`, which emits
   `[:req_managed_agents, :session, :terminal | :tool_uses]` (plus the streaming
   `[:req_managed_agents, :stream | :tool, …]` events) regardless of provider — so this bridge
-  covers AgentCore and Claude Managed Agents alike. (The old per-driver
-  `[:req_managed_agents, :agent_core, …]` events were retired with the driver collapse.)
+  covers AgentCore and Claude Managed Agents alike. (The old per-driver *turn-loop* events
+  were retired with the driver collapse. The `[:req_managed_agents, :agent_core, …]`
+  namespace is still live for provider-specific work outside the session loop — the
+  `:request` events and the `:provision` poll/stop/exception events — which this bridge
+  does not span.)
   """
   require Logger
   @compile {:no_warn_undefined, [:otel_tracer, :opentelemetry]}
