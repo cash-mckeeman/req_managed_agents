@@ -1,6 +1,7 @@
 defmodule ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatusTest do
   use ExUnit.Case, async: true
 
+  alias ReqManagedAgents.Conformance.Corpus
   alias ReqManagedAgents.Providers.BedrockAgentCore, as: P
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatus
   alias ReqManagedAgents.Providers.BedrockAgentCore.WaitContext
@@ -27,15 +28,42 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatusTest do
     assert HarnessStatus.classify("INACTIVE") == {:unknown, "INACTIVE"}
   end
 
-  test "the classification covers every status the service model declares" do
-    # The service model's HarnessStatus enum is closed; anything outside it is a
-    # genuinely new status and must surface as {:unknown, s} rather than a poll.
-    declared = ~w(CREATING CREATE_FAILED UPDATING UPDATE_FAILED READY DELETING DELETE_FAILED)
+  # Excluded by default: the bundled examples are synthetic and carry no enum, so
+  # this can only mean anything against the mirrored botocore model. Run it with
+  #
+  #     RMA_CORPUS_DIR=/path/to/corpus mix test --include corpus
+  #
+  # A hand-typed status list here would be a tautology — it would restate the
+  # very literals the implementation matches on and could never detect an eighth.
+  @tag :corpus
+  test "every harness status the mirrored service model declares is classified" do
+    declared = declared_statuses()
+
+    refute declared == [],
+           "no HarnessStatus enum found under #{Corpus.dir(:agentcore)} — is the model synced?"
 
     for status <- declared do
       refute match?({:unknown, _}, HarnessStatus.classify(status)),
              "#{status} is declared by the service model but classifies as unknown"
     end
+  end
+
+  # The mirror keeps botocore's own layout (<service>/<version>/service-2.json),
+  # which is nested below the model dir, so walk it rather than listing one level.
+  defp declared_statuses do
+    Corpus.dir(:agentcore)
+    |> Path.join("model/**/service-2.json")
+    |> Path.wildcard()
+    |> Enum.flat_map(&status_enum/1)
+    |> Enum.uniq()
+  end
+
+  defp status_enum(path) do
+    path
+    |> File.read!()
+    |> Jason.decode!()
+    |> get_in(["shapes", "HarnessStatus", "enum"])
+    |> List.wrap()
   end
 
   test "a DELETING harness terminates the ready-wait instead of polling it" do
