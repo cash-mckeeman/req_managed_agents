@@ -760,8 +760,13 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   # ── instrumentation ──────────────────────────────────────────────────────────
 
   describe "provision instrumentation" do
+    # Telemetry handlers are global while these tests are async, so a handler here
+    # also receives events from any other async test provisioning concurrently.
+    # A unique harness id per test makes each assert_receive match only its own
+    # events; filtering on it in the handler keeps the mailbox clean too.
     setup do
       test_pid = self()
+      hid = "h_#{System.unique_integer([:positive])}"
       handler = "prov-#{System.unique_integer([:positive])}"
 
       :telemetry.attach_many(
@@ -770,15 +775,21 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
           [:req_managed_agents, :agent_core, :provision, :poll],
           [:req_managed_agents, :agent_core, :provision, :stop]
         ],
-        fn event, meas, meta, _ -> send(test_pid, {:telemetry, event, meas, meta}) end,
+        fn
+          event, meas, %{harness_id: ^hid} = meta, _ ->
+            send(test_pid, {:telemetry, event, meas, meta})
+
+          _event, _meas, _meta, _ ->
+            :ok
+        end,
         nil
       )
 
       on_exit(fn -> :telemetry.detach(handler) end)
-      :ok
+      {:ok, hid: hid}
     end
 
-    test "every poll emits telemetry naming the harness and its observed status" do
+    test "every poll emits telemetry naming the harness and its observed status", %{hid: hid} do
       {:ok, n} = Agent.start_link(fn -> 0 end)
 
       get = fn _ ->
@@ -793,7 +804,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
                P.provision(@spec_bedrock,
                  execution_role_arn: "r",
                  create_fun: fn _ ->
-                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}}
+                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => hid}}}
                  end,
                  get_fun: get,
                  ready_poll_ms: 0
@@ -801,28 +812,29 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
 
       assert_receive {:telemetry, [:req_managed_agents, :agent_core, :provision, :poll],
                       %{poll_n: 1, elapsed_ms: _},
-                      %{harness_id: "h", status: "CREATING", phase: :ready}}
+                      %{harness_id: ^hid, status: "CREATING", phase: :ready}}
 
       assert_receive {:telemetry, [:req_managed_agents, :agent_core, :provision, :poll],
-                      %{poll_n: 2}, %{harness_id: "h", status: "READY", phase: :ready}}
+                      %{poll_n: 2}, %{harness_id: ^hid, status: "READY", phase: :ready}}
     end
 
-    test "a terminal outcome emits a stop event carrying the poll count and result" do
+    test "a terminal outcome emits a stop event carrying the poll count and result", %{hid: hid} do
       assert {:ok, _} =
                P.provision(@spec_bedrock,
                  execution_role_arn: "r",
                  create_fun: fn _ ->
-                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}}
+                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => hid}}}
                  end,
                  get_fun: fn _ -> {:ok, %{"harness" => %{"status" => "READY"}}} end,
                  ready_poll_ms: 0
                )
 
       assert_receive {:telemetry, [:req_managed_agents, :agent_core, :provision, :stop],
-                      %{duration_ms: _, polls: 1}, %{harness_id: "h", phase: :ready, result: :ok}}
+                      %{duration_ms: _, polls: 1},
+                      %{harness_id: ^hid, phase: :ready, result: :ok}}
     end
 
-    test "a raising poll emits an exception event and does not swallow the raise" do
+    test "a raising poll emits an exception event and does not swallow the raise", %{hid: hid} do
       handler = "prov-ex-#{System.unique_integer([:positive])}"
       test_pid = self()
 
@@ -838,10 +850,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       assert_raise RuntimeError, "poll blew up", fn ->
         P.provision(@spec_bedrock,
           execution_role_arn: "r",
-          create_fun: fn _ -> {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}} end,
+          create_fun: fn _ -> {:ok, %{"harness" => %{"arn" => "a", "harnessId" => hid}}} end,
           get_fun: fn _ -> raise "poll blew up" end,
-          delete_fun: fn hid ->
-            send(test_pid, {:deleted, hid})
+          delete_fun: fn id ->
+            send(test_pid, {:deleted, id})
             {:ok, %{}}
           end,
           ready_poll_ms: 0
@@ -849,18 +861,18 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       end
 
       assert_receive {:exception, %{duration_ms: _},
-                      %{harness_id: "h", phase: :ready, result: {:exception, RuntimeError}}}
+                      %{harness_id: ^hid, phase: :ready, result: {:exception, RuntimeError}}}
 
       # Asserting the raise alone would pin the orphan this PR exists to close.
-      assert_receive {:deleted, "h"}
+      assert_receive {:deleted, ^hid}
     end
 
-    test "a failed wait emits a stop event tagged with the failure" do
+    test "a failed wait emits a stop event tagged with the failure", %{hid: hid} do
       assert {:error, _} =
                P.provision(@spec_bedrock,
                  execution_role_arn: "r",
                  create_fun: fn _ ->
-                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}}
+                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => hid}}}
                  end,
                  get_fun: fn _ -> {:ok, %{"harness" => %{"status" => "DELETING"}}} end,
                  delete_fun: fn _ -> {:ok, %{}} end,
@@ -869,7 +881,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
 
       assert_receive {:telemetry, [:req_managed_agents, :agent_core, :provision, :stop],
                       %{polls: 1},
-                      %{harness_id: "h", phase: :ready, result: {:error, :harness_terminating}}}
+                      %{harness_id: ^hid, phase: :ready, result: {:error, :harness_terminating}}}
     end
   end
 
