@@ -764,6 +764,76 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     end
   end
 
+  # ── the run-log bar ──────────────────────────────────────────────────────────
+  #
+  # The spec's bar is that a failure is diagnosable from the run log ALONE, with
+  # no telemetry handler attached — so these assert on log output, not events.
+  # Every other instrumentation test attaches a handler, which would leave the
+  # actual requirement unpinned and let a refactor delete the Logger calls green.
+
+  describe "diagnosability from the log alone" do
+    test "a poll line names the harness, its status, the poll number and elapsed time" do
+      log =
+        capture_log([level: :debug], fn ->
+          assert {:ok, _} =
+                   P.provision(@spec_bedrock,
+                     execution_role_arn: "r",
+                     create_fun: fn _ ->
+                       {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "log_poll"}}}
+                     end,
+                     get_fun: fn _ -> {:ok, %{"harness" => %{"status" => "READY"}}} end,
+                     ready_poll_ms: 0
+                   )
+        end)
+
+      assert log =~ "harness_id=log_poll"
+      assert log =~ "status=READY"
+      assert log =~ "poll_n=1"
+      assert log =~ "elapsed_ms="
+      assert log =~ "phase=ready"
+    end
+
+    test "a hard failure is visible at :info without any telemetry handler" do
+      log =
+        capture_log([level: :info], fn ->
+          assert catch_exit(
+                   P.provision(@spec_bedrock,
+                     execution_role_arn: "r",
+                     create_fun: fn _ ->
+                       {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "log_exit"}}}
+                     end,
+                     get_fun: fn _ -> exit(:boom) end,
+                     delete_fun: fn _ -> {:ok, %{}} end,
+                     ready_poll_ms: 0
+                   )
+                 ) == :boom
+        end)
+
+      assert log =~ "harness_id=log_exit"
+      assert log =~ "kind=exit"
+      assert log =~ "failed hard"
+    end
+
+    test "the rollback outcome is logged, so an orphan is never silent" do
+      log =
+        capture_log([level: :info], fn ->
+          assert {:error, _} =
+                   P.provision(@spec_bedrock,
+                     execution_role_arn: "r",
+                     create_fun: fn _ ->
+                       {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "log_rb"}}}
+                     end,
+                     get_fun: fn _ -> {:ok, %{"harness" => %{"status" => "CREATE_FAILED"}}} end,
+                     delete_fun: fn _ -> {:error, :nope} end,
+                     ready_poll_ms: 0
+                   )
+        end)
+
+      assert log =~ "could not roll back harness log_rb"
+      assert log =~ "it may be orphaned"
+    end
+  end
+
   # ── instrumentation ──────────────────────────────────────────────────────────
 
   describe "provision instrumentation" do
