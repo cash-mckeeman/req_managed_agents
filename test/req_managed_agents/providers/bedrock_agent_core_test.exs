@@ -764,6 +764,27 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     end
   end
 
+  test "get_fun receives the harness id it was given" do
+    # Every other stub ignores its argument, so an id-threading regression — polling
+    # the wrong harness — would be invisible to the whole suite.
+    test_pid = self()
+
+    assert {:ok, %{harness_id: "h_threaded"}} =
+             P.provision(@spec_bedrock,
+               execution_role_arn: "r",
+               create_fun: fn _ ->
+                 {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h_threaded"}}}
+               end,
+               get_fun: fn hid ->
+                 send(test_pid, {:polled, hid})
+                 {:ok, %{"harness" => %{"status" => "READY"}}}
+               end,
+               ready_poll_ms: 0
+             )
+
+    assert_receive {:polled, "h_threaded"}
+  end
+
   # ── the run-log bar ──────────────────────────────────────────────────────────
   #
   # The spec's bar is that a failure is diagnosable from the run log ALONE, with
@@ -1146,7 +1167,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     new_digest = Spec.digest(agent_spec)
 
     assert old_digest == new_digest
-    assert String.ends_with?(P.harness_name(spec, nil), "_#{new_digest}")
+    # Exact, not a suffix check: with no prefix and no spec name the base is empty,
+    # so the leading-letter rule supplies the whole base. Pinning the exact string
+    # keeps that fallback from drifting unnoticed.
+    assert P.harness_name(spec, nil) == "a_#{new_digest}"
   end
 
   test "two specs differing only in name produce different harness names" do

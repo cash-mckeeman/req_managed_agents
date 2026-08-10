@@ -90,6 +90,8 @@ defmodule ReqManagedAgents.Provisioner.AgentsTest do
 
       assert byte_size(name) == 256
       assert String.starts_with?(name, ok_base <> "_")
+      # The digest is the content address — truncation must never reach it.
+      assert String.ends_with?(name, "_" <> Spec.digest(elem(Spec.new(@spec_attrs), 1)))
 
       assert {:error, {:agent_base_too_long, _}} =
                Agents.ensure_agent(nil, @spec_attrs,
