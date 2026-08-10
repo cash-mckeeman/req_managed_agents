@@ -15,9 +15,15 @@ defmodule ReqManagedAgents.Provisioner.NameTest do
     assert Name.compose("9-live.agent", "38ca3140", @ac) =~ ~r/^[a-zA-Z][a-zA-Z0-9_]*$/
   end
 
-  test "never exceeds the policy limit" do
+  test "fills the policy limit exactly when the base must be truncated" do
+    # byte_size, not String.length: fit/3 budgets in bytes, so a character-count
+    # assertion cannot catch a byte overflow. The value is knowable, so pin it:
+    # 24 base + 1 + 6 hash + 1 + 8 digest = 40.
     long = String.duplicate("verylongsegment", 8)
-    assert String.length(Name.compose(long, "38ca3140", @ac)) <= 40
+    composed = Name.compose(long, "38ca3140", @ac)
+
+    assert byte_size(composed) == 40
+    assert composed =~ ~r/^[a-zA-Z][a-zA-Z0-9_]{39}$/
   end
 
   test "bases sharing a long common prefix stay distinct after truncation" do
