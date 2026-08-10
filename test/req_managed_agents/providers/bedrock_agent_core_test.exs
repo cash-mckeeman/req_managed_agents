@@ -227,11 +227,16 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     model_config: %{"bedrockModelConfig" => %{"modelId" => "anthropic.claude-sonnet-4"}}
   }
 
+  # delete_fun is defaulted deliberately: rollback/2 otherwise falls back to a real
+  # Client.delete_harness/2 against a live signed endpoint with a 600 s timeout, and
+  # swallows the outcome — so a future test whose ready-wait fails under this helper
+  # would silently reach AWS instead of failing offline.
   defp prov_opts(create_fun, extra \\ []) do
     [
       execution_role_arn: "arn:aws:iam::1:role/R",
       create_fun: create_fun,
-      get_fun: fn _hid -> {:ok, %{"harness" => %{"status" => "READY"}}} end
+      get_fun: fn _hid -> {:ok, %{"harness" => %{"status" => "READY"}}} end,
+      delete_fun: fn _hid -> {:ok, %{}} end
     ] ++ extra
   end
 
