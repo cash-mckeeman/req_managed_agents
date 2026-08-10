@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+Canary-hardening release. Two breaking changes, both requiring action.
+
+### Changed (breaking) — AgentCore harness names carry the spec name
+
+`harness_name/3` never consulted `spec.name`, so two specs with identical
+identity content but different names content-addressed to the *same* harness.
+The name now forms the harness base, composed through the new shared
+`Provisioner.Name` under a per-provider `Name.Policy`, and the redundant
+`harness_` literal is gone.
+
+**Migration.** Existing harnesses do not match the new names and will not be
+found by recovery. There is no harness GC, so they must be swept deliberately —
+this is a one-time re-provision. The content digest itself is unchanged.
+
+Claude Managed Agents names are **not** affected: the CMA policy is
+permissive, so every name that composed before is byte-identical now.
+
+### Changed (breaking) — wait errors carry a `%WaitContext{}`
+
+`{:error, :harness_ready_timeout}`, `{:error, {:harness_failed, status}}` and
+`{:error, {:harness_still_deleting, name}}` now carry a
+`%BedrockAgentCore.WaitContext{harness_id, phase, last_status, elapsed_ms,
+polls}` instead of a bare atom or name. Two new tags join them:
+`:harness_terminating` and `:harness_unknown_status`.
+
+### Added
+- `Provisioner.Name` / `Name.Policy` — shared `<base>_<digest>` composition,
+  fitted to a per-provider length and charset, with a hash fallback so two
+  bases sharing a long prefix cannot collapse onto one name.
+- `BedrockAgentCore.HarnessStatus` — one total classification of the harness
+  status vocabulary, replacing two lists that disagreed about `DELETING`.
+- Telemetry and logging on every provisioning poll and terminal outcome:
+  `[:req_managed_agents, :agent_core, :provision, :poll | :stop | :exception]`.
+
+### Fixed
+- A harness this library created and could not bring to READY is now
+  best-effort deleted before the error is returned, on the error, raise, throw
+  and exit paths. **New side effect:** provisioning can now issue
+  `DeleteHarness`. A harness merely *adopted* on 409 recovery is never deleted.
+- A `DELETING` harness terminates the ready-wait instead of being polled until
+  the budget burns and the failure is misreported as a ready-timeout.
+- A 2xx `CreateHarness` body missing `arn`/`harnessId` is rejected rather than
+  cached as a handle.
+- An unrecognised harness status is now named and fatal rather than polled.
+  **Narrowing:** a harness in a status this library does not know is no longer
+  reusable, so recovery reports a conflict where it previously waited.
+- `Provisioner.Agents` refuses a base too long to compose without truncation
+  (`{:error, {:agent_base_too_long, base}}`) rather than creating an agent
+  `prune_agents/3` could never reclaim.
+
 ## v0.10.0 (2026-07-15)
 
 Durability release — uniform host reattach across providers (with
@@ -171,11 +223,15 @@ content-addressed spec. Several public contracts change — see **Migration**.
   memory buffering) and `hpax` 1.0.3 → 1.0.4 (EEF-CVE-2026-58226 — unbounded HPACK
   integer decoding DoS). Patch bumps, no API impact.
 
-**Upgrade note:** specs that conform to the documented `Agent.Spec` type keep
-byte-identical agent/harness names across the upgrade — no re-provisioning. The only
-exception is hand-built, out-of-contract specs (omitting the `terminal_tool` key
+**Upgrade note (v0.10.0):** specs that conform to the documented `Agent.Spec` type keep
+byte-identical agent/harness names across the upgrade to v0.10.0 — no re-provisioning.
+The only exception is hand-built, out-of-contract specs (omitting the `terminal_tool` key
 entirely, or passing `environment: nil` explicitly rather than leaving it unset); those
 re-provision once on upgrade, which is non-destructive.
+
+> Superseded for AgentCore by the Unreleased section above: harness names gained a
+> base segment, so every AgentCore harness re-provisions once on that upgrade. CMA
+> agent names are still byte-identical.
 
 ## v0.6.2 (2026-07-05)
 
