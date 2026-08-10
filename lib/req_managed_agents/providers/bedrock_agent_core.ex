@@ -455,9 +455,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
     # The one line worth keeping when a consumer runs above :debug — a failed
     # provision must not go quiet just because per-poll detail is filtered out.
+    # It therefore has to carry last_status: that is the field that made 08-06
+    # undiagnosable, and it lives nowhere else above :debug.
     log_stop(tag, fn ->
       "agent_core provision stop harness_id=#{harness_id} phase=#{phase} " <>
-        "result=#{inspect(tag)} polls=#{polls} duration_ms=#{duration}"
+        "result=#{inspect(tag)} last_status=#{last_status(result) || "none"} " <>
+        "polls=#{polls} duration_ms=#{duration}"
     end)
 
     :telemetry.execute(
@@ -466,6 +469,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       %{harness_id: harness_id, phase: phase, result: tag}
     )
   end
+
+  # The observed status is already inside the error's %WaitContext{}; a successful
+  # wait ended on READY by definition.
+  defp last_status(:ok), do: "READY"
+  defp last_status({:error, {_tag, %WaitContext{last_status: status}}}), do: status
+  defp last_status(_other), do: nil
 
   defp log_stop(:ok, message), do: Logger.info(message)
   defp log_stop(_error_tag, message), do: Logger.warning(message)
