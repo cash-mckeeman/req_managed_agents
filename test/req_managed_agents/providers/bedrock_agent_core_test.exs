@@ -592,6 +592,64 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       assert_receive {:deleted, "h_new"}
     end
 
+    test "an exiting poll still rolls the created harness back" do
+      # `rescue` catches class :error only. The production get_fun runs through
+      # :telemetry.span, Req, Finch and NimblePool, any of which can surface an
+      # exit — which would have skipped rollback entirely.
+      test_pid = self()
+
+      assert catch_exit(
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ ->
+                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}}
+                 end,
+                 get_fun: fn _ -> exit(:boom) end,
+                 delete_fun: fn hid ->
+                   send(test_pid, {:deleted, hid})
+                   {:ok, %{}}
+                 end,
+                 ready_poll_ms: 0
+               )
+             ) == :boom
+
+      assert_receive {:deleted, "h"}
+    end
+
+    test "a throwing poll still rolls the created harness back" do
+      test_pid = self()
+
+      assert catch_throw(
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ ->
+                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}}
+                 end,
+                 get_fun: fn _ -> throw(:nope) end,
+                 delete_fun: fn hid ->
+                   send(test_pid, {:deleted, hid})
+                   {:ok, %{}}
+                 end,
+                 ready_poll_ms: 0
+               )
+             ) == :nope
+
+      assert_receive {:deleted, "h"}
+    end
+
+    test "a rollback that exits never masks the original error" do
+      assert {:error, {:harness_failed, %WaitContext{}}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ ->
+                   {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}}
+                 end,
+                 get_fun: fn _ -> {:ok, %{"harness" => %{"status" => "CREATE_FAILED"}}} end,
+                 delete_fun: fn _ -> exit(:delete_died) end,
+                 ready_poll_ms: 0
+               )
+    end
+
     test "a rollback that raises never masks the original error" do
       get_fun = fn _ -> {:ok, %{"harness" => %{"status" => "CREATE_FAILED"}}} end
 
@@ -738,8 +796,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       assert_receive {:exception, %{duration_ms: _},
                       %{harness_id: "h", phase: :ready, result: {:exception, RuntimeError}}}
 
-      # A raise is an exit path like any other: the harness this call created must
-      # not survive it. Asserting the raise alone would pin the orphan.
+      # Asserting the raise alone would pin the orphan this PR exists to close.
       assert_receive {:deleted, "h"}
     end
 
