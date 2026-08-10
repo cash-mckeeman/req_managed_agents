@@ -97,11 +97,6 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     max_polls = opts[:ready_max_polls] || @ready_max_polls
 
     case create_fun.(harness_spec) do
-      # CreateHarness returns the created resource wrapped under "harness" (verified live against
-      # bedrock-agentcore-control), consistent with GetHarness — NOT a flat "harnessArn".
-      {:ok, %{"harness" => %{"arn" => arn, "harnessId" => hid}}} ->
-        ready_or_rollback(get_fun, arn, hid, poll_ms, max_polls, opts)
-
       {:error, {:http_error, 409, _}} ->
         recover_existing(
           create_fun,
@@ -114,10 +109,29 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
           opts
         )
 
-      {:error, reason} ->
-        {:error, reason}
+      created ->
+        create_and_wait(created, get_fun, poll_ms, max_polls, opts)
     end
   end
+
+  defp create_and_wait(create_result, get_fun, poll_ms, max_polls, opts) do
+    case normalize_create(create_result) do
+      {:ok, arn, hid} -> ready_or_rollback(get_fun, arn, hid, poll_ms, max_polls, opts)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # CreateHarness returns the created resource wrapped under "harness" (verified live
+  # against bedrock-agentcore-control), consistent with GetHarness — NOT a flat
+  # "harnessArn". A 2xx body that does not carry BOTH an arn and a harnessId is drift,
+  # not a handle: passing it on would let the provisioner cache a shape open/2 can
+  # never use, and every later ensure/3 would serve the same poison from the store.
+  defp normalize_create({:ok, %{"harness" => %{"arn" => arn, "harnessId" => hid}}})
+       when is_binary(arn) and is_binary(hid),
+       do: {:ok, arn, hid}
+
+  defp normalize_create({:error, reason}), do: {:error, reason}
+  defp normalize_create(other), do: {:error, {:unexpected_create_response, other}}
 
   # A harness this call created and could not bring to READY is a billable resource
   # nothing else will ever reclaim — the ready-wait's own failure is the last moment
@@ -251,10 +265,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
           deleting?(harnesses, name) ->
             # A prior same-name harness is still tearing down; wait it out, then re-create.
-            with :ok <- wait_until_deleted(list_fun, name, poll_ms, max_polls),
-                 {:ok, %{"harness" => %{"arn" => arn, "harnessId" => hid}}} <-
-                   create_fun.(harness_spec) do
-              ready_or_rollback(get_fun, arn, hid, poll_ms, max_polls, opts)
+            with :ok <- wait_until_deleted(list_fun, name, poll_ms, max_polls) do
+              create_and_wait(create_fun.(harness_spec), get_fun, poll_ms, max_polls, opts)
             end
 
           true ->
