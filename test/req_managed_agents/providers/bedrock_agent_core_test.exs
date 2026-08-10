@@ -814,6 +814,54 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       assert log =~ "failed hard"
     end
 
+    test "a delete-wait that gave up unconfirmed says so, rather than logging only :ok" do
+      name = P.harness_name(@spec_bedrock, nil)
+      {:ok, lists} = Agent.start_link(fn -> 0 end)
+
+      list_fun = fn ->
+        case Agent.get_and_update(lists, &{&1 + 1, &1 + 1}) do
+          1 -> {:ok, %{"harnesses" => [%{"harnessName" => name, "status" => "DELETING"}]}}
+          _ -> {:error, :listing_down}
+        end
+      end
+
+      log =
+        capture_log([level: :info], fn ->
+          P.provision(@spec_bedrock,
+            execution_role_arn: "r",
+            create_fun: fn _ -> {:error, {:http_error, 409, "exists"}} end,
+            list_fun: list_fun,
+            ready_poll_ms: 0
+          )
+        end)
+
+      # The control flow is right — the next create arbitrates — but the stop line
+      # reports result=:ok, so without this the log would claim a clean delete.
+      assert log =~ "could not list harnesses"
+      assert log =~ "proceeding unconfirmed"
+    end
+
+    test "a name conflict is logged rather than returned silently" do
+      name = P.harness_name(@spec_bedrock, nil)
+
+      list = fn ->
+        {:ok, %{"harnesses" => [%{"harnessName" => name, "status" => "CREATE_FAILED"}]}}
+      end
+
+      log =
+        capture_log([level: :info], fn ->
+          assert {:error, {:harness_name_conflict, ^name}} =
+                   P.provision(@spec_bedrock,
+                     execution_role_arn: "r",
+                     create_fun: fn _ -> {:error, {:http_error, 409, %{}}} end,
+                     list_fun: list,
+                     ready_poll_ms: 0
+                   )
+        end)
+
+      assert log =~ "cannot recover harness #{name}"
+    end
+
     test "the rollback outcome is logged, so an orphan is never silent" do
       log =
         capture_log([level: :info], fn ->

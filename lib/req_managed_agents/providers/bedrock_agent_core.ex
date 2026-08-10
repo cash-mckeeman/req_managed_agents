@@ -116,8 +116,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   defp create_and_wait(create_result, get_fun, poll_ms, max_polls, opts) do
     case normalize_create(create_result) do
-      {:ok, arn, hid} -> ready_or_rollback(get_fun, arn, hid, poll_ms, max_polls, opts)
-      {:error, reason} -> {:error, reason}
+      {:ok, arn, hid} ->
+        ready_or_rollback(get_fun, arn, hid, poll_ms, max_polls, opts)
+
+      {:error, reason} ->
+        Logger.warning("agent_core CreateHarness did not yield a harness: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
@@ -270,13 +274,20 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
             end
 
           true ->
+            Logger.warning(
+              "agent_core cannot recover harness #{name}: a same-name harness exists " <>
+                "in a status that is neither reusable nor terminating"
+            )
+
             {:error, {:harness_name_conflict, name}}
         end
 
       {:error, reason} ->
+        Logger.warning("agent_core ListHarnesses failed during recovery: #{inspect(reason)}")
         {:error, reason}
 
       other ->
+        Logger.warning("agent_core ListHarnesses returned an unexpected shape: #{inspect(other)}")
         {:error, {:unexpected_list_response, other}}
     end
   end
@@ -288,8 +299,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
          do: {:ok, %{harness_arn: arn, harness_id: hid}}
   end
 
-  defp adopt(harness, _get_fun, _poll_ms, _max_polls),
-    do: {:error, {:unexpected_list_response, harness}}
+  defp adopt(harness, _get_fun, _poll_ms, _max_polls) do
+    Logger.warning("agent_core listing entry lacks an arn/harnessId: #{inspect(harness)}")
+    {:error, {:unexpected_list_response, harness}}
+  end
 
   defp recoverable_harness(harnesses, name) do
     Enum.find(harnesses, fn h ->
@@ -342,8 +355,15 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
         end
 
       # A listing failure mid-teardown is not evidence the harness survived; the
-      # subsequent create is the real arbiter and 409s if it did.
-      _ ->
+      # subsequent create is the real arbiter and 409s if it did. The wait still
+      # ends without ever having seen it go, so say so — the stop line reports
+      # :ok, which here means "stopped waiting", not "confirmed deleted".
+      other ->
+        Logger.warning(
+          "agent_core delete-wait for #{name} could not list harnesses " <>
+            "(proceeding unconfirmed; the next create arbitrates): #{inspect(other)}"
+        )
+
         {:ok, poll_n}
     end
   end
