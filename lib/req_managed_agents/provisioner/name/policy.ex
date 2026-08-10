@@ -10,9 +10,11 @@ defmodule ReqManagedAgents.Provisioner.Name.Policy do
   `[a-zA-Z0-9_]` onto CMA would rewrite every hyphenated agent name and rotate
   resources for no benefit.
 
-  The two constructors below are the only supported policies; there is
-  deliberately no public `new/1`, so `max_length` is always large enough to hold
-  a digest plus the truncation hash.
+  The two constructors below are the only supported policies. The struct itself
+  is public, though, so a hand-built policy whose `max_length` cannot hold a
+  digest plus the truncation hash is possible — `ReqManagedAgents.Provisioner.Name.compose/3`
+  rejects one with a message naming the minimum rather than failing obscurely
+  inside the fit.
   """
 
   @enforce_keys [:max_length, :charset, :leading]

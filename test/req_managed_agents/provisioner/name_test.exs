@@ -36,6 +36,32 @@ defmodule ReqManagedAgents.Provisioner.NameTest do
     assert Name.compose("rma-v02-rtc", "38ca3140", cma) == "rma-v02-rtc_38ca3140"
   end
 
+  describe "policy validation" do
+    test "a hand-built policy too small for a digest is rejected by name, not by binary_part" do
+      # The struct is public, so this is constructible; the moduledoc claims it
+      # cannot break the fit, and that claim has to be enforced to be true.
+      tiny = %Policy{max_length: 10, charset: :alnum_underscore, leading: :alpha}
+
+      assert_raise ArgumentError, ~r/cannot hold a 8-byte digest.*at least 17/, fn ->
+        Name.compose("anything", "38ca3140", tiny)
+      end
+    end
+
+    test "the smallest usable limit composes rather than raising" do
+      smallest = %Policy{max_length: 17, charset: :alnum_underscore, leading: :alpha}
+      composed = Name.compose(String.duplicate("a", 40), "38ca3140", smallest)
+
+      assert byte_size(composed) == 17
+      assert String.ends_with?(composed, "_38ca3140")
+    end
+
+    test "both shipped policies are usable" do
+      for policy <- [Policy.agent_core(), Policy.claude_managed_agents()] do
+        assert is_binary(Name.compose("base", "38ca3140", policy))
+      end
+    end
+  end
+
   describe "at the fit boundary" do
     # The AgentCore budget for the base is 40 - len(digest) - 1 = 31 bytes: the
     # last width that survives whole, and the first that must be hashed.

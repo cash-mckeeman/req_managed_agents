@@ -25,6 +25,8 @@ defmodule ReqManagedAgents.Provisioner.Name do
   @spec compose(String.t(), String.t(), Policy.t()) :: String.t()
   def compose(base, digest, %Policy{} = policy)
       when is_binary(base) and is_binary(digest) do
+    ensure_usable!(digest, policy)
+
     base
     |> sanitize(policy)
     |> ensure_leading(policy)
@@ -43,6 +45,22 @@ defmodule ReqManagedAgents.Provisioner.Name do
   @spec preserves_base?(String.t(), String.t()) :: boolean()
   def preserves_base?(name, base) when is_binary(name) and is_binary(base),
     do: String.starts_with?(name, base <> "_")
+
+  # A policy is only usable if its limit can hold the digest, the separator, the
+  # truncation hash and at least one byte of base. The shipped policies satisfy
+  # this by a wide margin, but the struct is public, and failing here names the
+  # cause instead of surfacing an out-of-range binary_part/3 deep inside the fit.
+  defp ensure_usable!(digest, %Policy{max_length: max}) do
+    minimum = byte_size(digest) + @base_hash_len + 3
+
+    if max < minimum do
+      raise ArgumentError,
+            "Name.Policy max_length #{max} cannot hold a #{byte_size(digest)}-byte digest " <>
+              "plus the truncation hash; it needs at least #{minimum}"
+    end
+
+    :ok
+  end
 
   defp sanitize(base, %Policy{charset: :permissive}), do: base
 
