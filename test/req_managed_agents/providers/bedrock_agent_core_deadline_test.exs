@@ -321,7 +321,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
                provision_quietly(
                  execution_role_arn: "role",
                  create_fun: created("h-bounded"),
-                 delete_fun: fn _hid -> {:ok, %{}} end,
+                 delete_fun: reporting_delete(),
                  client: client,
                  timeout: 30_000
                )
@@ -329,6 +329,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       assert_received {:request, :get, "/harnesses/h-bounded", receive_timeout}
       assert receive_timeout <= 10_000
       assert receive_timeout > 5_000
+
+      # The harness reached READY, so nothing may be rolled back.
+      refute_received {:deleted, _}
     end
 
     test "the bound is recomputed per poll, not once per provision" do
@@ -374,7 +377,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       assert {:ok, %{harness_id: "h-create"}} =
                provision_quietly(
                  execution_role_arn: "role",
-                 delete_fun: fn _hid -> {:ok, %{}} end,
+                 delete_fun: reporting_delete(),
                  client: client,
                  timeout: 30_000
                )
@@ -382,6 +385,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       assert_received {:request, :post, "/harnesses", receive_timeout}
       assert receive_timeout <= 30_000
       assert receive_timeout > 25_000
+
+      # The harness reached READY, so nothing may be rolled back.
+      refute_received {:deleted, _}
     end
 
     test "a delete-wait listing is bounded the same way" do
@@ -404,7 +410,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
                provision_quietly(
                  execution_role_arn: "role",
                  create_fun: fn _spec -> {:error, {:http_error, 409, "exists"}} end,
-                 delete_fun: fn _hid -> {:ok, %{}} end,
+                 delete_fun: reporting_delete(),
                  client: client,
                  timeout: 30_000,
                  ready_poll_ms: 0
@@ -415,6 +421,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
 
       assert_received {:request, :get, "/harnesses", receive_timeout}
       assert receive_timeout <= 10_000
+
+      # Every create 409'd, so this call created nothing to roll back.
+      refute_received {:deleted, _}
     end
 
     test "rollback gets a fixed budget of its own, neither derived nor unbounded" do
