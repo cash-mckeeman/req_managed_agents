@@ -215,10 +215,15 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       assert receive_timeout <= 10_000
     end
 
-    test "rollback is NOT bounded by the spent budget, or every timeout would orphan" do
-      # Rollback runs once the budget is gone, so bounding its DELETE by what is
-      # left would hand it a 1 ms timeout and turn the exact failure this release
-      # exists to fix into a leaked, billable harness.
+    test "rollback gets a fixed budget of its own, neither derived nor unbounded" do
+      # Two wrong answers here, and the test has to exclude both. Deriving the
+      # bound from what is LEFT hands rollback ~1 ms and orphans the harness on
+      # every timeout. Leaving it unbounded is the failure this release closes,
+      # reproduced on the way out: 600 s across three attempts is ~30 minutes of
+      # DELETE on a return path whose caller deadline has already passed, so the
+      # enclosing timeout kills the process mid-DELETE and it leaks anyway.
+      #
+      # So: a fixed 30 s total, which is 10 s per attempt.
       client =
         reporting_client(fn req ->
           case req.method do
@@ -237,7 +242,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
                )
 
       assert_received {:request, :delete, "/harnesses/h-rollback", receive_timeout}
-      assert receive_timeout == 600_000
+      assert receive_timeout == 10_000
     end
   end
 
