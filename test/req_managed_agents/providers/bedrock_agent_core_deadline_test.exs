@@ -29,30 +29,35 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
   defp created(hid),
     do: fn _spec -> {:ok, %{"harness" => %{"arn" => "a", "harnessId" => hid}}} end
 
-  # `extra` wins: a keyword list resolves left-to-right, so appending the overrides
-  # would leave them shadowed by the defaults and silently test the wrong path.
-  #
-  # delete_fun is defaulted because every provision here ends in a failed
-  # ready-wait, which fires rollback, and an un-injected rollback reaches a real
-  # signed AWS endpoint. It REPORTS rather than absorbing: a stub that quietly
-  # returns {:ok, %{}} suppresses exactly the rollback that bedrock_agent_core_test
-  # asserts, so every timing test here would keep passing while the harness leaked.
-  # Tests whose provision creates a harness assert {:deleted, hid}.
+  # The ONLY delete_fun this file may inject. It REPORTS rather than absorbing: a
+  # stub that quietly returns {:ok, %{}} suppresses exactly the rollback that
+  # bedrock_agent_core_test asserts, so every timing test here would keep passing
+  # while the harness leaked. Injecting one at all is not optional — an
+  # un-injected rollback reaches a real signed AWS endpoint.
   #
   # Call this in the test process, never inside a spawned task — self() is captured
   # here, and a task-side call would send the report to the task.
-  defp prov_opts(hid, extra) do
+  defp reporting_delete do
     test_pid = self()
 
+    fn id ->
+      send(test_pid, {:deleted, id})
+      {:ok, %{}}
+    end
+  end
+
+  # `extra` wins: a keyword list resolves left-to-right, so appending the overrides
+  # would leave them shadowed by the defaults and silently test the wrong path.
+  #
+  # Every provision that creates a harness in this file asserts {:deleted, hid};
+  # one that creates none asserts it received no such report.
+  defp prov_opts(hid, extra) do
     Keyword.merge(
       [
         execution_role_arn: "role",
         create_fun: created(hid),
         get_fun: always_creating(),
-        delete_fun: fn id ->
-          send(test_pid, {:deleted, id})
-          {:ok, %{}}
-        end
+        delete_fun: reporting_delete()
       ],
       extra
     )
@@ -136,6 +141,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       # anything well clear of it proves the count was dropped. Asserting hundreds
       # would instead be asserting a sustained poll rate on the test machine.
       assert p > 10
+
+      assert_receive {:deleted, "h-uncapped"}
     end
 
     test "a :timeout shorter than the default cadence still polls more than once" do
@@ -146,6 +153,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
                provision_quietly(prov_opts("h-subcadence", timeout: 600))
 
       assert p > 1
+
+      assert_receive {:deleted, "h-subcadence"}
     end
 
     test "a provision that expires on the DEADLINE still rolls back what it created" do
@@ -170,6 +179,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
                provision_quietly(
                  prov_opts("h-transport", get_fun: failing_get, timeout: 0, ready_poll_ms: 0)
                )
+
+      assert_receive {:deleted, "h-transport"}
     end
 
     test "a poll failure with budget still left is surfaced verbatim, not renamed" do
@@ -181,6 +192,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
                provision_quietly(
                  prov_opts("h-transport-live", get_fun: failing_get, timeout: 60_000)
                )
+
+      assert_receive {:deleted, "h-transport-live"}
     end
 
     test "a :timeout that is not a non-negative integer is rejected, not silently ignored" do
@@ -281,7 +294,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
                provision_quietly(
                  execution_role_arn: "role",
                  create_fun: created("h-recomputed"),
-                 delete_fun: fn _hid -> {:ok, %{}} end,
+                 delete_fun: reporting_delete(),
                  client: client,
                  timeout: 400,
                  ready_poll_ms: 50
@@ -292,6 +305,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
 
       assert length(polls) >= 3
       assert List.last(polls) < List.first(polls)
+
+      assert_receive {:deleted, "h-recomputed"}
     end
 
     test "CreateHarness is bounded too — it runs with the budget fully intact" do
