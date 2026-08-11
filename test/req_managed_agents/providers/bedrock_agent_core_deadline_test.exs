@@ -122,7 +122,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
                  prov_opts("h-uncapped", timeout: 100, ready_poll_ms: 0, ready_max_polls: 2)
                )
 
-      assert p > 100
+      # A margin, not a throughput benchmark: the legacy opt describes 2 polls, so
+      # anything well clear of it proves the count was dropped. Asserting hundreds
+      # would instead be asserting a sustained poll rate on the test machine.
+      assert p > 10
     end
 
     test "a :timeout shorter than the default cadence still polls more than once" do
