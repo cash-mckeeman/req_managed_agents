@@ -77,6 +77,11 @@ polls}` instead of a bare atom or name. Two new tags join them:
   retries — one hung poll could block ~30 minutes regardless of the poll count.
   `:ready_poll_ms` / `:ready_max_polls` remain accepted and keep their count
   semantics, so no existing caller's wait is shortened.
+- `CreateHarness` draws on the same budget as the waits do, so no request a
+  provision makes is unbounded. On the 409 recover path that means a re-create
+  the delete-wait left no budget for returns
+  `{:harness_ready_timeout, %WaitContext{}}` rather than being attempted on a
+  timeout no network can answer inside and failing as a raw transport error.
 
 ## v0.10.0 (2026-07-15)
 
