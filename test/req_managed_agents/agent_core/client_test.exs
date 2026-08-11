@@ -251,6 +251,54 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
     assert :counters.get(counter, 1) == 1
   end
 
+  test "control_plane_attempts/1 reports the attempts each method actually makes", %{
+    bypass: bypass
+  } do
+    # Callers divide a wall-clock budget by this number, so a retry-policy change
+    # that left it stale would multiply what one call may spend. Counting the
+    # attempts off the transport rather than asserting a literal is what stops the
+    # two from drifting apart silently.
+    client =
+      Client.new(
+        credentials: @creds,
+        base_url: "http://localhost:#{bypass.port}",
+        req_options: [retry_delay: 0]
+      )
+
+    attempts = fn method, path, call ->
+      counter = :counters.new(1, [])
+
+      Bypass.stub(bypass, method, path, fn conn ->
+        :counters.add(counter, 1, 1)
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(500, ~s({"message":"Internal Server Error"}))
+      end)
+
+      assert {:error, {:http_error, 500, _}} = call.()
+      :counters.get(counter, 1)
+    end
+
+    delete = attempts.("DELETE", "/harnesses/h1", fn -> Client.delete_harness(client, "h1") end)
+    assert delete == Client.control_plane_attempts(:delete)
+    assert delete > 1
+
+    post =
+      attempts.("POST", "/harnesses", fn ->
+        Client.create_harness(client, %{
+          name: "h",
+          execution_role_arn: "role",
+          system_prompt: "s",
+          model: %{},
+          tools: []
+        })
+      end)
+
+    assert post == Client.control_plane_attempts(:post)
+    assert post == 1
+  end
+
   test "create_harness passes environment + environmentVariables opaquely (absent when unset)",
        %{bypass: bypass, client: client} do
     env = %{

@@ -46,7 +46,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudgetTest do
       max_polls = 100
 
       assert {:ok, budget} = WaitBudget.new(ready_poll_ms: poll_ms, ready_max_polls: max_polls)
-      assert WaitBudget.remaining(budget) >= poll_ms * (max_polls + 1)
+
+      # Strictly above what the one-poll-early derivation gives, rather than at
+      # the full N+1 exactly: `remaining/1` re-reads the clock, so a millisecond
+      # of preemption between the two calls would fail an exact assertion. The
+      # correct derivation still clears this by a whole poll interval.
+      assert WaitBudget.remaining(budget) > poll_ms * max_polls
     end
 
     test "a non-integer or negative :timeout is rejected rather than silently ignored" do
