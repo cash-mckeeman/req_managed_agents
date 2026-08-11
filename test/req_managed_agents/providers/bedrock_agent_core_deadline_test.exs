@@ -3,8 +3,16 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
 
   import ExUnit.CaptureLog
 
+  alias ReqManagedAgents.AgentCore.Client
   alias ReqManagedAgents.Providers.BedrockAgentCore, as: P
   alias ReqManagedAgents.Providers.BedrockAgentCore.WaitContext
+
+  @creds %{
+    access_key_id: "AKID",
+    secret_access_key: "secret",
+    region: "us-east-1",
+    security_token: nil
+  }
 
   @spec_bedrock %{
     name: "harness",
@@ -47,6 +55,22 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
     {result, _log} = with_log(fn -> P.provision(@spec_bedrock, opts) end)
     result
   end
+
+  # Exercises the REAL default poll closures — no get_fun/list_fun injected — so
+  # the transport is reached through Client. An adapter stands in for the network
+  # and reports the receive_timeout each request would have used.
+  defp reporting_client(responder) do
+    test_pid = self()
+
+    adapter = fn req ->
+      send(test_pid, {:request, req.method, req.url.path, req.options[:receive_timeout]})
+      {req, responder.(req)}
+    end
+
+    Client.new(credentials: @creds, req_options: [adapter: adapter])
+  end
+
+  defp ok_json(body), do: %Req.Response{status: 200, body: body}
 
   describe "the caller's deadline bounds the waits" do
     test "a provision returns its named error well inside an enclosing caller's budget" do
@@ -150,6 +174,70 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       # And the whole provision stayed inside one budget: two would be the 150 ms
       # delete-wait plus a fresh 300 ms ready-wait.
       assert System.monotonic_time(:millisecond) - started < 400
+    end
+  end
+
+  describe "the per-poll HTTP timeout is bounded by what is left of the budget" do
+    test "a ready-poll may spend only its share of the remaining budget" do
+      # The client's own receive_timeout is 600 s and a control-plane call retries
+      # twice, so one hung poll could block ~30 minutes regardless of how short the
+      # caller's budget was — which is what made the "360 s budget" not an upper
+      # bound on anything.
+      client = reporting_client(fn _req -> ok_json(%{"harness" => %{"status" => "READY"}}) end)
+
+      assert {:ok, %{harness_id: "h-bounded"}} =
+               provision_quietly(
+                 execution_role_arn: "role",
+                 create_fun: created("h-bounded"),
+                 delete_fun: fn _hid -> {:ok, %{}} end,
+                 client: client,
+                 timeout: 30_000
+               )
+
+      assert_received {:request, :get, "/harnesses/h-bounded", receive_timeout}
+      assert receive_timeout <= 10_000
+      assert receive_timeout > 5_000
+    end
+
+    test "a delete-wait listing is bounded the same way" do
+      client = reporting_client(fn _req -> ok_json(%{"harnesses" => []}) end)
+
+      assert {:error, {:harness_name_conflict, _name}} =
+               provision_quietly(
+                 execution_role_arn: "role",
+                 create_fun: fn _spec -> {:error, {:http_error, 409, "exists"}} end,
+                 delete_fun: fn _hid -> {:ok, %{}} end,
+                 client: client,
+                 timeout: 30_000
+               )
+
+      assert_received {:request, :get, "/harnesses", receive_timeout}
+      assert receive_timeout <= 10_000
+    end
+
+    test "rollback is NOT bounded by the spent budget, or every timeout would orphan" do
+      # Rollback runs once the budget is gone, so bounding its DELETE by what is
+      # left would hand it a 1 ms timeout and turn the exact failure this release
+      # exists to fix into a leaked, billable harness.
+      client =
+        reporting_client(fn req ->
+          case req.method do
+            :delete -> ok_json(%{})
+            _ -> ok_json(%{"harness" => %{"status" => "CREATING"}})
+          end
+        end)
+
+      assert {:error, {:harness_ready_timeout, %WaitContext{}}} =
+               provision_quietly(
+                 execution_role_arn: "role",
+                 create_fun: created("h-rollback"),
+                 client: client,
+                 timeout: 50,
+                 ready_poll_ms: 10
+               )
+
+      assert_received {:request, :delete, "/harnesses/h-rollback", receive_timeout}
+      assert receive_timeout == 600_000
     end
   end
 
