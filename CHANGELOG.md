@@ -63,6 +63,11 @@ polls}` instead of a bare atom or name. Two new tags join them:
 - `Provisioner.Agents` refuses a base too long to compose without truncation
   (`{:error, {:agent_base_too_long, base}}`) rather than creating an agent
   `prune_agents/3` could never reclaim.
+- **`BedrockAgentCore.provision/2` now rejects opts it used to ignore.** A
+  `:timeout`, `:ready_poll_ms` or `:ready_max_polls` that is not a non-negative
+  integer returns `{:error, {:invalid_opts, key}}`. `timeout: :infinity` was
+  previously a harmless no-op and is now an error — a wait with no deadline is
+  the defect this release exists to close.
 - Provisioning waits are bounded by wall-clock rather than by a poll count, so
   a named error is reachable inside the caller's budget. **Behaviour change:**
   a recover-delete-recreate provision used to grant the delete-wait and the

@@ -161,6 +161,22 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget do
   spend it several times over. Never returns less than 1: a poll on a spent budget
   degrades to "try once, briefly", and a non-positive `receive_timeout` is rejected
   by the transport.
+
+  ## What this does not cover
+
+  `receive_timeout` bounds the *receive* phase of one attempt. Three costs sit
+  outside it, so a poll can exceed its share of the budget:
+
+    * the transport's sleeps between retries (exponential backoff — roughly 1 s
+      then 2 s at the default policy), and a `Retry-After` header, which the server
+      chooses;
+    * the connect timeout, which is a separate 30 s default;
+    * the time to establish TLS on a cold connection.
+
+  A wait therefore overruns its deadline by at most one poll's envelope, and the
+  smaller the budget the larger that envelope is in proportion — at a 200 ms
+  budget, one transient error costs seconds. Bounding the total needs a
+  deadline-aware retry delay, which belongs in the client rather than here.
   """
   @spec attempt_timeout(t(), timeout(), pos_integer()) :: pos_integer()
   def attempt_timeout(%__MODULE__{} = budget, :infinity, attempts),
