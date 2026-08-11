@@ -135,6 +135,17 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       assert p > 1
     end
 
+    test "a provision that expires on the DEADLINE still rolls back what it created" do
+      # Every legacy case expires on the poll count, because the derived deadline
+      # is floored well above it — so nothing else in the suite reaches expiry
+      # through the deadline itself. A restructure that skipped rollback on the
+      # :timeout path would leave the rest of this file green.
+      assert {:error, {:harness_ready_timeout, %WaitContext{}}} =
+               provision_quietly(prov_opts("h-deadline-rollback", timeout: 100))
+
+      assert_receive {:deleted, "h-deadline-rollback"}
+    end
+
     test "a poll that fails on an exhausted budget is still named as a timeout" do
       # The last poll of a wait runs on whatever is left, so its receive timeout
       # can fall below real GetHarness latency and come back as a transport error.
