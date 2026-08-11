@@ -271,6 +271,16 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
   end
 
   describe "legacy poll opts" do
+    test "a nonzero cadence still gets every poll the count allows" do
+      # The zero-cadence cases below cannot see this: with poll_ms: 0 the derived
+      # deadline collapses onto its floor and the count always binds first. At a
+      # real cadence the derivation decides, and deriving only poll_ms * max_polls
+      # ends the wait one poll early — the wait quietly shortens while every
+      # assertion about it still passes.
+      assert {:error, {:harness_ready_timeout, %WaitContext{polls: 4}}} =
+               provision_quietly(prov_opts("h-cadence", ready_poll_ms: 5, ready_max_polls: 3))
+    end
+
     test "still bound the wait by their count, unchanged" do
       # ready_poll_ms: 0 with ready_max_polls: 3 means "poll as fast as you can,
       # three times over" — attempts, not time. Reading that as a 0 ms wall-clock

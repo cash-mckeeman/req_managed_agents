@@ -38,6 +38,17 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudgetTest do
       assert WaitBudget.remaining(budget) > 999_000
     end
 
+    test "the derived deadline covers every poll the count allows, not one fewer" do
+      # A count of N permits N+1 polls, so a deadline of poll_ms * N expires one
+      # poll early and silently shortens the wait the count was meant to govern.
+      # Asserted above the floor, where the derivation is what decides.
+      poll_ms = 10_000
+      max_polls = 100
+
+      assert {:ok, budget} = WaitBudget.new(ready_poll_ms: poll_ms, ready_max_polls: max_polls)
+      assert WaitBudget.remaining(budget) >= poll_ms * (max_polls + 1)
+    end
+
     test "a non-integer or negative :timeout is rejected rather than silently ignored" do
       assert {:error, {:invalid_opts, :timeout}} = WaitBudget.new(timeout: -1)
       assert {:error, {:invalid_opts, :timeout}} = WaitBudget.new(timeout: "300")

@@ -15,8 +15,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget do
 
   `:timeout` (ms) is the whole budget, and the deadline alone bounds the loops.
   The legacy `:ready_poll_ms` / `:ready_max_polls` pair is still accepted and keeps
-  its count semantics, under a deadline derived from `poll_ms * max_polls` and
-  floored at the default. The floor matters: `ready_poll_ms: 0` means "poll as fast
+  its count semantics, under a deadline derived from `poll_ms * (max_polls + 1)`
+  — every poll the count allows, so the count is what binds — floored at the
+  default. The floor matters: `ready_poll_ms: 0` means "poll as fast
   as you can, N times" — attempts, not time — and deriving a zero-length wall-clock
   budget from it would end the wait after a single poll.
 
@@ -33,7 +34,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget do
 
   # The wall-clock the legacy poll opts describe at their defaults. It is the
   # floor for every derived budget, and the default when no :timeout is given.
-  @default_timeout_ms @default_poll_ms * @default_max_polls
+  #
+  # `max_polls + 1` because a count of N permits N+1 polls: the first is free and
+  # each unit of the count buys one more. Deriving only `poll_ms * max_polls`
+  # leaves the deadline expiring one poll early, which would silently shorten
+  # every legacy wait the count was supposed to govern.
+  @default_timeout_ms @default_poll_ms * (@default_max_polls + 1)
 
   @enforce_keys [:deadline_at, :poll_ms, :polls_left]
   defstruct [:deadline_at, :poll_ms, :polls_left]
@@ -80,7 +86,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget do
   defp budget(ms, _poll_ms, _max_polls) when is_integer(ms) and ms >= 0, do: {:ok, ms, :infinity}
 
   defp budget(nil, poll_ms, max_polls),
-    do: {:ok, max(poll_ms * max_polls, @default_timeout_ms), max_polls}
+    do: {:ok, max(poll_ms * (max_polls + 1), @default_timeout_ms), max_polls}
 
   defp budget(_other, _poll_ms, _max_polls), do: {:error, {:invalid_opts, :timeout}}
 
