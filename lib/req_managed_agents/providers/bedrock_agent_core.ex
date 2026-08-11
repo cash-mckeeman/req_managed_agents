@@ -100,10 +100,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     create_fun =
       opts[:create_fun] || fn s -> Client.create_harness(opts[:client] || Client.new(), s) end
 
-    list_fun = opts[:list_fun] || fn -> Client.list_harnesses(opts[:client] || Client.new()) end
+    list_fun = opts[:list_fun] || fn -> Client.list_harnesses(poll_client(opts, budget)) end
 
-    get_fun =
-      opts[:get_fun] || fn hid -> Client.get_harness(opts[:client] || Client.new(), hid) end
+    get_fun = opts[:get_fun] || fn hid -> Client.get_harness(poll_client(opts, budget), hid) end
 
     case create_fun.(harness_spec) do
       {:error, {:http_error, 409, _}} ->
@@ -120,6 +119,29 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       created ->
         create_and_wait(created, get_fun, budget, opts)
     end
+  end
+
+  # One poll may spend only its share of what is left. Unbounded, a single hung
+  # poll blocks for the client's full 600 s receive timeout — three times over,
+  # since a control-plane call retries — so a wait's budget bounded nothing.
+  #
+  # Deliberately NOT applied to create, rollback or teardown. Rollback runs only
+  # once the budget is spent, so bounding its DELETE by what remains would hand it
+  # a 1 ms timeout and turn every timed-out provision into a leaked harness.
+  #
+  # The client is still built inside the closure: hoisting it would read AWS
+  # credentials even when every seam is injected.
+  defp poll_client(opts, budget) do
+    client = opts[:client] || Client.new()
+
+    bounded =
+      WaitBudget.attempt_timeout(
+        budget,
+        client.receive_timeout,
+        Client.control_plane_attempts()
+      )
+
+    %{client | receive_timeout: bounded}
   end
 
   defp create_and_wait(create_result, get_fun, budget, opts) do

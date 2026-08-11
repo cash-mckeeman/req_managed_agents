@@ -84,6 +84,17 @@ defmodule ReqManagedAgents.AgentCore.Client do
     span(c, :post, "/harnesses", :create_harness, fn -> post_json(c, "/harnesses", body) end)
   end
 
+  @doc """
+  Worst-case number of HTTP attempts one control-plane call makes: the initial
+  request plus its `retry: :transient` retries.
+
+  `receive_timeout` applies per attempt, so a caller bounding a call by a
+  wall-clock budget has to divide by this — otherwise a hung request spends the
+  whole budget once per attempt.
+  """
+  @spec control_plane_attempts() :: pos_integer()
+  def control_plane_attempts, do: @max_retries + 1
+
   @spec get_harness(t(), String.t()) :: {:ok, map()} | {:error, term()}
   def get_harness(c, id),
     do: span(c, :get, "/harnesses/#{id}", :get_harness, fn -> get_json(c, "/harnesses/#{id}") end)
