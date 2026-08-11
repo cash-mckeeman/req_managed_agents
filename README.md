@@ -233,6 +233,34 @@ and `transcript/1` exposes the grown history. Any provider whose history lives c
 implement the optional `transcript/1` callback — `Session` embeds it into `SessionResult.transcript`
 at terminal (`nil` for server-held providers like Claude Managed Agents and AgentCore).
 
+### Provisioning budget (Bedrock AgentCore)
+
+`provision/3` takes `:timeout` (ms, default 365 000) as the budget for the whole call. It
+becomes a monotonic deadline at entry, shared by the wait for a same-name harness to finish
+deleting and the wait for the new one to reach READY, and it bounds every request those waits
+make — so a provision that cannot finish returns a named `{:error, {tag, %WaitContext{}}}`
+inside the budget rather than overrunning the deadline it is running under. (The best-effort
+`DeleteHarness` that rolls back a harness this call created is the deliberate exception: it
+runs after the budget is spent and carries a small fixed budget of its own.)
+
+**The budgets are additive, so size them that way.** `provision` and `Session.run/2` run in
+sequence, and the defaults do **not** compose: 365 s of provisioning plus `run/2`'s 600 s
+default exceeds a 900 s enclosing limit. The constraint is
+
+```
+provision :timeout  +  Session.run/2 :timeout  +  margin  ≤  your enclosing deadline
+```
+
+where the enclosing deadline is whatever kills you from outside — a CI job timeout, an ExUnit
+`@tag timeout:`, a supervisor. Getting this wrong is the failure this budget exists to make
+diagnosable: the enclosing timeout fires first, the process is killed mid-wait, and no named
+error is ever returned.
+
+The `:timeout` also derives the poll cadence when `:ready_poll_ms` is not given, so a short
+budget still polls repeatedly rather than looking once. Note that the bound covers each
+request's *receive* phase; a retried call also spends Req's backoff sleeps and Finch's connect
+timeout outside it, so leave margin rather than sizing to the millisecond.
+
 ## Layers
 
 - `ReqManagedAgents.Provider` — the behaviour every backend implements (invocation + `normalize/1`).
@@ -267,13 +295,6 @@ The `:provision` events fire once per poll and once per terminal outcome while a
 AgentCore harness is being provisioned; `phase` is `:ready` or `:deleted`, and `result` is
 `:ok` or `{:error, tag}`. The same fields are also written to the log, so a provisioning
 failure is diagnosable without attaching a handler.
-
-Provisioning a Bedrock AgentCore harness takes `:timeout` (ms, default 360 000) as the budget
-for the **whole** call. It becomes a deadline at entry, shared by the wait for a same-name
-harness to finish deleting and the wait for the new one to reach READY, and it bounds each
-poll's HTTP timeout too — so a provision that cannot finish returns a named
-`{:error, {tag, %WaitContext{}}}` inside the budget instead of overrunning whatever timeout
-it is running under. Set it below your `Session.run/2` timeout.
 
 All providers run through `Session`, so the `:session` events fire regardless of loop host.
 `:stream` `:event` also fires for **both** providers as events arrive mid-turn — on Claude,
