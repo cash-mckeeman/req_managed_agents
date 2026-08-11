@@ -21,7 +21,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.AgentCore.{Client, Converse}
   alias ReqManagedAgents.Environment
-  alias ReqManagedAgents.Providers.BedrockAgentCore.{HarnessSpec, HarnessStatus, WaitContext}
+  alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
+  alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatus
+  alias ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget
+  alias ReqManagedAgents.Providers.BedrockAgentCore.WaitContext
   alias ReqManagedAgents.Provisioner.Name
   alias ReqManagedAgents.Provisioner.Name.Policy
   alias ReqManagedAgents.{ToolUse, TurnResult, Usage}
@@ -29,14 +32,23 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   @impl true
   def mode, do: :request_response
 
-  @ready_poll_ms 5_000
-  @ready_max_polls 72
+  @doc """
+  Provisions the harness for `spec`, waiting for it to reach READY.
 
+  `opts[:timeout]` (ms) is the budget for the whole call, converted once here into
+  a monotonic deadline that every wait shares — a provision that cannot finish
+  returns a named error tuple strictly inside it rather than running past the
+  deadline of whatever it runs under. The legacy `:ready_poll_ms` /
+  `:ready_max_polls` pair is still accepted; see
+  `ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget` for how the two shapes
+  relate.
+  """
   @impl true
   def provision(spec, opts) do
     with {:ok, spec} <- Spec.new(spec),
-         {:ok, harness_spec} <- build_spec(spec, opts) do
-      do_provision(harness_spec, opts)
+         {:ok, harness_spec} <- build_spec(spec, opts),
+         {:ok, budget} <- WaitBudget.new(opts) do
+      do_provision(harness_spec, budget, opts)
     end
   end
 
@@ -84,7 +96,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   defp validate_role_arn(_), do: {:error, {:invalid_opts, :execution_role_arn}}
 
-  defp do_provision(harness_spec, opts) do
+  defp do_provision(harness_spec, budget, opts) do
     create_fun =
       opts[:create_fun] || fn s -> Client.create_harness(opts[:client] || Client.new(), s) end
 
@@ -92,9 +104,6 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
     get_fun =
       opts[:get_fun] || fn hid -> Client.get_harness(opts[:client] || Client.new(), hid) end
-
-    poll_ms = opts[:ready_poll_ms] || @ready_poll_ms
-    max_polls = opts[:ready_max_polls] || @ready_max_polls
 
     case create_fun.(harness_spec) do
       {:error, {:http_error, 409, _}} ->
@@ -104,20 +113,19 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
           list_fun,
           get_fun,
           harness_spec.name,
-          poll_ms,
-          max_polls,
+          budget,
           opts
         )
 
       created ->
-        create_and_wait(created, get_fun, poll_ms, max_polls, opts)
+        create_and_wait(created, get_fun, budget, opts)
     end
   end
 
-  defp create_and_wait(create_result, get_fun, poll_ms, max_polls, opts) do
+  defp create_and_wait(create_result, get_fun, budget, opts) do
     case normalize_create(create_result) do
       {:ok, arn, hid} ->
-        ready_or_rollback(get_fun, arn, hid, poll_ms, max_polls, opts)
+        ready_or_rollback(get_fun, arn, hid, budget, opts)
 
       {:error, reason} ->
         Logger.warning("agent_core CreateHarness did not yield a harness: #{inspect(reason)}")
@@ -140,8 +148,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   # A harness this call created and could not bring to READY is a billable resource
   # nothing else will ever reclaim — the ready-wait's own failure is the last moment
   # its id is known. Rollback is best-effort and never replaces the original error.
-  defp ready_or_rollback(get_fun, arn, hid, poll_ms, max_polls, opts) do
-    case wait_until_ready(get_fun, hid, poll_ms, max_polls) do
+  defp ready_or_rollback(get_fun, arn, hid, budget, opts) do
+    case wait_until_ready(get_fun, hid, budget) do
       :ok ->
         {:ok, %{harness_arn: arn, harness_id: hid}}
 
@@ -251,26 +259,19 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     s
   end
 
-  defp recover_existing(
-         create_fun,
-         harness_spec,
-         list_fun,
-         get_fun,
-         name,
-         poll_ms,
-         max_polls,
-         opts
-       ) do
+  defp recover_existing(create_fun, harness_spec, list_fun, get_fun, name, budget, opts) do
     case list_fun.() do
       {:ok, %{"harnesses" => harnesses}} ->
         cond do
           harness = recoverable_harness(harnesses, name) ->
-            adopt(harness, get_fun, poll_ms, max_polls)
+            adopt(harness, get_fun, budget)
 
           deleting?(harnesses, name) ->
-            # A prior same-name harness is still tearing down; wait it out, then re-create.
-            with :ok <- wait_until_deleted(list_fun, name, poll_ms, max_polls) do
-              create_and_wait(create_fun.(harness_spec), get_fun, poll_ms, max_polls, opts)
+            # A prior same-name harness is still tearing down; wait it out, then
+            # re-create. Both waits carry the SAME budget, so what the delete-wait
+            # spends is gone from the ready-wait — they are one budget, not two.
+            with :ok <- wait_until_deleted(list_fun, name, budget) do
+              create_and_wait(create_fun.(harness_spec), get_fun, budget, opts)
             end
 
           true ->
@@ -294,12 +295,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   # An adopted harness was created by someone else, so a failed ready-wait here must
   # NOT delete it — rollback covers only what this call created.
-  defp adopt(%{"arn" => arn, "harnessId" => hid}, get_fun, poll_ms, max_polls) do
-    with :ok <- wait_until_ready(get_fun, hid, poll_ms, max_polls),
+  defp adopt(%{"arn" => arn, "harnessId" => hid}, get_fun, budget) do
+    with :ok <- wait_until_ready(get_fun, hid, budget),
          do: {:ok, %{harness_arn: arn, harness_id: hid}}
   end
 
-  defp adopt(harness, _get_fun, _poll_ms, _max_polls) do
+  defp adopt(harness, _get_fun, _budget) do
     Logger.warning("agent_core listing entry lacks an arn/harnessId: #{inspect(harness)}")
     {:error, {:unexpected_list_response, harness}}
   end
@@ -329,13 +330,13 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   defp terminating?(_), do: false
 
-  defp wait_until_deleted(list_fun, name, poll_ms, max_polls) do
+  defp wait_until_deleted(list_fun, name, budget) do
     run_wait(:deleted, name, fn started ->
-      deleted_loop(list_fun, name, poll_ms, max_polls, started, 0)
+      deleted_loop(list_fun, name, budget, started, 0)
     end)
   end
 
-  defp deleted_loop(list_fun, name, poll_ms, polls_left, started, poll_n) do
+  defp deleted_loop(list_fun, name, budget, started, poll_n) do
     case list_fun.() do
       {:ok, %{"harnesses" => hs}} ->
         n = poll_n + 1
@@ -347,8 +348,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
           is_nil(entry) ->
             {:ok, n}
 
-          polls_left > 0 ->
-            sleep_and_recheck(list_fun, name, poll_ms, polls_left, started, n)
+          WaitBudget.next(budget) == :poll ->
+            sleep_and_recheck(list_fun, name, budget, started, n)
 
           true ->
             {{:error, {:harness_still_deleting, ctx(name, :deleted, status, started, n)}}, n}
@@ -368,9 +369,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     end
   end
 
-  defp sleep_and_recheck(list_fun, name, poll_ms, polls_left, started, poll_n) do
-    Process.sleep(poll_ms)
-    deleted_loop(list_fun, name, poll_ms, polls_left - 1, started, poll_n)
+  defp sleep_and_recheck(list_fun, name, budget, started, poll_n) do
+    Process.sleep(budget.poll_ms)
+    deleted_loop(list_fun, name, WaitBudget.spend(budget), started, poll_n)
   end
 
   # The status the listing actually returned. A harness whose delete failed sits
@@ -379,19 +380,24 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   defp observed_status(nil), do: nil
   defp observed_status(entry), do: entry["status"]
 
-  defp wait_until_ready(get_fun, hid, poll_ms, max_polls) do
+  defp wait_until_ready(get_fun, hid, budget) do
     run_wait(:ready, hid, fn started ->
-      ready_loop(get_fun, hid, poll_ms, max_polls, started, 0)
+      ready_loop(get_fun, hid, budget, started, 0)
     end)
   end
 
-  defp ready_loop(get_fun, hid, poll_ms, polls_left, started, poll_n) do
+  defp ready_loop(get_fun, hid, budget, started, poll_n) do
     case get_fun.(hid) do
       {:ok, %{"harness" => %{"status" => status}}} when is_binary(status) ->
         n = poll_n + 1
         emit_poll(hid, :ready, status, started, n)
         classified = HarnessStatus.classify(status)
-        on_status(classified, {get_fun, hid, poll_ms, polls_left}, {started, n, status})
+
+        on_status(
+          classified,
+          {get_fun, hid, budget, WaitBudget.next(budget)},
+          {started, n, status}
+        )
 
       {:ok, other} ->
         {{:error, {:unexpected_get_harness_response, other}}, poll_n}
@@ -403,23 +409,22 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   defp on_status(:ready, _poll, {_started, n, _status}), do: {:ok, n}
 
-  defp on_status(:creating, {get_fun, hid, poll_ms, polls_left}, {started, n, _status})
-       when polls_left > 0 do
-    Process.sleep(poll_ms)
-    ready_loop(get_fun, hid, poll_ms, polls_left - 1, started, n)
+  defp on_status(:creating, {get_fun, hid, budget, :poll}, {started, n, _status}) do
+    Process.sleep(budget.poll_ms)
+    ready_loop(get_fun, hid, WaitBudget.spend(budget), started, n)
   end
 
-  defp on_status(:creating, {_get_fun, hid, _poll_ms, _left}, {started, n, status}),
+  defp on_status(:creating, {_get_fun, hid, _budget, :expired}, {started, n, status}),
     do: {{:error, {:harness_ready_timeout, ctx(hid, :ready, status, started, n)}}, n}
 
   # A deleting harness can never become READY, so polling it is always wrong.
-  defp on_status(:terminating, {_get_fun, hid, _poll_ms, _left}, {started, n, status}),
+  defp on_status(:terminating, {_get_fun, hid, _budget, _verdict}, {started, n, status}),
     do: {{:error, {:harness_terminating, ctx(hid, :ready, status, started, n)}}, n}
 
-  defp on_status({:failed, _}, {_get_fun, hid, _poll_ms, _left}, {started, n, status}),
+  defp on_status({:failed, _}, {_get_fun, hid, _budget, _verdict}, {started, n, status}),
     do: {{:error, {:harness_failed, ctx(hid, :ready, status, started, n)}}, n}
 
-  defp on_status({:unknown, _}, {_get_fun, hid, _poll_ms, _left}, {started, n, status}),
+  defp on_status({:unknown, _}, {_get_fun, hid, _budget, _verdict}, {started, n, status}),
     do: {{:error, {:harness_unknown_status, ctx(hid, :ready, status, started, n)}}, n}
 
   defp ctx(harness_id, phase, status, started, polls) do
