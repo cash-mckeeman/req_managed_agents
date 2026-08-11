@@ -32,8 +32,11 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   @impl true
   def mode, do: :request_response
 
-  # The total wall-clock a best-effort rollback may spend. Fixed rather than
-  # derived: see `rollback_client/1`.
+  # The receive time a best-effort rollback may spend, divided across the attempts
+  # its DELETE makes. Not a wall-clock cap: connect time and retry backoff sit
+  # outside `receive_timeout` (see `WaitBudget.attempt_timeout/3`), so three
+  # attempts against a black-holing endpoint still run into the minutes. Fixed
+  # rather than derived: see `rollback_client/1`.
   @rollback_budget_ms 30_000
 
   @doc """
