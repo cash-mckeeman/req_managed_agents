@@ -288,16 +288,33 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
     end
 
     test "a delete-wait listing is bounded the same way" do
-      client = reporting_client(fn _req -> ok_json(%{"harnesses" => []}) end)
+      # The listing has to keep returning a DELETING harness for a poll or two,
+      # or recovery exits on a name conflict after its OWN listing and the
+      # delete-wait is never entered — the loop this test is named for.
+      name = P.harness_name(@spec_bedrock, nil)
+      {:ok, lists} = Agent.start_link(fn -> 0 end)
 
-      assert {:error, {:harness_name_conflict, _name}} =
+      client =
+        reporting_client(fn _req ->
+          n = Agent.get_and_update(lists, &{&1 + 1, &1 + 1})
+          harnesses = if n >= 3, do: [], else: [%{"harnessName" => name, "status" => "DELETING"}]
+          ok_json(%{"harnesses" => harnesses})
+        end)
+
+      # Listing 1 is recovery's; the delete-wait polls on 2 and sees it gone on 3,
+      # then the re-create 409s again and ends the call.
+      assert {:error, {:http_error, 409, _}} =
                provision_quietly(
                  execution_role_arn: "role",
                  create_fun: fn _spec -> {:error, {:http_error, 409, "exists"}} end,
                  delete_fun: fn _hid -> {:ok, %{}} end,
                  client: client,
-                 timeout: 30_000
+                 timeout: 30_000,
+                 ready_poll_ms: 0
                )
+
+      # Three listings means the delete-wait ran: recovery only makes one.
+      assert Agent.get(lists, & &1) >= 3
 
       assert_received {:request, :get, "/harnesses", receive_timeout}
       assert receive_timeout <= 10_000
