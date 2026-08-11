@@ -40,10 +40,13 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   Provisions the harness for `spec`, waiting for it to reach READY.
 
   `opts[:timeout]` (ms) is the budget for the whole call, converted once here into
-  a monotonic deadline that every wait shares — a provision that cannot finish
-  returns a named error tuple strictly inside it rather than running past the
-  deadline of whatever it runs under. The legacy `:ready_poll_ms` /
-  `:ready_max_polls` pair is still accepted; see
+  a monotonic deadline shared by every wait and by every request they make — a
+  provision that cannot finish returns a named error tuple strictly inside it
+  rather than running past the deadline of whatever it runs under. The one
+  exception is the best-effort rollback of a harness this call created, which runs
+  after the budget is spent and so carries a small fixed budget of its own.
+
+  The legacy `:ready_poll_ms` / `:ready_max_polls` pair is still accepted; see
   `ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget` for how the two shapes
   relate.
   """
@@ -102,11 +105,14 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   defp do_provision(harness_spec, budget, opts) do
     create_fun =
-      opts[:create_fun] || fn s -> Client.create_harness(opts[:client] || Client.new(), s) end
+      opts[:create_fun] ||
+        fn s -> Client.create_harness(budgeted_client(opts, budget, :post), s) end
 
-    list_fun = opts[:list_fun] || fn -> Client.list_harnesses(poll_client(opts, budget)) end
+    list_fun =
+      opts[:list_fun] || fn -> Client.list_harnesses(budgeted_client(opts, budget, :get)) end
 
-    get_fun = opts[:get_fun] || fn hid -> Client.get_harness(poll_client(opts, budget), hid) end
+    get_fun =
+      opts[:get_fun] || fn hid -> Client.get_harness(budgeted_client(opts, budget, :get), hid) end
 
     case create_fun.(harness_spec) do
       {:error, {:http_error, 409, _}} ->
@@ -125,21 +131,22 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     end
   end
 
-  # One poll may spend only its share of what is left. Unbounded, a single hung
-  # poll blocks for the client's full 600 s receive timeout — three times over,
-  # since a retried control-plane call makes three attempts — so a wait's budget
-  # bounded nothing.
+  # Every call made while the budget is still running draws on what is left of it.
+  # Unbounded, a single hung request blocks for the client's full 600 s receive
+  # timeout — three times over on a retried method — so the budget bounded nothing.
+  # The attempt count is method-specific: a retried GET/DELETE divides three ways,
+  # a POST once.
   #
   # The client is still built inside the closure: hoisting it would read AWS
   # credentials even when every seam is injected.
-  defp poll_client(opts, budget) do
+  defp budgeted_client(opts, budget, method) do
     client = opts[:client] || Client.new()
 
     bounded =
       WaitBudget.attempt_timeout(
         budget,
         client.receive_timeout,
-        Client.control_plane_attempts(:get)
+        Client.control_plane_attempts(method)
       )
 
     %{client | receive_timeout: bounded}

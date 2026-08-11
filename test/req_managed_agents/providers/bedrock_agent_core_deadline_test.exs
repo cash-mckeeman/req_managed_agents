@@ -233,6 +233,33 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       assert receive_timeout > 5_000
     end
 
+    test "CreateHarness is bounded too — it runs with the budget fully intact" do
+      # The exemption granted to rollback does not extend here: create runs before
+      # any of the budget is spent, so "the budget for the whole call" is only true
+      # if it is bounded. CreateHarness is a POST, which Req's :safe_transient
+      # policy does not retry, so its share is the whole remaining budget rather
+      # than a third of it.
+      client =
+        reporting_client(fn req ->
+          case req.method do
+            :post -> ok_json(%{"harness" => %{"arn" => "a", "harnessId" => "h-create"}})
+            _ -> ok_json(%{"harness" => %{"status" => "READY"}})
+          end
+        end)
+
+      assert {:ok, %{harness_id: "h-create"}} =
+               provision_quietly(
+                 execution_role_arn: "role",
+                 delete_fun: fn _hid -> {:ok, %{}} end,
+                 client: client,
+                 timeout: 30_000
+               )
+
+      assert_received {:request, :post, "/harnesses", receive_timeout}
+      assert receive_timeout <= 30_000
+      assert receive_timeout > 25_000
+    end
+
     test "a delete-wait listing is bounded the same way" do
       client = reporting_client(fn _req -> ok_json(%{"harnesses" => []}) end)
 

@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget do
   @moduledoc """
   The single wall-clock budget a `BedrockAgentCore.provision/2` call spends across
-  **all** of its waits.
+  **all** of its waits and every request they make.
 
   One provision can wait twice — first for a same-name harness to finish deleting,
   then for the new one to reach READY. Bounding each wait by a poll *count* made
