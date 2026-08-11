@@ -83,6 +83,16 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
 
   defp ok_json(body), do: %Req.Response{status: 200, body: body}
 
+  # Every request the adapter served, in order. assert_received only reaches the
+  # first match, which cannot express "each poll got less than the one before".
+  defp collect_requests(acc \\ []) do
+    receive do
+      {:request, _method, _path, _rt} = msg -> collect_requests([msg | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
   describe "the caller's deadline bounds the waits" do
     test "a provision returns its named error well inside an enclosing caller's budget" do
       # This is the 07-30 failure, in miniature. provision consumed the caller's
@@ -258,6 +268,30 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       assert_received {:request, :get, "/harnesses/h-bounded", receive_timeout}
       assert receive_timeout <= 10_000
       assert receive_timeout > 5_000
+    end
+
+    test "the bound is recomputed per poll, not once per provision" do
+      # Hoisting the client out of the poll closure would compute the bound once
+      # against the full budget and reuse it for every later poll — and every other
+      # assertion in this block would still pass. Each poll must see a strictly
+      # smaller share, because each one has less budget left than the one before.
+      client = reporting_client(fn _req -> ok_json(%{"harness" => %{"status" => "CREATING"}}) end)
+
+      assert {:error, {:harness_ready_timeout, %WaitContext{}}} =
+               provision_quietly(
+                 execution_role_arn: "role",
+                 create_fun: created("h-recomputed"),
+                 delete_fun: fn _hid -> {:ok, %{}} end,
+                 client: client,
+                 timeout: 400,
+                 ready_poll_ms: 50
+               )
+
+      polls =
+        for {:request, :get, "/harnesses/h-recomputed", rt} <- collect_requests(), do: rt
+
+      assert length(polls) >= 3
+      assert List.last(polls) < List.first(polls)
     end
 
     test "CreateHarness is bounded too — it runs with the budget fully intact" do
