@@ -40,6 +40,12 @@ polls}` instead of a bare atom or name. Two new tags join them:
   status vocabulary, replacing two lists that disagreed about `DELETING`.
 - Telemetry and logging on every provisioning poll and terminal outcome:
   `[:req_managed_agents, :agent_core, :provision, :poll | :stop | :exception]`.
+- `BedrockAgentCore.provision/2` accepts `:timeout` (ms) — the budget for the
+  whole call, converted once at entry into a deadline that every wait shares.
+  A `:timeout` that is not a non-negative integer returns
+  `{:error, {:invalid_opts, :timeout}}`.
+- `AgentCore.Client.control_plane_attempts/0` — the worst-case attempt count of
+  a control-plane call, for callers bounding one by a wall-clock budget.
 
 ### Fixed
 - A harness this library created and could not bring to READY is now
@@ -56,6 +62,15 @@ polls}` instead of a bare atom or name. Two new tags join them:
 - `Provisioner.Agents` refuses a base too long to compose without truncation
   (`{:error, {:agent_base_too_long, base}}`) rather than creating an agent
   `prune_agents/3` could never reclaim.
+- Provisioning waits are bounded by wall-clock rather than by a poll count, so
+  a named error is reachable inside the caller's budget. **Behaviour change:**
+  a recover-delete-recreate provision used to grant the delete-wait and the
+  ready-wait a full budget each (up to 720 s combined) and now spends one budget
+  across both; and each poll's HTTP `receive_timeout` is bounded by what is left
+  of that budget, where it previously used the client's 600 s default with two
+  retries — one hung poll could block ~30 minutes regardless of the poll count.
+  `:ready_poll_ms` / `:ready_max_polls` remain accepted and keep their count
+  semantics, so no existing caller's wait is shortened.
 
 ## v0.10.0 (2026-07-15)
 
