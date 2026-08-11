@@ -259,6 +259,54 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
 
       assert_receive {:deleted, "h-shared"}
     end
+
+    test "a re-create the delete-wait left no budget for is named, not attempted" do
+      # create_fun builds its client at call time, so on the recover path the
+      # re-create runs AFTER the delete-wait — and the delete-wait ends the moment
+      # the harness disappears, which can be the last millisecond of the budget.
+      # Attempted anyway, that create carries a receive_timeout of ~1 ms, which no
+      # real network answers inside: it comes back a raw %Req.TransportError{}
+      # where the named tag is the whole point of the deadline.
+      #
+      # The prior harness is gone only once the budget is too short to sleep one
+      # more poll interval, so the delete-wait returns :ok with nothing left.
+      name = P.harness_name(@spec_bedrock, nil)
+      gone_at = System.monotonic_time(:millisecond) + 250
+
+      client =
+        reporting_client(fn req ->
+          case req.method do
+            :post ->
+              %Req.Response{status: 409, body: %{"message" => "exists"}}
+
+            _ ->
+              harnesses =
+                if System.monotonic_time(:millisecond) >= gone_at,
+                  do: [],
+                  else: [%{"harnessName" => name, "status" => "DELETING"}]
+
+              ok_json(%{"harnesses" => harnesses})
+          end
+        end)
+
+      assert {:error, {:harness_ready_timeout, %WaitContext{harness_id: ^name}}} =
+               provision_quietly(
+                 execution_role_arn: "role",
+                 delete_fun: reporting_delete(),
+                 client: client,
+                 timeout: 300
+               )
+
+      creates = for {:request, :post, "/harnesses", rt} <- collect_requests(), do: rt
+
+      # One CreateHarness, on the intact budget. A second is the re-create running
+      # on whatever the delete-wait happened to leave it.
+      assert [create_timeout] = creates
+      assert create_timeout > 250
+
+      # Nothing was created, so nothing may be rolled back.
+      refute_received {:deleted, _}
+    end
   end
 
   describe "the per-poll HTTP timeout is bounded by what is left of the budget" do

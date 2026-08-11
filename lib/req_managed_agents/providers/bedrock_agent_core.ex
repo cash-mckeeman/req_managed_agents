@@ -317,7 +317,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
             # re-create. Both waits carry the SAME budget, so what the delete-wait
             # spends is gone from the ready-wait — they are one budget, not two.
             with :ok <- wait_until_deleted(list_fun, name, budget) do
-              create_and_wait(create_fun.(harness_spec), get_fun, budget, opts)
+              recreate(create_fun, harness_spec, get_fun, budget, opts)
             end
 
           true ->
@@ -338,6 +338,33 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
         {:error, {:unexpected_list_response, other}}
     end
   end
+
+  # The delete-wait ends the moment the harness disappears, which can be the last
+  # millisecond of the budget — and `create_fun` builds its client at call time,
+  # so the re-create would then run on a receive_timeout of ~1 ms and come back a
+  # raw transport error, handing the caller the shape the named tag exists to
+  # replace. A create with no budget left to make it IS the timeout, so say so
+  # while there is still time to say it.
+  defp recreate(create_fun, harness_spec, get_fun, budget, opts) do
+    case WaitBudget.next(budget) do
+      :poll ->
+        create_and_wait(create_fun.(harness_spec), get_fun, budget, opts)
+
+      :expired ->
+        Logger.warning(
+          "agent_core cannot re-create harness #{harness_spec.name}: the delete-wait " <>
+            "left no budget for it (reported as a ready-timeout)"
+        )
+
+        {:error, {:harness_ready_timeout, spent_budget_ctx(harness_spec.name)}}
+    end
+  end
+
+  # No harness exists yet, so the only identifier is the name and there is no
+  # ready-phase observation to report — the phase named is the one that spent the
+  # budget.
+  defp spent_budget_ctx(name),
+    do: %WaitContext{harness_id: name, phase: :deleted, last_status: nil, polls: nil}
 
   # An adopted harness was created by someone else, so a failed ready-wait here must
   # NOT delete it — rollback covers only what this call created.
