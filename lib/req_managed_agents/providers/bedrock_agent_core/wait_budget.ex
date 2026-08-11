@@ -21,6 +21,11 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget do
   as you can, N times" — attempts, not time — and deriving a zero-length wall-clock
   budget from it would end the wait after a single poll.
 
+  An explicit `:timeout` with no `:ready_poll_ms` also derives its own cadence,
+  scaled to the budget and never wider than the default. A budget shorter than one
+  default interval would otherwise buy exactly one poll — creating a harness,
+  looking at it once and rolling it back, with the arithmetic entirely correct.
+
   ## Why `next/1` stops early
 
   `next/1` returns `:poll` only while a *whole* poll interval still fits inside what
@@ -31,6 +36,14 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget do
 
   @default_poll_ms 5_000
   @default_max_polls 72
+
+  # How many polls an explicit :timeout should buy when the caller did not pick a
+  # cadence, and the floor on the cadence that derives. Without this a :timeout
+  # below one default interval degenerates to a single poll: it would create a
+  # harness, look once, roll it back and return in ~0 ms, having honoured the
+  # budget arithmetic and observed nothing.
+  @target_polls 12
+  @min_derived_poll_ms 50
 
   # The wall-clock the legacy poll opts describe at their defaults. It is the
   # floor for every derived budget, and the default when no :timeout is given.
@@ -68,7 +81,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget do
   """
   @spec new(keyword()) :: {:ok, t()} | {:error, {:invalid_opts, :timeout}}
   def new(opts) do
-    poll_ms = opts[:ready_poll_ms] || @default_poll_ms
+    poll_ms = opts[:ready_poll_ms] || derived_poll_ms(opts[:timeout])
     max_polls = opts[:ready_max_polls] || @default_max_polls
 
     with {:ok, timeout_ms, polls_left} <- budget(opts[:timeout], poll_ms, max_polls) do
@@ -89,6 +102,16 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget do
     do: {:ok, max(poll_ms * (max_polls + 1), @default_timeout_ms), max_polls}
 
   defp budget(_other, _poll_ms, _max_polls), do: {:error, {:invalid_opts, :timeout}}
+
+  # An explicit :timeout with no cadence gets one scaled to it, never wider than
+  # the default. An invalid :timeout keeps the default so that `budget/3` is the
+  # one place the error is reported.
+  defp derived_poll_ms(timeout) when is_integer(timeout) and timeout >= 0 do
+    scaled = div(timeout, @target_polls)
+    min(max(scaled, @min_derived_poll_ms), @default_poll_ms)
+  end
+
+  defp derived_poll_ms(_), do: @default_poll_ms
 
   @doc "Milliseconds left before the deadline; negative once it has passed."
   @spec remaining(t()) :: integer()
