@@ -86,7 +86,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
 
       task =
         Task.async(fn ->
-          provision_quietly(prov_opts("h-enclosed", timeout: 200, ready_poll_ms: 50))
+          provision_quietly(prov_opts("h-enclosed", timeout: 200))
         end)
 
       assert {:error, {:harness_ready_timeout, %WaitContext{elapsed_ms: elapsed}}} =
@@ -112,6 +112,16 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
                )
 
       assert p > 100
+    end
+
+    test "a :timeout shorter than the default cadence still polls more than once" do
+      # A 600 ms budget against the 5 s default interval used to buy exactly one
+      # poll: create a harness, look once, roll it back, return in ~0 ms with the
+      # budget arithmetic perfectly correct and nothing observed.
+      assert {:error, {:harness_ready_timeout, %WaitContext{polls: p}}} =
+               provision_quietly(prov_opts("h-subcadence", timeout: 600))
+
+      assert p > 1
     end
 
     test "a poll that fails on an exhausted budget is still named as a timeout" do
