@@ -85,15 +85,25 @@ defmodule ReqManagedAgents.AgentCore.Client do
   end
 
   @doc """
-  Worst-case number of HTTP attempts one control-plane call makes: the initial
-  request plus its `retry: :transient` retries.
+  Worst-case number of HTTP attempts one control-plane call makes, by method.
 
   `receive_timeout` applies per attempt, so a caller bounding a call by a
   wall-clock budget has to divide by this — otherwise a hung request spends the
   whole budget once per attempt.
+
+  `:get` and `:delete` pass `retry: :transient` and so make the initial request
+  plus `#{@max_retries}` retries. `:post` (`CreateHarness`, credential providers)
+  passes no retry option and inherits Req's `:safe_transient` policy, which does
+  not retry a non-idempotent method — one attempt.
+
+  The count covers attempts only. Req also sleeps between them (exponential
+  backoff, or a `Retry-After` header), and Finch's connect timeout sits outside
+  `receive_timeout` — so a budget divided by this bounds the *receive* phase, not
+  the total wall-clock of a retried call.
   """
-  @spec control_plane_attempts() :: pos_integer()
-  def control_plane_attempts, do: @max_retries + 1
+  @spec control_plane_attempts(:get | :post | :delete) :: pos_integer()
+  def control_plane_attempts(:post), do: 1
+  def control_plane_attempts(method) when method in [:get, :delete], do: @max_retries + 1
 
   @spec get_harness(t(), String.t()) :: {:ok, map()} | {:error, term()}
   def get_harness(c, id),

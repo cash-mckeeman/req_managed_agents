@@ -32,6 +32,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   @impl true
   def mode, do: :request_response
 
+  # The total wall-clock a best-effort rollback may spend. Fixed rather than
+  # derived: see `rollback_client/1`.
+  @rollback_budget_ms 30_000
+
   @doc """
   Provisions the harness for `spec`, waiting for it to reach READY.
 
@@ -123,11 +127,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   # One poll may spend only its share of what is left. Unbounded, a single hung
   # poll blocks for the client's full 600 s receive timeout — three times over,
-  # since a control-plane call retries — so a wait's budget bounded nothing.
-  #
-  # Deliberately NOT applied to create, rollback or teardown. Rollback runs only
-  # once the budget is spent, so bounding its DELETE by what remains would hand it
-  # a 1 ms timeout and turn every timed-out provision into a leaked harness.
+  # since a retried control-plane call makes three attempts — so a wait's budget
+  # bounded nothing.
   #
   # The client is still built inside the closure: hoisting it would read AWS
   # credentials even when every seam is injected.
@@ -138,10 +139,26 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       WaitBudget.attempt_timeout(
         budget,
         client.receive_timeout,
-        Client.control_plane_attempts()
+        Client.control_plane_attempts(:get)
       )
 
     %{client | receive_timeout: bounded}
+  end
+
+  # Rollback runs only once the budget is SPENT, so it cannot draw on what is
+  # left — there is nothing left, and a `remaining`-derived bound would hand it
+  # ~1 ms and orphan the harness on every timeout. Leaving it unbounded is worse:
+  # the client's 600 s across three attempts is ~30 minutes of DELETE on a return
+  # path whose caller deadline has already passed. That reproduces the very
+  # failure this release closes, on the way out of it — the enclosing timeout
+  # kills the process mid-DELETE and the harness leaks anyway.
+  #
+  # So rollback gets a fixed budget of its own, deliberately independent of the
+  # provisioning deadline and small enough to return inside a caller's margin.
+  defp rollback_client(opts) do
+    client = opts[:client] || Client.new()
+    per_attempt = div(@rollback_budget_ms, Client.control_plane_attempts(:delete))
+    %{client | receive_timeout: min(client.receive_timeout, per_attempt)}
   end
 
   defp create_and_wait(create_result, get_fun, budget, opts) do
@@ -200,7 +217,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   # logged and swallowed.
   defp rollback(hid, opts) do
     delete_fun =
-      opts[:delete_fun] || fn id -> Client.delete_harness(opts[:client] || Client.new(), id) end
+      opts[:delete_fun] || fn id -> Client.delete_harness(rollback_client(opts), id) end
 
     case delete_fun.(hid) do
       {:ok, _} ->
