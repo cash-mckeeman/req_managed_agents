@@ -45,8 +45,10 @@ polls}` instead of a bare atom or name. Two new tags join them:
   by every request they make. An explicit `:timeout` with no `:ready_poll_ms`
   also derives its poll cadence, so a budget shorter than the default interval
   no longer buys a single poll.
-- `AgentCore.Client.control_plane_attempts/0` — the worst-case attempt count of
-  a control-plane call, for callers bounding one by a wall-clock budget.
+- `AgentCore.Client.control_plane_attempts/1` — the worst-case attempt count of
+  a control-plane call of the given HTTP method, for callers bounding one by a
+  wall-clock budget. It is method-specific: a retried `:get` / `:delete` makes
+  three attempts, a `:post` one.
 
 ### Fixed
 - A harness this library created and could not bring to READY is now
@@ -76,7 +78,10 @@ polls}` instead of a bare atom or name. Two new tags join them:
   of that budget, where it previously used the client's 600 s default with two
   retries — one hung poll could block ~30 minutes regardless of the poll count.
   `:ready_poll_ms` / `:ready_max_polls` remain accepted and keep their count
-  semantics, so no existing caller's wait is shortened.
+  semantics: the deadline derived from them covers every poll the count allows,
+  so the count is what binds — unless the polls' own latency spends the derived
+  deadline first, which at the defaults leaves a wait a few seconds shorter than
+  the count alone described.
 - `CreateHarness` draws on the same budget as the waits do, so no request a
   provision makes is unbounded. On the 409 recover path that means a re-create
   the delete-wait left no budget for returns
