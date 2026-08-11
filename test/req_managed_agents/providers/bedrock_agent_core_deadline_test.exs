@@ -32,16 +32,27 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
   # `extra` wins: a keyword list resolves left-to-right, so appending the overrides
   # would leave them shadowed by the defaults and silently test the wrong path.
   #
-  # delete_fun is defaulted for the reason recorded in bedrock_agent_core_test.exs:
-  # every provision here ends in a failed ready-wait, which fires rollback, and an
-  # un-injected rollback reaches a real signed AWS endpoint.
+  # delete_fun is defaulted because every provision here ends in a failed
+  # ready-wait, which fires rollback, and an un-injected rollback reaches a real
+  # signed AWS endpoint. It REPORTS rather than absorbing: a stub that quietly
+  # returns {:ok, %{}} suppresses exactly the rollback that bedrock_agent_core_test
+  # asserts, so every timing test here would keep passing while the harness leaked.
+  # Tests whose provision creates a harness assert {:deleted, hid}.
+  #
+  # Call this in the test process, never inside a spawned task — self() is captured
+  # here, and a task-side call would send the report to the task.
   defp prov_opts(hid, extra) do
+    test_pid = self()
+
     Keyword.merge(
       [
         execution_role_arn: "role",
         create_fun: created(hid),
         get_fun: always_creating(),
-        delete_fun: fn _hid -> {:ok, %{}} end
+        delete_fun: fn id ->
+          send(test_pid, {:deleted, id})
+          {:ok, %{}}
+        end
       ],
       extra
     )
@@ -83,16 +94,15 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       # A failure surfaces as a Task.await timeout, which is exactly the shape the
       # canary failed in.
       caller_budget = 600
+      opts = prov_opts("h-enclosed", timeout: 200)
 
-      task =
-        Task.async(fn ->
-          provision_quietly(prov_opts("h-enclosed", timeout: 200))
-        end)
+      task = Task.async(fn -> provision_quietly(opts) end)
 
       assert {:error, {:harness_ready_timeout, %WaitContext{elapsed_ms: elapsed}}} =
                Task.await(task, caller_budget)
 
       assert elapsed < caller_budget
+      assert_receive {:deleted, "h-enclosed"}
     end
 
     test "the named timeout error carries the status and poll count it actually observed" do
@@ -100,6 +110,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
                provision_quietly(prov_opts("h-named", timeout: 100, ready_poll_ms: 0))
 
       assert p > 0
+      assert_receive {:deleted, "h-named"}
     end
 
     test "an explicit :timeout drops the legacy poll count rather than being capped by it" do
@@ -208,6 +219,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       # And the whole provision stayed inside one budget: two would be the 150 ms
       # delete-wait plus a fresh 300 ms ready-wait.
       assert System.monotonic_time(:millisecond) - started < 400
+
+      assert_receive {:deleted, "h-shared"}
     end
   end
 
@@ -324,6 +337,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       # budget would end the wait after a single poll.
       assert {:error, {:harness_ready_timeout, %WaitContext{polls: 4}}} =
                provision_quietly(prov_opts("h-legacy", ready_poll_ms: 0, ready_max_polls: 3))
+
+      assert_receive {:deleted, "h-legacy"}
     end
   end
 end
