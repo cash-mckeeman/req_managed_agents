@@ -41,9 +41,10 @@ polls}` instead of a bare atom or name. Two new tags join them:
 - Telemetry and logging on every provisioning poll and terminal outcome:
   `[:req_managed_agents, :agent_core, :provision, :poll | :stop | :exception]`.
 - `BedrockAgentCore.provision/2` accepts `:timeout` (ms) — the budget for the
-  whole call, converted once at entry into a deadline that every wait shares.
-  A `:timeout` that is not a non-negative integer returns
-  `{:error, {:invalid_opts, :timeout}}`.
+  whole call, converted once at entry into a deadline shared by every wait and
+  by every request they make. An explicit `:timeout` with no `:ready_poll_ms`
+  also derives its poll cadence, so a budget shorter than the default interval
+  no longer buys a single poll.
 - `AgentCore.Client.control_plane_attempts/0` — the worst-case attempt count of
   a control-plane call, for callers bounding one by a wall-clock budget.
 
