@@ -114,6 +114,30 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       assert p > 100
     end
 
+    test "a poll that fails on an exhausted budget is still named as a timeout" do
+      # The last poll of a wait runs on whatever is left, so its receive timeout
+      # can fall below real GetHarness latency and come back as a transport error.
+      # Returned raw, that hands the caller a %Req.TransportError{} where the
+      # deadline exists precisely to make the NAMED tag reachable.
+      failing_get = fn _hid -> {:error, %Req.TransportError{reason: :timeout}} end
+
+      assert {:error, {:harness_ready_timeout, %WaitContext{harness_id: "h-transport"}}} =
+               provision_quietly(
+                 prov_opts("h-transport", get_fun: failing_get, timeout: 0, ready_poll_ms: 0)
+               )
+    end
+
+    test "a poll failure with budget still left is surfaced verbatim, not renamed" do
+      # The rename applies only at exhaustion: a transport error with budget left
+      # is a real provider error and must not be disguised as a timeout.
+      failing_get = fn _hid -> {:error, %Req.TransportError{reason: :closed}} end
+
+      assert {:error, %Req.TransportError{reason: :closed}} =
+               provision_quietly(
+                 prov_opts("h-transport-live", get_fun: failing_get, timeout: 60_000)
+               )
+    end
+
     test "a :timeout that is not a non-negative integer is rejected, not silently ignored" do
       assert {:error, {:invalid_opts, :timeout}} =
                P.provision(@spec_bedrock, prov_opts("h-invalid", timeout: -1))

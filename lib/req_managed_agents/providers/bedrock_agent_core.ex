@@ -442,6 +442,27 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
         {{:error, {:unexpected_get_harness_response, other}}, poll_n}
 
       {:error, reason} ->
+        on_poll_error(reason, hid, budget, started, poll_n)
+    end
+  end
+
+  # A poll that fails on an exhausted budget IS the timeout, and must be named as
+  # one. The last poll of a wait runs on whatever is left, so its receive timeout
+  # can fall below real GetHarness latency and fail as a transport error — which
+  # returned raw would hand the caller a `%Req.TransportError{}` in place of the
+  # named tag the deadline exists to make reachable. The reason still reaches the
+  # log, where the tag alone would not explain the shape of the failure.
+  defp on_poll_error(reason, hid, budget, started, poll_n) do
+    case WaitBudget.next(budget) do
+      :expired ->
+        Logger.warning(
+          "agent_core ready-poll for #{hid} failed with no budget left to retry " <>
+            "(reported as a ready-timeout): #{inspect(reason)}"
+        )
+
+        {{:error, {:harness_ready_timeout, ctx(hid, :ready, nil, started, poll_n)}}, poll_n}
+
+      :poll ->
         {{:error, reason}, poll_n}
     end
   end
