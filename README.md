@@ -268,6 +268,13 @@ AgentCore harness is being provisioned; `phase` is `:ready` or `:deleted`, and `
 `:ok` or `{:error, tag}`. The same fields are also written to the log, so a provisioning
 failure is diagnosable without attaching a handler.
 
+Provisioning a Bedrock AgentCore harness takes `:timeout` (ms, default 360 000) as the budget
+for the **whole** call. It becomes a deadline at entry, shared by the wait for a same-name
+harness to finish deleting and the wait for the new one to reach READY, and it bounds each
+poll's HTTP timeout too — so a provision that cannot finish returns a named
+`{:error, {tag, %WaitContext{}}}` inside the budget instead of overrunning whatever timeout
+it is running under. Set it below your `Session.run/2` timeout.
+
 All providers run through `Session`, so the `:session` events fire regardless of loop host.
 `:stream` `:event` also fires for **both** providers as events arrive mid-turn — on Claude,
 `type` is the SSE event type and `session_id`/`usage` are set; on Bedrock AgentCore, `type` is
