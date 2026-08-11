@@ -54,6 +54,14 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudgetTest do
       assert {:error, {:invalid_opts, :timeout}} = WaitBudget.new(timeout: "300")
       assert {:error, {:invalid_opts, :timeout}} = WaitBudget.new(timeout: :infinity)
     end
+
+    test "the legacy opts are validated the same way" do
+      # A negative cadence otherwise loops forever and then crashes inside
+      # Process.sleep, a long way from the opt that caused it.
+      assert {:error, {:invalid_opts, :ready_poll_ms}} = WaitBudget.new(ready_poll_ms: -1)
+      assert {:error, {:invalid_opts, :ready_poll_ms}} = WaitBudget.new(ready_poll_ms: :fast)
+      assert {:error, {:invalid_opts, :ready_max_polls}} = WaitBudget.new(ready_max_polls: -1)
+    end
   end
 
   describe "next/1" do

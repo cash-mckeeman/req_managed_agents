@@ -71,20 +71,25 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget do
   @typedoc "Whether a wait may poll once more, or has run out of budget."
   @type verdict :: :poll | :expired
 
+  @typedoc "The opts this budget reads, and the keys `new/1` can reject."
+  @type opt_key :: :timeout | :ready_poll_ms | :ready_max_polls
+
   @doc """
   Builds the budget for one `provision/2` call from its opts, starting the clock.
 
-  Reads `:timeout` (ms) and the legacy `:ready_poll_ms` / `:ready_max_polls`.
-  Returns `{:error, {:invalid_opts, :timeout}}` for a `:timeout` that is not a
-  non-negative integer — including `:infinity`, which this budget deliberately
-  cannot express.
+  Reads `:timeout` (ms) and the legacy `:ready_poll_ms` / `:ready_max_polls`. Each
+  must be a non-negative integer; anything else returns
+  `{:error, {:invalid_opts, key}}`. That includes `timeout: :infinity`, which this
+  budget deliberately cannot express — a wait with no deadline is the defect it
+  exists to prevent.
   """
-  @spec new(keyword()) :: {:ok, t()} | {:error, {:invalid_opts, :timeout}}
+  @spec new(keyword()) :: {:ok, t()} | {:error, {:invalid_opts, opt_key()}}
   def new(opts) do
-    poll_ms = opts[:ready_poll_ms] || derived_poll_ms(opts[:timeout])
-    max_polls = opts[:ready_max_polls] || @default_max_polls
-
-    with {:ok, timeout_ms, polls_left} <- budget(opts[:timeout], poll_ms, max_polls) do
+    with {:ok, poll_ms} <-
+           non_neg_integer(opts[:ready_poll_ms], :ready_poll_ms, derived_poll_ms(opts[:timeout])),
+         {:ok, max_polls} <-
+           non_neg_integer(opts[:ready_max_polls], :ready_max_polls, @default_max_polls),
+         {:ok, timeout_ms, polls_left} <- budget(opts[:timeout], poll_ms, max_polls) do
       {:ok,
        %__MODULE__{
          deadline_at: System.monotonic_time(:millisecond) + timeout_ms,
@@ -102,6 +107,15 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget do
     do: {:ok, max(poll_ms * (max_polls + 1), @default_timeout_ms), max_polls}
 
   defp budget(_other, _poll_ms, _max_polls), do: {:error, {:invalid_opts, :timeout}}
+
+  # A negative cadence loops forever and then crashes inside Process.sleep, far
+  # from the opt that caused it; a negative count silently means "no polls".
+  defp non_neg_integer(nil, _key, default), do: {:ok, default}
+
+  defp non_neg_integer(value, _key, _default) when is_integer(value) and value >= 0,
+    do: {:ok, value}
+
+  defp non_neg_integer(_value, key, _default), do: {:error, {:invalid_opts, key}}
 
   # An explicit :timeout with no cadence gets one scaled to it, never wider than
   # the default. An invalid :timeout keeps the default so that `budget/3` is the
