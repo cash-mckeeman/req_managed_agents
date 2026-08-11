@@ -419,8 +419,13 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       # Three listings means the delete-wait ran: recovery only makes one.
       assert Agent.get(lists, & &1) >= 3
 
-      assert_received {:request, :get, "/harnesses", receive_timeout}
-      assert receive_timeout <= 10_000
+      # Recovery's own listing runs before the delete-wait exists, and asserting
+      # its bound would say nothing about the wait this test is named for.
+      assert [_recovery | delete_wait] =
+               for({:request, :get, "/harnesses", rt} <- collect_requests(), do: rt)
+
+      assert length(delete_wait) >= 2
+      assert Enum.all?(delete_wait, &(&1 <= 10_000))
 
       # Every create 409'd, so this call created nothing to roll back.
       refute_received {:deleted, _}
