@@ -14,6 +14,20 @@ mix format            # formatting (CI enforces --check-formatted)
 
 All four are enforced in CI. Run them before opening a PR.
 
+## Public-repo hygiene
+
+This package is public and published to Hex, so treat every tracked file as
+something a consumer may read.
+
+Planning and QA docs under `docs/superpowers/` and `docs/qa/` are this repo's
+local working log — they are gitignored, and they are the only place an internal
+tracker id may appear. No other surface may reference one: not source, tests, CI
+config, commit messages, or PR titles. The single permitted linkage is a trailing
+`Closes …` line in a **PR body**.
+
+Keep AWS account numbers, real ARNs, and internal infrastructure names out of
+source and tests — use placeholders (`role`, `arn:new`, `us-east-1`).
+
 ## Struct vocabulary (binding convention)
 
 Domain values crossing a module boundary are structs, not bare maps.
