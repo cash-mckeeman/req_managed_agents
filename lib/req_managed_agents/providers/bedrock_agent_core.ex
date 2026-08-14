@@ -250,7 +250,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   # nothing else will ever reclaim — the ready-wait's own failure is the last moment
   # its id is known. Rollback is best-effort and never replaces the original error.
   defp ready_or_rollback(get_fun, arn, hid, budget, opts) do
-    case wait_ready(get_fun, hid, budget, opts) do
+    case wait_ready(get_fun, endpoint_fun(opts, budget), endpoint_name(opts), hid, budget) do
       :ok ->
         {:ok, %{harness_arn: arn, harness_id: hid}}
 
@@ -365,7 +365,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       {:ok, %{"harnesses" => harnesses}} ->
         cond do
           harness = recoverable_harness(harnesses, name) ->
-            adopt(harness, get_fun, budget, opts)
+            adopt(harness, get_fun, endpoint_fun(opts, budget), endpoint_name(opts), budget)
 
           deleting?(harnesses, name) ->
             # A prior same-name harness is still tearing down; wait it out, then
@@ -422,13 +422,15 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     do: %WaitContext{harness_id: name, phase: :deleted, last_status: nil, polls: nil}
 
   # An adopted harness was created by someone else, so a failed ready-wait here must
-  # NOT delete it — rollback covers only what this call created.
-  defp adopt(%{"arn" => arn, "harnessId" => hid}, get_fun, budget, opts) do
-    with :ok <- wait_ready(get_fun, hid, budget, opts),
+  # NOT delete it — rollback covers only what this call created. That is enforced by
+  # construction rather than by care: adopt takes the two endpoint values it needs
+  # and never the caller's `opts`, so there is no `:delete_fun` in scope to reach.
+  defp adopt(%{"arn" => arn, "harnessId" => hid}, get_fun, endpoint_fun, endpoint, budget) do
+    with :ok <- wait_ready(get_fun, endpoint_fun, endpoint, hid, budget),
          do: {:ok, %{harness_arn: arn, harness_id: hid}}
   end
 
-  defp adopt(harness, _get_fun, _budget, _opts) do
+  defp adopt(harness, _get_fun, _endpoint_fun, _endpoint, _budget) do
     Logger.warning("agent_core listing entry lacks an arn/harnessId: #{inspect(harness)}")
     {:error, {:unexpected_list_response, harness}}
   end
@@ -514,9 +516,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   # whose next invoke fails. The endpoint wait is gated BEHIND harness readiness
   # so the common path costs one extra call rather than one per harness poll, and
   # both waits draw on the same budget.
-  defp wait_ready(get_fun, hid, budget, opts) do
+  defp wait_ready(get_fun, endpoint_fun, endpoint, hid, budget) do
     with :ok <- wait_until_ready(get_fun, hid, budget) do
-      wait_until_endpoint_ready(endpoint_fun(opts, budget), hid, endpoint_name(opts), budget)
+      wait_until_endpoint_ready(endpoint_fun, hid, endpoint, budget)
     end
   end
 
