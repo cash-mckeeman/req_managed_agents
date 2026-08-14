@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.AgentCore.Client do
   @moduledoc """
   SigV4-signed REST client for AWS AgentCore (`bedrock-agentcore`). Covers the
-  control-plane harness lifecycle (`create_harness`/`get_harness`/`delete_harness`),
+  control-plane harness lifecycle (`create_harness`/`get_harness`/`get_harness_endpoint`/`delete_harness`),
   the AgentCore Identity token-vault (`create_api_key_credential_provider`), and the
   data-plane `invoke_harness` (returns a decoded `vnd.amazon.eventstream`).
 
@@ -118,6 +118,21 @@ defmodule ReqManagedAgents.AgentCore.Client do
   @spec list_harnesses(t()) :: {:ok, map()} | {:error, term()}
   def list_harnesses(c),
     do: span(c, :get, "/harnesses", :list_harnesses, fn -> get_json(c, "/harnesses") end)
+
+  @doc """
+  `GetHarnessEndpoint` (control plane). Returns the decoded body
+  `%{"endpoint" => %{"endpointName", "status", "arn", "liveVersion", ...}}`.
+
+  A harness and each of its endpoints carry **separate** statuses and reach READY
+  at different times, so a READY harness is not yet invokable. The data plane's
+  `qualifier` defaults to the `DEFAULT` endpoint, which makes that endpoint the
+  one a provision has to wait on.
+  """
+  @spec get_harness_endpoint(t(), String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def get_harness_endpoint(c, harness_id, endpoint_name) do
+    path = "/harnesses/#{harness_id}/endpoints/#{endpoint_name}"
+    span(c, :get, path, :get_harness_endpoint, fn -> get_json(c, path) end)
+  end
 
   @spec delete_harness(t(), String.t()) :: {:ok, map()} | {:error, term()}
   def delete_harness(c, id),
