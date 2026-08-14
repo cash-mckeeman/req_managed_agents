@@ -1,2 +1,4 @@
+# Content patterns enforced in every repo, public or private.
+# Public-bound repos additionally get forbidden-content-public.txt.
 MIM-[0-9]+
 BIAI-[0-9]+
