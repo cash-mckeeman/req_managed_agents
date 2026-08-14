@@ -1144,6 +1144,11 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       assert log =~ "phase=endpoint"
       assert log =~ "last_status=UPDATE_FAILED"
       assert log =~ "endpoint_failed"
+
+      # This test injects a delete seam, so a rollback that stopped firing on the
+      # endpoint-failure path would leave it green and the harness billing. The
+      # rollback logs at :info and this block captures :info, so the pin is free.
+      assert log =~ "rolled back harness h_ep_log"
     end
   end
 
