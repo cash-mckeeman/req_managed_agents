@@ -385,6 +385,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       assert_received {:request, :get, "/harnesses/h-bounded/endpoints/DEFAULT", endpoint_timeout}
       assert endpoint_timeout <= 10_000
 
+      # The band, not just the ceiling: a regression that handed the endpoint poll
+      # the dregs of a budget the harness wait had already spent would satisfy the
+      # upper bound and reinstate the raw-transport-error failure the deadline
+      # exists to replace.
+      assert endpoint_timeout > 5_000
+
       # The harness reached READY, so nothing may be rolled back.
       refute_received {:deleted, _}
     end

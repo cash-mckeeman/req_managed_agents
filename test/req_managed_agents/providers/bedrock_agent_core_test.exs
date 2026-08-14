@@ -1065,8 +1065,11 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       # create into a provisioning error.
       {:ok, polls} = Agent.start_link(fn -> 0 end)
 
+      # `{&1, &1 + 1}` returns the count BEFORE the bump, so poll 0 is the 404. The
+      # `{&1 + 1, &1 + 1}` this used never returned 0, so the 404 branch was dead
+      # and the test proved only that a READY endpoint provisions.
       endpoint_fun = fn _hid, _name ->
-        case Agent.get_and_update(polls, &{&1 + 1, &1 + 1}) do
+        case Agent.get_and_update(polls, &{&1, &1 + 1}) do
           0 -> {:error, {:http_error, 404, %{"message" => "not found"}}}
           _ -> {:ok, %{"endpoint" => %{"status" => "READY"}}}
         end
@@ -1082,6 +1085,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
                  ready_poll_ms: 0
                )
 
+      # Without this, "the endpoint was never polled at all" reads exactly like
+      # "the 404 was tolerated" — the 404 has to have been served AND followed.
+      assert Agent.get(polls, & &1) == 2
       refute_received {:deleted, _}
     end
 
