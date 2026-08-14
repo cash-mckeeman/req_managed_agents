@@ -256,6 +256,18 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   defp created(hid),
     do: fn _spec -> {:ok, %{"harness" => %{"arn" => "a", "harnessId" => hid}}} end
 
+  # The create counterpart of `reporting_delete/0`: an opt rejected at entry must
+  # cost no CreateHarness at all, and only a reporting stub can tell "rejected
+  # before the create" from "created, then rejected".
+  defp reporting_create(hid) do
+    test_pid = self()
+
+    fn _spec ->
+      send(test_pid, {:created, hid})
+      {:ok, %{"harness" => %{"arn" => "a", "harnessId" => hid}}}
+    end
+  end
+
   # Reports rather than absorbing: a stub that quietly answers {:ok, %{}} would
   # let a test assert a failure while the rollback it depends on never ran.
   defp reporting_delete do
@@ -797,6 +809,100 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   # different times — measured live, 11 s against 2 m 31 s. A handle returned on
   # the harness status alone therefore names an endpoint that cannot yet be
   # invoked, which is what these pin.
+
+  # A name the service can never resolve is indistinguishable from an endpoint
+  # that has not appeared yet: GetHarnessEndpoint 404s, the 404 is treated as
+  # "still creating", and the wait burns the whole budget. That wait sits inside
+  # the rollback, so the provision then DELETES a harness that is healthy and
+  # READY. Rejecting the name at entry is what makes the typo free.
+  describe ":endpoint_name validation" do
+    test "an endpoint name outside the service pattern is rejected before anything is created" do
+      assert {:error, {:invalid_opts, :endpoint_name}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 endpoint_name: "Defualt endpoint!",
+                 create_fun: reporting_create("h_bad_ep"),
+                 get_fun: harness_ready(),
+                 endpoint_fun: ready_endpoint(),
+                 delete_fun: reporting_delete(),
+                 ready_poll_ms: 0
+               )
+
+      refute_received {:created, _}
+      refute_received {:deleted, _}
+    end
+
+    test "the pattern is the endpoint's own: 48 characters, not the harness name's 40" do
+      long = "e" <> String.duplicate("a", 47)
+      too_long = long <> "a"
+
+      assert {:ok, _} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 endpoint_name: long,
+                 create_fun: created("h_48"),
+                 get_fun: harness_ready(),
+                 endpoint_fun: ready_endpoint(),
+                 delete_fun: reporting_delete(),
+                 ready_poll_ms: 0
+               )
+
+      assert {:error, {:invalid_opts, :endpoint_name}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 endpoint_name: too_long,
+                 create_fun: reporting_create("h_49"),
+                 get_fun: harness_ready(),
+                 endpoint_fun: ready_endpoint(),
+                 delete_fun: reporting_delete(),
+                 ready_poll_ms: 0
+               )
+
+      refute_received {:created, _}
+    end
+
+    test "a name that does not start with a letter, and a non-binary, are both rejected" do
+      for bad <- ["1prod", "_prod", "", :DEFAULT] do
+        assert {:error, {:invalid_opts, :endpoint_name}} =
+                 P.provision(@spec_bedrock,
+                   execution_role_arn: "r",
+                   endpoint_name: bad,
+                   create_fun: reporting_create("h_bad"),
+                   get_fun: harness_ready(),
+                   endpoint_fun: ready_endpoint(),
+                   delete_fun: reporting_delete(),
+                   ready_poll_ms: 0
+                 )
+      end
+
+      refute_received {:created, _}
+    end
+
+    test "an endpoint wait names the endpoint it was waiting on, in the context and the log" do
+      # `last_status=none` on a 404-only wait says nothing about WHICH endpoint was
+      # missing, and with the name caller-configurable that is the first thing to
+      # check.
+      log =
+        capture_log([level: :info], fn ->
+          assert {:error, {:endpoint_ready_timeout, %WaitContext{endpoint_name: "canary"}}} =
+                   P.provision(@spec_bedrock,
+                     execution_role_arn: "r",
+                     endpoint_name: "canary",
+                     create_fun: created("h_ep_named"),
+                     get_fun: harness_ready(),
+                     endpoint_fun: fn _hid, _name ->
+                       {:error, {:http_error, 404, %{"message" => "not found"}}}
+                     end,
+                     delete_fun: reporting_delete(),
+                     ready_poll_ms: 0,
+                     ready_max_polls: 2
+                   )
+        end)
+
+      assert log =~ "endpoint=canary"
+      assert_receive {:deleted, "h_ep_named"}
+    end
+  end
 
   describe "endpoint readiness" do
     test "a READY harness whose endpoint is still creating is not a ready provision" do
