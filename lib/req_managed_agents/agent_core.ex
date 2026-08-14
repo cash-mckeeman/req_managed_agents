@@ -14,8 +14,9 @@ defmodule ReqManagedAgents.AgentCore do
   a surfaced `{:harness_stream_error, _, _}`, `:early_termination`, or a client error.
 
   Required opts: `:harness_arn`, `:runtime_session_id`, `:handler`. Optional: `:model`,
-  `:prompt`, `:context`, `:timeout`, `:max_turns`, `:telemetry_metadata` (and `:client` /
-  `:invoke_fun` for tests).
+  `:prompt`, `:context`, `:timeout`, `:max_turns`, `:endpoint_name` (the harness endpoint to
+  invoke, sent as `InvokeHarness`'s `qualifier`; defaults to the service's own `DEFAULT`),
+  `:telemetry_metadata` (and `:client` / `:invoke_fun` for tests).
   """
   @spec invoke_to_completion(keyword()) :: {:ok, map()} | {:error, term()}
   def invoke_to_completion(opts) do

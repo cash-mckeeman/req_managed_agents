@@ -42,6 +42,24 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
         1
       )
 
+  defp qualifier_reporting_conn(opts) do
+    test_pid = self()
+
+    invoke_fun = fn inv ->
+      send(test_pid, {:invoked, Map.get(inv, :qualifier)})
+      {:ok, [%{"messageStop" => %{"stopReason" => "end_turn"}}]}
+    end
+
+    base = [
+      harness_arn: "arn",
+      runtime_session_id: String.duplicate("s", 33),
+      invoke_fun: invoke_fun
+    ]
+
+    {:ok, conn} = P.open(base ++ opts, self())
+    conn
+  end
+
   # ── normalize ─────────────────────────────────────────────────────────────────
   test "normalize/1 surfaces usage from the Converse metadata frame" do
     events = [
@@ -179,6 +197,27 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
   test "poll_turn/2 returns a turn's events" do
     events = [%{"messageStop" => %{"stopReason" => "end_turn"}}]
     assert {:ok, ^events, _conn} = P.poll_turn(conn(fn _inv -> {:ok, events} end), [])
+  end
+
+  describe ":endpoint_name is the endpoint invokes actually reach" do
+    # Gating a provision on an endpoint the library then never calls is worse than
+    # not gating at all: `endpoint_name: "PROD"` would wait for PROD, invoke
+    # DEFAULT, and report success — the exact "invoke against a still-creating
+    # endpoint" failure the endpoint wait exists to close.
+    test "open/2's :endpoint_name rides every invoke as InvokeHarness's qualifier" do
+      assert {:ok, _events, _conn} =
+               P.poll_turn(qualifier_reporting_conn(endpoint_name: "canary"), [])
+
+      assert_received {:invoked, "canary"}
+    end
+
+    test "no :endpoint_name sends no qualifier, so the service picks its own default" do
+      # Sending "DEFAULT" explicitly would be a behaviour change on every existing
+      # caller; omitting the query param is what the service already resolves to.
+      assert {:ok, _events, _conn} = P.poll_turn(qualifier_reporting_conn([]), [])
+
+      assert_received {:invoked, nil}
+    end
   end
 
   test "poll_turn/2 surfaces a __stream_error__ frame as a harness_stream_error" do

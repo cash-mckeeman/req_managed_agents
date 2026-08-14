@@ -273,6 +273,13 @@ harness exists. A mistyped name would otherwise be indistinguishable from an end
 not appeared yet — both are a `404` — so it would spend the whole budget and then roll back a
 harness that is healthy and READY.
 
+`Session.run/2` takes the same `:endpoint_name` and sends it as `InvokeHarness`'s `qualifier`,
+so the endpoint a provision gates on and the endpoint its turns reach are one option rather than
+two. It belongs on the connection rather than on the provision handle: the endpoint is a
+call-time routing choice, excluded from the content digest, and one harness has many endpoints —
+a handle replayed from the provisioner store would otherwise pin whichever one the first
+provision happened to ask for.
+
 The `:timeout` also derives the poll cadence when `:ready_poll_ms` is not given, so a short
 budget still polls repeatedly rather than looking once. Note that the bound covers each
 request's *receive* phase; a retried call also spends Req's backoff sleeps and Finch's connect
