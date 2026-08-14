@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Best-effort local gate. NOTE: jj git push does NOT run this hook.
-repo="$(git rev-parse --show-toplevel)"
+#
+# Resolve the *workspace* root, not the colocated parent. `git rev-parse
+# --show-toplevel` walks up to the enclosing .git, so from a jj workspace under
+# .claude/worktrees/<name>/ it returns the parent checkout — the hook would then
+# scan a tree that is not the one being pushed. Measured: from a control-plane
+# repo's `.claude/worktrees/<name>` it returns the control-plane repo's root.
+repo="$(jj workspace root 2>/dev/null || git rev-parse --show-toplevel)"
 if ! bash "$repo/.hygiene/preflight-scan.sh" --dir "$repo"; then
   echo "pre-push: hygiene violations found (above). Push aborted." >&2
   exit 1
