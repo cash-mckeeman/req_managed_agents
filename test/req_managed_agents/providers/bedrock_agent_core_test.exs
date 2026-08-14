@@ -1480,6 +1480,34 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     assert P.harness_name(spec, "rma_live") =~ ~r/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/
   end
 
+  test "the live legs compose distinct, untruncated names with no prefix of their own" do
+    # Each live spec name already begins with `rma-live-`, so a `name_prefix:
+    # "rma_live"` on top ran the composed name past 40 characters and into the
+    # truncation-hash fallback — which replaces the readable leg name with a
+    # hash, on exactly the names a human reads to find a stray harness. Without
+    # it every leg keeps its own segment AND the shared `rma_live` prefix a
+    # sweep matches on.
+    model = %{"bedrockModelConfig" => %{"modelId" => "m"}}
+
+    names =
+      for leg <- ~w(harness command mount reattach) do
+        spec = %{
+          name: "rma-live-bedrock-#{leg}",
+          system_prompt: "p",
+          tools: [],
+          terminal_tool: nil,
+          model_config: model
+        }
+
+        name = P.harness_name(spec, nil)
+        assert name =~ ~r/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/
+        assert String.starts_with?(name, "rma_live_bedrock_#{leg}_")
+        name
+      end
+
+    assert length(Enum.uniq(names)) == 4
+  end
+
   test "a nil prefix still produces a valid name" do
     spec = %{
       name: "orchestrated-agent",

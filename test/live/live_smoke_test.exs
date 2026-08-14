@@ -266,11 +266,14 @@ defmodule ReqManagedAgents.LiveSmokeTest do
       }
     }
 
+    # No name_prefix: the harness base already carries this spec's own `rma-live-`
+    # segment, so prefixing "rma_live" on top pushed the composed name past 40
+    # characters and into the truncation-hash fallback — which replaced the
+    # readable leg name with a hash. Dropped, every leg composes to
+    # `rma_live_bedrock_<leg>_<digest>`: distinct, readable, and still matched by
+    # a prefix sweep for stray `rma_live*` harnesses.
     {:ok, handle} =
-      ReqManagedAgents.provision(BedrockAgentCore, spec,
-        execution_role_arn: role,
-        name_prefix: "rma_live"
-      )
+      ReqManagedAgents.provision(BedrockAgentCore, spec, execution_role_arn: role)
 
     teardown_on_exit(BedrockAgentCore, handle)
 
@@ -400,10 +403,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     }
 
     {:ok, handle} =
-      ReqManagedAgents.provision(BedrockAgentCore, spec,
-        execution_role_arn: role,
-        name_prefix: "rma_live"
-      )
+      ReqManagedAgents.provision(BedrockAgentCore, spec, execution_role_arn: role)
 
     teardown_on_exit(BedrockAgentCore, handle)
 
@@ -468,7 +468,6 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     {:ok, handle} =
       ReqManagedAgents.provision(BedrockAgentCore, spec,
         execution_role_arn: role,
-        name_prefix: "rma_live",
         environment: environment
       )
 
@@ -622,10 +621,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     }
 
     {:ok, handle} =
-      ReqManagedAgents.provision(BedrockAgentCore, spec,
-        execution_role_arn: role,
-        name_prefix: "rma_live"
-      )
+      ReqManagedAgents.provision(BedrockAgentCore, spec, execution_role_arn: role)
 
     teardown_on_exit(BedrockAgentCore, handle)
 
