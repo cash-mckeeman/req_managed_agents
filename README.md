@@ -260,9 +260,11 @@ error is ever returned.
 **A harness reaching READY is not the end of provisioning.** The harness and each of its
 endpoints carry separate statuses: measured live, a harness was READY in 11 s while its
 `DEFAULT` endpoint took 2 m 31 s, and an invoke against a still-creating endpoint fails. So
-`provision/3` waits for the endpoint too, polling it only once the harness is READY (the common
-path costs one extra call, not one per poll). The endpoint is `:endpoint_name`, defaulting to
-`DEFAULT` — the endpoint `InvokeHarness` uses when no `qualifier` is given. Its failures carry
+`provision/3` waits for the endpoint too, polling it only once the harness is READY — so a
+harness that never gets there costs zero endpoint calls, and one that does costs a poll per
+remaining endpoint interval (at the measured 2 m 31 s and a 5 s cadence, roughly thirty). The
+endpoint is `:endpoint_name`, defaulting to `DEFAULT` — the endpoint `InvokeHarness` uses when
+no `qualifier` is given. Its failures carry
 their own tags (`:endpoint_ready_timeout`, `:endpoint_failed`, `:endpoint_terminating`,
 `:endpoint_unknown_status`) so an endpoint problem never reads as a harness one, and each names
 the endpoint it was waiting on. Size `:timeout` for both waits.
