@@ -44,6 +44,14 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   # reaches — and therefore the one readiness has to be gated on.
   @default_endpoint_name "DEFAULT"
 
+  # `HarnessEndpointName` in the service model — 48 characters, NOT the 40 that
+  # `HarnessName` carries. A name outside it can never resolve, and a
+  # GetHarnessEndpoint 404 is deliberately read as "not there yet" (the DEFAULT
+  # endpoint is provisioned asynchronously), so a typo is indistinguishable from a
+  # pending endpoint: the wait polls 404s for the whole budget and, because it sits
+  # inside the rollback, then deletes a harness that is healthy and READY.
+  @endpoint_name_re ~r/\A[a-zA-Z][a-zA-Z0-9_]{0,47}\z/
+
   # The harness and the endpoint repeat one status vocabulary (identical enums in
   # the service model), so a single classification drives both waits and only the
   # tag a failure carries differs. An endpoint that never became READY reported as
@@ -75,6 +83,11 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   exception is the best-effort rollback of a harness this call created, which runs
   after the budget is spent and so carries a small fixed budget of its own.
 
+  `opts[:endpoint_name]` is validated against the service's own
+  `[a-zA-Z][a-zA-Z0-9_]{0,47}` before anything is created — an unresolvable name
+  returns `{:error, {:invalid_opts, :endpoint_name}}` rather than costing a
+  harness the wait would then roll back.
+
   The legacy `:ready_poll_ms` / `:ready_max_polls` pair is still accepted; see
   `ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget` for how the two shapes
   relate.
@@ -82,11 +95,22 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   @impl true
   def provision(spec, opts) do
     with {:ok, spec} <- Spec.new(spec),
+         {:ok, _endpoint} <- validate_endpoint_name(opts[:endpoint_name]),
          {:ok, harness_spec} <- build_spec(spec, opts),
          {:ok, budget} <- WaitBudget.new(opts) do
       do_provision(harness_spec, budget, opts)
     end
   end
+
+  defp validate_endpoint_name(nil), do: {:ok, @default_endpoint_name}
+
+  defp validate_endpoint_name(name) when is_binary(name) do
+    if Regex.match?(@endpoint_name_re, name),
+      do: {:ok, name},
+      else: {:error, {:invalid_opts, :endpoint_name}}
+  end
+
+  defp validate_endpoint_name(_), do: {:error, {:invalid_opts, :endpoint_name}}
 
   # Note: `build_spec/2` coerces `opts[:environment]` via `Environment.Spec.new/1` — a
   # single coercion point per provision that both threads env into the harness name and
@@ -514,7 +538,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   defp wait_until_endpoint_ready(endpoint_fun, hid, name, budget) do
     fetch = fn -> endpoint_status(endpoint_fun, hid, name) end
 
-    run_wait(:endpoint, hid, fn started ->
+    run_wait(:endpoint, hid, name, fn started ->
       status_loop(fetch, hid, :endpoint, budget, started, 0)
     end)
   end
@@ -637,12 +661,18 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   # alone, so every poll logs as well as emitting telemetry — an attached
   # handler must not be a precondition for a readable failure.
 
-  defp run_wait(phase, harness_id, loop) do
+  defp run_wait(phase, harness_id, loop), do: run_wait(phase, harness_id, nil, loop)
+
+  # The endpoint name is stamped onto the failure here rather than inside the loop
+  # so that the struct a caller receives and the one line `emit_stop/6` writes
+  # cannot disagree about which endpoint was being waited on.
+  defp run_wait(phase, harness_id, endpoint, loop) do
     started = System.monotonic_time(:millisecond)
 
     try do
       {result, polls} = loop.(started)
-      emit_stop(harness_id, phase, started, polls, result)
+      result = name_endpoint(result, endpoint)
+      emit_stop(harness_id, phase, endpoint, started, polls, result)
       result
     catch
       kind, reason ->
@@ -650,6 +680,11 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
         :erlang.raise(kind, reason, __STACKTRACE__)
     end
   end
+
+  defp name_endpoint({:error, {tag, %WaitContext{} = ctx}}, name) when is_binary(name),
+    do: {:error, {tag, %{ctx | endpoint_name: name}}}
+
+  defp name_endpoint(result, _name), do: result
 
   defp emit_poll(harness_id, phase, status, started, poll_n) do
     elapsed = elapsed(started)
@@ -666,7 +701,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     )
   end
 
-  defp emit_stop(harness_id, phase, started, polls, result) do
+  defp emit_stop(harness_id, phase, endpoint, started, polls, result) do
     duration = elapsed(started)
     tag = result_tag(result)
 
@@ -677,6 +712,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     log_stop(tag, fn ->
       "agent_core provision stop harness_id=#{harness_id} phase=#{phase} " <>
         "result=#{inspect(tag)} last_status=#{last_status(result) || "none"} " <>
+        endpoint_field(endpoint) <>
         "polls=#{polls} duration_ms=#{duration}"
     end)
 
@@ -686,6 +722,11 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       %{harness_id: harness_id, phase: phase, result: tag}
     )
   end
+
+  # Only the endpoint wait has an endpoint, and omitting the field elsewhere keeps
+  # the harness and delete lines byte-identical to what they logged before.
+  defp endpoint_field(nil), do: ""
+  defp endpoint_field(name), do: "endpoint=#{name} "
 
   # The observed status is already inside the error's %WaitContext{}; a successful
   # wait ended on READY by definition.

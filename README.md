@@ -264,8 +264,14 @@ endpoints carry separate statuses: measured live, a harness was READY in 11 s wh
 path costs one extra call, not one per poll). The endpoint is `:endpoint_name`, defaulting to
 `DEFAULT` — the endpoint `InvokeHarness` uses when no `qualifier` is given. Its failures carry
 their own tags (`:endpoint_ready_timeout`, `:endpoint_failed`, `:endpoint_terminating`,
-`:endpoint_unknown_status`) so an endpoint problem never reads as a harness one. Size `:timeout`
-for both waits.
+`:endpoint_unknown_status`) so an endpoint problem never reads as a harness one, and each names
+the endpoint it was waiting on. Size `:timeout` for both waits.
+
+`:endpoint_name` is validated at entry against the service's own
+`[a-zA-Z][a-zA-Z0-9_]{0,47}`, returning `{:error, {:invalid_opts, :endpoint_name}}` before a
+harness exists. A mistyped name would otherwise be indistinguishable from an endpoint that has
+not appeared yet — both are a `404` — so it would spend the whole budget and then roll back a
+harness that is healthy and READY.
 
 The `:timeout` also derives the poll cadence when `:ready_poll_ms` is not given, so a short
 budget still polls repeatedly rather than looking once. Note that the bound covers each
