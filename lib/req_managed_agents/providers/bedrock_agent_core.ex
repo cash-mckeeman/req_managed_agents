@@ -513,9 +513,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   # Two statuses stand between a create and a usable handle, and they are not the
   # same status: measured live, a harness reached READY in 11 s while its DEFAULT
   # endpoint took 2 m 31 s. Returning on the harness alone hands back a handle
-  # whose next invoke fails. The endpoint wait is gated BEHIND harness readiness
-  # so the common path costs one extra call rather than one per harness poll, and
-  # both waits draw on the same budget.
+  # whose next invoke fails. The endpoint wait is gated BEHIND harness readiness,
+  # so a harness that never becomes READY costs zero endpoint calls; a harness
+  # that does costs a poll per remaining endpoint interval — at the measured
+  # 2 m 31 s and a 5 s cadence, roughly thirty. Both waits draw on one budget.
   defp wait_ready(get_fun, endpoint_fun, endpoint, hid, budget) do
     with :ok <- wait_until_ready(get_fun, hid, budget) do
       wait_until_endpoint_ready(endpoint_fun, hid, endpoint, budget)
