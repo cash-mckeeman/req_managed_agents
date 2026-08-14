@@ -74,7 +74,9 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   The two carry separate statuses and reach READY at different times, so a wait
   on the harness alone can return a handle that is not yet invokable. The
   endpoint is `opts[:endpoint_name]`, defaulting to `#{@default_endpoint_name}` —
-  the endpoint `InvokeHarness` uses when no `qualifier` is given.
+  the endpoint `InvokeHarness` uses when no `qualifier` is given. `open/2` takes
+  the same option and sends it as that `qualifier`, so gating a provision on a
+  non-default endpoint and then invoking it are the one option, not two.
 
   `opts[:timeout]` (ms) is the budget for the whole call, converted once here into
   a monotonic deadline shared by every wait and by every request they make — a
@@ -794,6 +796,15 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
        sid: sid,
        session_id: sid,
        resume: opts[:session_id] != nil,
+       # The endpoint every invoke on this connection reaches, sent as
+       # InvokeHarness's `qualifier`. Same option name and same default as
+       # provision/2's, so the endpoint readiness is gated on and the endpoint the
+       # turns actually reach cannot be different ones. It rides open/2 rather than
+       # the provision handle because it is a call-time routing choice, not part of
+       # the resource identity: it is excluded from the content digest, one harness
+       # has many endpoints, and a handle replayed from the provisioner store would
+       # otherwise pin whichever endpoint the first provision happened to ask for.
+       endpoint_name: opts[:endpoint_name],
        model: opts[:model],
        retries: opts[:invoke_retries] || 2,
        subscriber: subscriber,
@@ -845,6 +856,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     inv = %{
       harness_arn: conn.harness_arn,
       runtime_session_id: conn.sid,
+      qualifier: conn.endpoint_name,
       messages: messages,
       model: conn.model,
       idle_timeout: conn.idle_timeout,
