@@ -601,7 +601,13 @@ defmodule ReqManagedAgents.LiveSmokeTest do
            "expected 'rt-canary:1.20' in agent output, got: #{inspect(result.text)}"
   end
 
-  @tag timeout: 300_000
+  @tag timeout: 600_000
+  @tag :live_bedrock_reattach
+  @tag skip:
+         if(System.get_env("HARNESS_EXECUTION_ROLE_ARN") in [nil, ""],
+           do: "requires HARNESS_EXECUTION_ROLE_ARN (AWS harness execution role ARN)",
+           else: false
+         )
   test "AgentCore Harness: within-window reattach via session_id: continues the conversation" do
     alias ReqManagedAgents.Providers.BedrockAgentCore
     {:ok, _} = Application.ensure_all_started(:req_managed_agents)
