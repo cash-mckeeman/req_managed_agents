@@ -39,8 +39,34 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   # rather than derived: see `rollback_client/1`.
   @rollback_budget_ms 30_000
 
+  # `qualifier` is optional on InvokeHarness and the service defaults it to the
+  # DEFAULT endpoint, so DEFAULT is the endpoint a caller's invoke actually
+  # reaches — and therefore the one readiness has to be gated on.
+  @default_endpoint_name "DEFAULT"
+
+  # The harness and the endpoint repeat one status vocabulary (identical enums in
+  # the service model), so a single classification drives both waits and only the
+  # tag a failure carries differs. An endpoint that never became READY reported as
+  # a harness timeout would send the next investigation to the wrong resource.
+  @wait_tags %{
+    {:ready, :timeout} => :harness_ready_timeout,
+    {:ready, :terminating} => :harness_terminating,
+    {:ready, :failed} => :harness_failed,
+    {:ready, :unknown} => :harness_unknown_status,
+    {:endpoint, :timeout} => :endpoint_ready_timeout,
+    {:endpoint, :terminating} => :endpoint_terminating,
+    {:endpoint, :failed} => :endpoint_failed,
+    {:endpoint, :unknown} => :endpoint_unknown_status
+  }
+
   @doc """
-  Provisions the harness for `spec`, waiting for it to reach READY.
+  Provisions the harness for `spec`, waiting for it **and the endpoint an invoke
+  will reach** to become READY.
+
+  The two carry separate statuses and reach READY at different times, so a wait
+  on the harness alone can return a handle that is not yet invokable. The
+  endpoint is `opts[:endpoint_name]`, defaulting to `#{@default_endpoint_name}` —
+  the endpoint `InvokeHarness` uses when no `qualifier` is given.
 
   `opts[:timeout]` (ms) is the budget for the whole call, converted once here into
   a monotonic deadline shared by every wait and by every request they make — a
@@ -198,7 +224,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   # nothing else will ever reclaim — the ready-wait's own failure is the last moment
   # its id is known. Rollback is best-effort and never replaces the original error.
   defp ready_or_rollback(get_fun, arn, hid, budget, opts) do
-    case wait_until_ready(get_fun, hid, budget) do
+    case wait_ready(get_fun, hid, budget, opts) do
       :ok ->
         {:ok, %{harness_arn: arn, harness_id: hid}}
 
@@ -313,7 +339,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       {:ok, %{"harnesses" => harnesses}} ->
         cond do
           harness = recoverable_harness(harnesses, name) ->
-            adopt(harness, get_fun, budget)
+            adopt(harness, get_fun, budget, opts)
 
           deleting?(harnesses, name) ->
             # A prior same-name harness is still tearing down; wait it out, then
@@ -371,12 +397,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   # An adopted harness was created by someone else, so a failed ready-wait here must
   # NOT delete it — rollback covers only what this call created.
-  defp adopt(%{"arn" => arn, "harnessId" => hid}, get_fun, budget) do
-    with :ok <- wait_until_ready(get_fun, hid, budget),
+  defp adopt(%{"arn" => arn, "harnessId" => hid}, get_fun, budget, opts) do
+    with :ok <- wait_ready(get_fun, hid, budget, opts),
          do: {:ok, %{harness_arn: arn, harness_id: hid}}
   end
 
-  defp adopt(harness, _get_fun, _budget) do
+  defp adopt(harness, _get_fun, _budget, _opts) do
     Logger.warning("agent_core listing entry lacks an arn/harnessId: #{inspect(harness)}")
     {:error, {:unexpected_list_response, harness}}
   end
@@ -456,32 +482,99 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   defp observed_status(nil), do: nil
   defp observed_status(entry), do: entry["status"]
 
+  # Two statuses stand between a create and a usable handle, and they are not the
+  # same status: measured live, a harness reached READY in 11 s while its DEFAULT
+  # endpoint took 2 m 31 s. Returning on the harness alone hands back a handle
+  # whose next invoke fails. The endpoint wait is gated BEHIND harness readiness
+  # so the common path costs one extra call rather than one per harness poll, and
+  # both waits draw on the same budget.
+  defp wait_ready(get_fun, hid, budget, opts) do
+    with :ok <- wait_until_ready(get_fun, hid, budget) do
+      wait_until_endpoint_ready(endpoint_fun(opts, budget), hid, endpoint_name(opts), budget)
+    end
+  end
+
+  defp endpoint_fun(opts, budget) do
+    opts[:endpoint_fun] ||
+      fn hid, name ->
+        Client.get_harness_endpoint(budgeted_client(opts, budget, :get), hid, name)
+      end
+  end
+
+  defp endpoint_name(opts), do: opts[:endpoint_name] || @default_endpoint_name
+
   defp wait_until_ready(get_fun, hid, budget) do
+    fetch = fn -> harness_status(get_fun, hid) end
+
     run_wait(:ready, hid, fn started ->
-      ready_loop(get_fun, hid, budget, started, 0)
+      status_loop(fetch, hid, :ready, budget, started, 0)
     end)
   end
 
-  defp ready_loop(get_fun, hid, budget, started, poll_n) do
+  defp wait_until_endpoint_ready(endpoint_fun, hid, name, budget) do
+    fetch = fn -> endpoint_status(endpoint_fun, hid, name) end
+
+    run_wait(:endpoint, hid, fn started ->
+      status_loop(fetch, hid, :endpoint, budget, started, 0)
+    end)
+  end
+
+  defp harness_status(get_fun, hid) do
     case get_fun.(hid) do
-      {:ok, %{"harness" => %{"status" => status}}} when is_binary(status) ->
+      {:ok, %{"harness" => %{"status" => status}}} when is_binary(status) -> {:ok, status}
+      {:ok, other} -> {:invalid, {:unexpected_get_harness_response, other}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp endpoint_status(endpoint_fun, hid, name) do
+    case endpoint_fun.(hid, name) do
+      {:ok, %{"endpoint" => %{"status" => status}}} when is_binary(status) ->
+        {:ok, status}
+
+      {:ok, other} ->
+        {:invalid, {:unexpected_get_endpoint_response, other}}
+
+      # CreateHarness provisions the DEFAULT endpoint asynchronously, so an
+      # endpoint that is not there yet is a stage of creation rather than a
+      # failure — the shared deadline is what ends the wait either way.
+      {:error, {:http_error, 404, _}} ->
+        {:ok, nil}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp status_loop(fetch, hid, phase, budget, started, poll_n) do
+    case fetch.() do
+      {:ok, status} ->
         n = poll_n + 1
-        emit_poll(hid, :ready, status, started, n)
-        classified = HarnessStatus.classify(status)
+        emit_poll(hid, phase, status, started, n)
 
         on_status(
-          classified,
-          {get_fun, hid, budget, WaitBudget.next(budget)},
+          classify_observed(status),
+          {fetch, hid, phase, budget, WaitBudget.next(budget)},
           {started, n, status}
         )
 
-      {:ok, other} ->
-        {{:error, {:unexpected_get_harness_response, other}}, poll_n}
+      # A response the wire contract does not describe is drift, not a slow
+      # resource: retrying it until the budget is gone would report a timeout for
+      # a shape that will never change.
+      {:invalid, reason} ->
+        {{:error, reason}, poll_n}
 
       {:error, reason} ->
-        on_poll_error(reason, hid, budget, started, poll_n)
+        on_poll_error(reason, hid, phase, budget, started, poll_n)
     end
   end
+
+  # A resource that is not there yet has no status to classify; it is still being
+  # created, so it is waited on exactly like one that says so.
+  defp classify_observed(nil), do: :creating
+  defp classify_observed(status), do: HarnessStatus.classify(status)
+
+  defp wait_tag(phase, kind), do: Map.fetch!(@wait_tags, {phase, kind})
 
   # A poll that fails on an exhausted budget IS the timeout, and must be named as
   # one. The last poll of a wait runs on whatever is left, so its receive timeout
@@ -489,15 +582,17 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   # returned raw would hand the caller a `%Req.TransportError{}` in place of the
   # named tag the deadline exists to make reachable. The reason still reaches the
   # log, where the tag alone would not explain the shape of the failure.
-  defp on_poll_error(reason, hid, budget, started, poll_n) do
+  defp on_poll_error(reason, hid, phase, budget, started, poll_n) do
     case WaitBudget.next(budget) do
       :expired ->
+        tag = wait_tag(phase, :timeout)
+
         Logger.warning(
-          "agent_core ready-poll for #{hid} failed with no budget left to retry " <>
-            "(reported as a ready-timeout): #{inspect(reason)}"
+          "agent_core #{phase}-poll for #{hid} failed with no budget left to retry " <>
+            "(reported as #{tag}): #{inspect(reason)}"
         )
 
-        {{:error, {:harness_ready_timeout, ctx(hid, :ready, nil, started, poll_n)}}, poll_n}
+        {{:error, {tag, ctx(hid, phase, nil, started, poll_n)}}, poll_n}
 
       :poll ->
         {{:error, reason}, poll_n}
@@ -506,23 +601,23 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   defp on_status(:ready, _poll, {_started, n, _status}), do: {:ok, n}
 
-  defp on_status(:creating, {get_fun, hid, budget, :poll}, {started, n, _status}) do
+  defp on_status(:creating, {fetch, hid, phase, budget, :poll}, {started, n, _status}) do
     Process.sleep(budget.poll_ms)
-    ready_loop(get_fun, hid, WaitBudget.spend(budget), started, n)
+    status_loop(fetch, hid, phase, WaitBudget.spend(budget), started, n)
   end
 
-  defp on_status(:creating, {_get_fun, hid, _budget, :expired}, {started, n, status}),
-    do: {{:error, {:harness_ready_timeout, ctx(hid, :ready, status, started, n)}}, n}
+  defp on_status(:creating, {_fetch, hid, phase, _budget, :expired}, {started, n, status}),
+    do: {{:error, {wait_tag(phase, :timeout), ctx(hid, phase, status, started, n)}}, n}
 
   # A deleting harness can never become READY, so polling it is always wrong.
-  defp on_status(:terminating, {_get_fun, hid, _budget, _verdict}, {started, n, status}),
-    do: {{:error, {:harness_terminating, ctx(hid, :ready, status, started, n)}}, n}
+  defp on_status(:terminating, {_fetch, hid, phase, _budget, _verdict}, {started, n, status}),
+    do: {{:error, {wait_tag(phase, :terminating), ctx(hid, phase, status, started, n)}}, n}
 
-  defp on_status({:failed, _}, {_get_fun, hid, _budget, _verdict}, {started, n, status}),
-    do: {{:error, {:harness_failed, ctx(hid, :ready, status, started, n)}}, n}
+  defp on_status({:failed, _}, {_fetch, hid, phase, _budget, _verdict}, {started, n, status}),
+    do: {{:error, {wait_tag(phase, :failed), ctx(hid, phase, status, started, n)}}, n}
 
-  defp on_status({:unknown, _}, {_get_fun, hid, _budget, _verdict}, {started, n, status}),
-    do: {{:error, {:harness_unknown_status, ctx(hid, :ready, status, started, n)}}, n}
+  defp on_status({:unknown, _}, {_fetch, hid, phase, _budget, _verdict}, {started, n, status}),
+    do: {{:error, {wait_tag(phase, :unknown), ctx(hid, phase, status, started, n)}}, n}
 
   defp ctx(harness_id, phase, status, started, polls) do
     %WaitContext{
