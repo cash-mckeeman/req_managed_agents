@@ -7,7 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-Canary-hardening release. Two breaking changes, both requiring action.
+Canary-hardening release. Two breaking changes, both requiring action, and one
+behaviour change that requires none but changes how long provisioning takes.
 
 ### Changed (breaking) — AgentCore harness names carry the spec name
 
@@ -28,9 +29,28 @@ permissive, so every name that composed before is byte-identical now.
 
 `{:error, :harness_ready_timeout}`, `{:error, {:harness_failed, status}}` and
 `{:error, {:harness_still_deleting, name}}` now carry a
-`%BedrockAgentCore.WaitContext{harness_id, phase, last_status, elapsed_ms,
-polls}` instead of a bare atom or name. Two new tags join them:
+`%BedrockAgentCore.WaitContext{harness_id, phase, endpoint_name, last_status,
+elapsed_ms, polls}` instead of a bare atom or name. Two new tags join them:
 `:harness_terminating` and `:harness_unknown_status`.
+
+### Changed (behaviour) — provisioning waits for the harness ENDPOINT too
+
+`BedrockAgentCore.provision/2` no longer returns once the harness reaches
+READY. The harness and each of its endpoints carry separate statuses and reach
+READY at different times — measured live, a harness was READY in 11 s while its
+`DEFAULT` endpoint took 2 m 31 s — so a handle returned on the harness status
+alone named an endpoint whose next invoke failed.
+
+**Typical provisioning latency therefore goes from ~11 s to ~162 s.** Nothing
+about a caller's code has to change, and there are no external consumers to
+migrate, but anything sizing a timeout or a job budget around the old figure
+must be resized: `provision :timeout + Session.run/2 :timeout + margin ≤ your
+enclosing deadline`. The worst case is unchanged at ~581 s — the endpoint wait
+draws on the same absolute deadline as the harness and delete waits rather than
+starting a clock of its own.
+
+The wait is gated behind harness readiness, so a harness that never reaches
+READY costs zero endpoint calls.
 
 ### Added
 - `Provisioner.Name` / `Name.Policy` — shared `<base>_<digest>` composition,
@@ -45,6 +65,24 @@ polls}` instead of a bare atom or name. Two new tags join them:
   by every request they make. An explicit `:timeout` with no `:ready_poll_ms`
   also derives its poll cadence, so a budget shorter than the default interval
   no longer buys a single poll.
+- `AgentCore.Client.get_harness_endpoint/3` — `GetHarnessEndpoint` on the
+  control-plane client, the seam the endpoint wait polls (`:endpoint_fun`).
+- `BedrockAgentCore.provision/2` accepts `:endpoint_name` — which endpoint
+  readiness is gated on, defaulting to the `DEFAULT` that `InvokeHarness`
+  resolves to when no `qualifier` is given. It is validated at entry against the
+  service's own `[a-zA-Z][a-zA-Z0-9_]{0,47}`, returning
+  `{:error, {:invalid_opts, :endpoint_name}}` **before** `CreateHarness` runs: a
+  mistyped name is indistinguishable from an endpoint that has not appeared yet
+  (both are a `404`), so it would otherwise spend the whole budget and then roll
+  back a harness that was healthy and READY.
+- `BedrockAgentCore.open/2` accepts the same `:endpoint_name` and sends it as
+  `InvokeHarness`'s `qualifier`, so the endpoint a provision gates on and the
+  endpoint its turns reach are one option rather than two. Absent, no
+  `qualifier` is sent and the service resolves `DEFAULT` as before.
+- Four endpoint-phase error tags — `:endpoint_ready_timeout`,
+  `:endpoint_failed`, `:endpoint_terminating`, `:endpoint_unknown_status` — so
+  an endpoint problem never reads as a harness one, each carrying a
+  `%WaitContext{phase: :endpoint}` that names the endpoint it waited on.
 - `AgentCore.Client.control_plane_attempts/1` — the worst-case attempt count of
   a control-plane call of the given HTTP method, for callers bounding one by a
   wall-clock budget. It is method-specific: a retried `:get` / `:delete` makes
