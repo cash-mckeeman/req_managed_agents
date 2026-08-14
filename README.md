@@ -237,9 +237,10 @@ at terminal (`nil` for server-held providers like Claude Managed Agents and Agen
 
 `provision/3` takes `:timeout` (ms, default 365 000) as the budget for the whole call. It
 becomes a monotonic deadline at entry, shared by the wait for a same-name harness to finish
-deleting and the wait for the new one to reach READY, and it bounds every request those waits
-make — so a provision that cannot finish returns a named `{:error, {tag, %WaitContext{}}}`
-inside the budget rather than overrunning the deadline it is running under. (The best-effort
+deleting, the wait for the new one to reach READY, and the wait for the endpoint an invoke
+will reach — and it bounds every request those waits make, so a provision that cannot finish
+returns a named `{:error, {tag, %WaitContext{}}}` inside the budget rather than overrunning
+the deadline it is running under. (The best-effort
 `DeleteHarness` that rolls back a harness this call created is the deliberate exception: it
 runs after the budget is spent and carries a small fixed budget of its own.)
 
@@ -255,6 +256,16 @@ where the enclosing deadline is whatever kills you from outside — a CI job tim
 `@tag timeout:`, a supervisor. Getting this wrong is the failure this budget exists to make
 diagnosable: the enclosing timeout fires first, the process is killed mid-wait, and no named
 error is ever returned.
+
+**A harness reaching READY is not the end of provisioning.** The harness and each of its
+endpoints carry separate statuses: measured live, a harness was READY in 11 s while its
+`DEFAULT` endpoint took 2 m 31 s, and an invoke against a still-creating endpoint fails. So
+`provision/3` waits for the endpoint too, polling it only once the harness is READY (the common
+path costs one extra call, not one per poll). The endpoint is `:endpoint_name`, defaulting to
+`DEFAULT` — the endpoint `InvokeHarness` uses when no `qualifier` is given. Its failures carry
+their own tags (`:endpoint_ready_timeout`, `:endpoint_failed`, `:endpoint_terminating`,
+`:endpoint_unknown_status`) so an endpoint problem never reads as a harness one. Size `:timeout`
+for both waits.
 
 The `:timeout` also derives the poll cadence when `:ready_poll_ms` is not given, so a short
 budget still polls repeatedly rather than looking once. Note that the bound covers each
@@ -292,7 +303,7 @@ timeout outside it, so leave margin rather than sizing to the millisecond.
 | `[:req_managed_agents, :session, :terminal]` | — | `terminal` |
 
 The `:provision` events fire once per poll and once per terminal outcome while a Bedrock
-AgentCore harness is being provisioned; `phase` is `:ready` or `:deleted`, and `result` is
+AgentCore harness is being provisioned; `phase` is `:ready`, `:endpoint` or `:deleted`, and `result` is
 `:ok` or `{:error, tag}`. The same fields are also written to the log, so a provisioning
 failure is diagnosable without attaching a handler.
 

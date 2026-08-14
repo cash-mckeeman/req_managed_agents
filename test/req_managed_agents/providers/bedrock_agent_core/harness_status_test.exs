@@ -124,6 +124,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatusTest do
                create_fun: create,
                list_fun: list,
                get_fun: get_fun,
+               endpoint_fun: fn _hid, _name -> {:ok, %{"endpoint" => %{"status" => "READY"}}} end,
                ready_poll_ms: 0
              )
   end

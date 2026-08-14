@@ -238,8 +238,33 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       execution_role_arn: "arn:aws:iam::1:role/R",
       create_fun: create_fun,
       get_fun: fn _hid -> {:ok, %{"harness" => %{"status" => "READY"}}} end,
+      endpoint_fun: ready_endpoint(),
       delete_fun: fn _hid -> {:ok, %{}} end
     ] ++ extra
+  end
+
+  # A READY harness is polled a second time, for its endpoint, so every provision
+  # that reaches READY needs this seam injected too — otherwise it reaches a real
+  # signed AWS endpoint the way an un-injected get_fun would.
+  defp ready_endpoint, do: fn _hid, _name -> {:ok, %{"endpoint" => %{"status" => "READY"}}} end
+
+  defp endpoint_status(status),
+    do: fn _hid, _name -> {:ok, %{"endpoint" => %{"status" => status}}} end
+
+  defp harness_ready, do: fn _hid -> {:ok, %{"harness" => %{"status" => "READY"}}} end
+
+  defp created(hid),
+    do: fn _spec -> {:ok, %{"harness" => %{"arn" => "a", "harnessId" => hid}}} end
+
+  # Reports rather than absorbing: a stub that quietly answers {:ok, %{}} would
+  # let a test assert a failure while the rollback it depends on never ran.
+  defp reporting_delete do
+    test_pid = self()
+
+    fn hid ->
+      send(test_pid, {:deleted, hid})
+      {:ok, %{}}
+    end
   end
 
   describe "build_spec/2" do
@@ -374,6 +399,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
                create_fun: create_fun,
                list_fun: list_fun,
                get_fun: get_fun,
+               endpoint_fun: ready_endpoint(),
                ready_poll_ms: 1,
                ready_max_polls: 5
              )
@@ -478,6 +504,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
                execution_role_arn: "r",
                create_fun: create,
                get_fun: get,
+               endpoint_fun: ready_endpoint(),
                ready_poll_ms: 0
              )
   end
@@ -764,6 +791,256 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
     end
   end
 
+  # ── endpoint readiness ───────────────────────────────────────────────────────
+  #
+  # A harness and its DEFAULT endpoint carry separate statuses and reach READY at
+  # different times — measured live, 11 s against 2 m 31 s. A handle returned on
+  # the harness status alone therefore names an endpoint that cannot yet be
+  # invoked, which is what these pin.
+
+  describe "endpoint readiness" do
+    test "a READY harness whose endpoint is still creating is not a ready provision" do
+      assert {:error,
+              {:endpoint_ready_timeout,
+               %WaitContext{harness_id: "h_ep", phase: :endpoint, last_status: "CREATING"}}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: created("h_ep"),
+                 get_fun: harness_ready(),
+                 endpoint_fun: endpoint_status("CREATING"),
+                 delete_fun: reporting_delete(),
+                 ready_poll_ms: 0,
+                 ready_max_polls: 2
+               )
+
+      # The harness is this call's own, and a provision that gave up on it must
+      # not leave it billing.
+      assert_receive {:deleted, "h_ep"}
+    end
+
+    test "the handle is returned once BOTH the harness and its endpoint are READY" do
+      {:ok, polls} = Agent.start_link(fn -> 0 end)
+
+      endpoint_fun = fn _hid, _name ->
+        n = Agent.get_and_update(polls, &{&1 + 1, &1 + 1})
+        status = if n == 1, do: "CREATING", else: "READY"
+        {:ok, %{"endpoint" => %{"status" => status}}}
+      end
+
+      assert {:ok, %{harness_arn: "a", harness_id: "h_both"}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: created("h_both"),
+                 get_fun: harness_ready(),
+                 endpoint_fun: endpoint_fun,
+                 delete_fun: reporting_delete(),
+                 ready_poll_ms: 0
+               )
+
+      assert Agent.get(polls, & &1) == 2
+      refute_received {:deleted, _}
+    end
+
+    test "the endpoint is polled only once the harness is READY, not once per harness poll" do
+      # Gating it behind harness readiness is what keeps the common path at ONE
+      # extra call. An ungated check would poll the endpoint on every harness
+      # poll, and a harness that never becomes READY would still be asking about
+      # an endpoint that cannot exist.
+      test_pid = self()
+
+      endpoint_fun = fn hid, name ->
+        send(test_pid, {:endpoint_polled, hid, name})
+        {:ok, %{"endpoint" => %{"status" => "READY"}}}
+      end
+
+      assert {:error, {:harness_ready_timeout, %WaitContext{phase: :ready}}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: created("h_gated"),
+                 get_fun: fn _hid -> {:ok, %{"harness" => %{"status" => "CREATING"}}} end,
+                 endpoint_fun: endpoint_fun,
+                 delete_fun: reporting_delete(),
+                 ready_poll_ms: 0,
+                 ready_max_polls: 3
+               )
+
+      refute_received {:endpoint_polled, _, _}
+      assert_receive {:deleted, "h_gated"}
+    end
+
+    test "endpoint_fun receives the harness id and the endpoint the data plane defaults to" do
+      # `qualifier` is optional on InvokeHarness and defaults to DEFAULT, so
+      # DEFAULT is the endpoint an invoke actually reaches — waiting on any other
+      # one would gate readiness on an endpoint nobody calls.
+      test_pid = self()
+
+      endpoint_fun = fn hid, name ->
+        send(test_pid, {:endpoint_polled, hid, name})
+        {:ok, %{"endpoint" => %{"status" => "READY"}}}
+      end
+
+      assert {:ok, _} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: created("h_threaded_ep"),
+                 get_fun: harness_ready(),
+                 endpoint_fun: endpoint_fun,
+                 delete_fun: reporting_delete(),
+                 ready_poll_ms: 0
+               )
+
+      assert_receive {:endpoint_polled, "h_threaded_ep", "DEFAULT"}
+    end
+
+    test ":endpoint_name overrides which endpoint readiness is gated on" do
+      test_pid = self()
+
+      endpoint_fun = fn _hid, name ->
+        send(test_pid, {:endpoint_polled, name})
+        {:ok, %{"endpoint" => %{"status" => "READY"}}}
+      end
+
+      assert {:ok, _} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: created("h_named_ep"),
+                 get_fun: harness_ready(),
+                 endpoint_fun: endpoint_fun,
+                 endpoint_name: "canary",
+                 delete_fun: reporting_delete(),
+                 ready_poll_ms: 0
+               )
+
+      assert_receive {:endpoint_polled, "canary"}
+    end
+
+    test "an endpoint that has not appeared yet is waited on, not failed" do
+      # CreateHarness provisions the DEFAULT endpoint asynchronously, so a 404
+      # early in the wait means "not there yet". Failing on it would turn a normal
+      # create into a provisioning error.
+      {:ok, polls} = Agent.start_link(fn -> 0 end)
+
+      endpoint_fun = fn _hid, _name ->
+        case Agent.get_and_update(polls, &{&1 + 1, &1 + 1}) do
+          0 -> {:error, {:http_error, 404, %{"message" => "not found"}}}
+          _ -> {:ok, %{"endpoint" => %{"status" => "READY"}}}
+        end
+      end
+
+      assert {:ok, %{harness_id: "h_404"}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: created("h_404"),
+                 get_fun: harness_ready(),
+                 endpoint_fun: endpoint_fun,
+                 delete_fun: reporting_delete(),
+                 ready_poll_ms: 0
+               )
+
+      refute_received {:deleted, _}
+    end
+
+    test "a failed endpoint fails the provision and rolls the harness back" do
+      assert {:error,
+              {:endpoint_failed, %WaitContext{phase: :endpoint, last_status: "CREATE_FAILED"}}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: created("h_ep_failed"),
+                 get_fun: harness_ready(),
+                 endpoint_fun: endpoint_status("CREATE_FAILED"),
+                 delete_fun: reporting_delete(),
+                 ready_poll_ms: 0
+               )
+
+      assert_receive {:deleted, "h_ep_failed"}
+    end
+
+    test "a DELETING endpoint terminates the wait rather than polling it out" do
+      assert {:error,
+              {:endpoint_terminating, %WaitContext{phase: :endpoint, last_status: "DELETING"}}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: created("h_ep_deleting"),
+                 get_fun: harness_ready(),
+                 endpoint_fun: endpoint_status("DELETING"),
+                 delete_fun: reporting_delete(),
+                 ready_poll_ms: 0
+               )
+
+      assert_receive {:deleted, "h_ep_deleting"}
+    end
+
+    test "an unrecognised endpoint status is named, not polled until the budget is gone" do
+      assert {:error,
+              {:endpoint_unknown_status, %WaitContext{phase: :endpoint, last_status: "INACTIVE"}}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: created("h_ep_unknown"),
+                 get_fun: harness_ready(),
+                 endpoint_fun: endpoint_status("INACTIVE"),
+                 delete_fun: reporting_delete(),
+                 ready_poll_ms: 0
+               )
+
+      assert_receive {:deleted, "h_ep_unknown"}
+    end
+
+    test "an adopted harness whose endpoint never becomes ready is NOT rolled back" do
+      # The endpoint wait applies on the recovery path too — a 409-recovered
+      # harness is just as unusable with a creating endpoint — but the harness
+      # belongs to whoever created it, so this call must not delete it.
+      name = P.harness_name(@spec_bedrock, nil)
+
+      list = fn ->
+        {:ok,
+         %{
+           "harnesses" => [
+             %{
+               "harnessName" => name,
+               "harnessId" => "h_adopted",
+               "arn" => "arn:harness/exist",
+               "status" => "READY"
+             }
+           ]
+         }}
+      end
+
+      assert {:error, {:endpoint_ready_timeout, %WaitContext{harness_id: "h_adopted"}}} =
+               P.provision(@spec_bedrock,
+                 execution_role_arn: "r",
+                 create_fun: fn _ -> {:error, {:http_error, 409, %{}}} end,
+                 list_fun: list,
+                 get_fun: harness_ready(),
+                 endpoint_fun: endpoint_status("CREATING"),
+                 delete_fun: reporting_delete(),
+                 ready_poll_ms: 0,
+                 ready_max_polls: 2
+               )
+
+      refute_receive {:deleted, _}
+    end
+
+    test "an endpoint failure is diagnosable from the log alone" do
+      log =
+        capture_log([level: :info], fn ->
+          assert {:error, {:endpoint_failed, _}} =
+                   P.provision(@spec_bedrock,
+                     execution_role_arn: "r",
+                     create_fun: created("h_ep_log"),
+                     get_fun: harness_ready(),
+                     endpoint_fun: endpoint_status("UPDATE_FAILED"),
+                     delete_fun: reporting_delete(),
+                     ready_poll_ms: 0
+                   )
+        end)
+
+      assert log =~ "harness_id=h_ep_log"
+      assert log =~ "phase=endpoint"
+      assert log =~ "last_status=UPDATE_FAILED"
+      assert log =~ "endpoint_failed"
+    end
+  end
+
   test "get_fun receives the harness id it was given" do
     # Every other stub ignores its argument, so an id-threading regression — polling
     # the wrong harness — would be invisible to the whole suite.
@@ -779,6 +1056,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
                  send(test_pid, {:polled, hid})
                  {:ok, %{"harness" => %{"status" => "READY"}}}
                end,
+               endpoint_fun: ready_endpoint(),
                ready_poll_ms: 0
              )
 
@@ -803,6 +1081,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
                        {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "log_poll"}}}
                      end,
                      get_fun: fn _ -> {:ok, %{"harness" => %{"status" => "READY"}}} end,
+                     endpoint_fun: ready_endpoint(),
                      ready_poll_ms: 0
                    )
         end)
@@ -953,6 +1232,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
                    {:ok, %{"harness" => %{"arn" => "a", "harnessId" => hid}}}
                  end,
                  get_fun: get,
+                 endpoint_fun: ready_endpoint(),
                  ready_poll_ms: 0
                )
 
@@ -972,6 +1252,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
                    {:ok, %{"harness" => %{"arn" => "a", "harnessId" => hid}}}
                  end,
                  get_fun: fn _ -> {:ok, %{"harness" => %{"status" => "READY"}}} end,
+                 endpoint_fun: ready_endpoint(),
                  ready_poll_ms: 0
                )
 
