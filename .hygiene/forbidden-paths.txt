@@ -2,3 +2,4 @@
 ^docs/qa/
 ^docs/qa-runs/
 ^\.superpowers/
+^docs/aws-ci-setup\.md$
