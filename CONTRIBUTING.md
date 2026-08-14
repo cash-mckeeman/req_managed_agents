@@ -19,11 +19,10 @@ All four are enforced in CI. Run them before opening a PR.
 This package is public and published to Hex, so treat every tracked file as
 something a consumer may read.
 
-Planning and QA docs under `docs/superpowers/` and `docs/qa/` are this repo's
-local working log — they are gitignored, and they are the only place an internal
-tracker id may appear. No other surface may reference one: not source, tests, CI
-config, commit messages, or PR titles. The single permitted linkage is a trailing
-`Closes …` line in a **PR body**.
+An internal tracker id must not appear on any tracked surface — not source,
+tests, CI config, commit messages, or PR titles. The single permitted linkage is
+a trailing `Closes …` line in a **PR body**. Local planning scratch is gitignored
+and so is exempt by construction: nothing there is tracked.
 
 Keep AWS account numbers, real ARNs, and internal infrastructure names out of
 source and tests — use placeholders (`role`, `arn:new`, `us-east-1`).
