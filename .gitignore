@@ -11,3 +11,12 @@ req_managed_agents_host-*.tar
 /.elixir_ls/
 priv/plts/*.plt
 priv/plts/*.plt.hash
+
+# hygiene: ops docs live in the private control-plane repo
+docs/superpowers/
+docs/qa/
+docs/qa-runs/
+.superpowers/
+
+# jj workspaces: whole checkouts, never content
+.claude/worktrees/

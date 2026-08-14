@@ -1,0 +1,18 @@
+# Content patterns enforced ONLY in public-bound repos.
+#
+# `setup-repo.sh <repo> <slug> public` installs this file alongside
+# forbidden-content.txt; private mode does not. The rule these encode is
+# already stated per-visibility in CLAUDE.md — the control plane's name and
+# its doc-tree conventions are fine in a private repo and are a leak in a
+# public one — so the pattern set is split the same way rather than reddening
+# private repos on content the governing document permits.
+#
+# Every doc-tree pattern requires a following non-space character. The
+# .gitignore fragment setup-repo.sh appends contains the bare directory names
+# (`docs/superpowers/` at end of line); without the guard each installed repo
+# would fail its own gate on the line the installer wrote.
+[Bb]iai-ops
+docs/superpowers/[^[:space:]]
+docs/qa/[^[:space:]]
+docs/qa-runs/[^[:space:]]
+\.superpowers/[^[:space:]]
