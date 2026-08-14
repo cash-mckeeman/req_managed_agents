@@ -66,6 +66,18 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatusTest do
     |> List.wrap()
   end
 
+  # Reports rather than absorbing: `fn _ -> {:ok, %{}} end` lets a test assert the
+  # failure while the rollback it depends on silently stops running, which is the
+  # shape four earlier rounds kept re-introducing.
+  defp reporting_delete do
+    test_pid = self()
+
+    fn hid ->
+      send(test_pid, {:deleted, hid})
+      {:ok, %{}}
+    end
+  end
+
   test "a DELETING harness terminates the ready-wait instead of polling it" do
     create = fn _ -> {:ok, %{"harness" => %{"arn" => "a", "harnessId" => "h"}}} end
     get_fun = fn _hid -> {:ok, %{"harness" => %{"status" => "DELETING"}}} end
@@ -75,10 +87,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatusTest do
                execution_role_arn: "role",
                create_fun: create,
                get_fun: get_fun,
-               delete_fun: fn _ -> {:ok, %{}} end,
+               delete_fun: reporting_delete(),
                ready_poll_ms: 0,
                ready_max_polls: 3
              )
+
+    assert_receive {:deleted, "h"}
   end
 
   test "an unknown status terminates the ready-wait instead of burning the budget" do
@@ -90,10 +104,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatusTest do
                execution_role_arn: "role",
                create_fun: create,
                get_fun: get_fun,
-               delete_fun: fn _ -> {:ok, %{}} end,
+               delete_fun: reporting_delete(),
                ready_poll_ms: 0,
                ready_max_polls: 3
              )
+
+    assert_receive {:deleted, "h"}
   end
 
   test "a mid-create harness is still adopted on 409 recovery" do
