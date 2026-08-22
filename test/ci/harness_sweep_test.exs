@@ -114,6 +114,34 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
       assert report.unreclaimed == [{stuck, {:http_error, 409}}]
     end
 
+    test "an account holding no harnesses at all is nothing to reclaim, not a failure" do
+      report =
+        HarnessSweep.run(
+          list_fun: fn -> {:ok, %{}} end,
+          delete_fun: refusing_delete(self()),
+          prefix: "rma_live"
+        )
+
+      assert report.matched == []
+
+      assert report.unreclaimed == [],
+             "AWS list APIs omit the collection key when it is empty; reporting that as an " <>
+               "unreclaimable harness reddens the canary on the best possible outcome"
+
+      assert report.complete?
+    end
+
+    test "a harnesses key that is not a list is an unexpected shape" do
+      report =
+        HarnessSweep.run(
+          list_fun: fn -> {:ok, %{"harnesses" => "nope"}} end,
+          delete_fun: refusing_delete(self()),
+          prefix: "rma_live"
+        )
+
+      assert [{nil, {:unexpected_list_shape, _}}] = report.unreclaimed
+    end
+
     test "a listing the provider refuses is reported rather than silently swept clean" do
       report =
         HarnessSweep.run(

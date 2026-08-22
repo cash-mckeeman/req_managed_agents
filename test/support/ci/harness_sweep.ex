@@ -70,10 +70,8 @@ defmodule ReqManagedAgents.CI.HarnessSweep do
     prefix = opts[:prefix] || @prefix
 
     case list_fun.() do
-      {:ok, %{"harnesses" => harnesses} = body} when is_list(harnesses) ->
-        harnesses
-        |> Enum.filter(&matches?(&1, prefix))
-        |> reclaim(delete_fun, complete?(body))
+      {:ok, body} when is_map(body) ->
+        sweep_page(body, prefix, delete_fun)
 
       {:ok, other} ->
         list_failure({:unexpected_list_shape, other})
@@ -118,6 +116,21 @@ defmodule ReqManagedAgents.CI.HarnessSweep do
     end
 
     :ok
+  end
+
+  # Several AWS list APIs omit the collection key entirely when it is empty, so
+  # an absent "harnesses" is an account holding none — the one outcome the sweep
+  # most wants, and previously the one it reported as an unreclaimable failure.
+  defp sweep_page(body, prefix, delete_fun) do
+    case Map.get(body, "harnesses", []) do
+      harnesses when is_list(harnesses) ->
+        harnesses
+        |> Enum.filter(&matches?(&1, prefix))
+        |> reclaim(delete_fun, complete?(body))
+
+      other ->
+        list_failure({:unexpected_list_shape, %{"harnesses" => other}})
+    end
   end
 
   # A `nextToken` means the account holds more harnesses than this page shows.
