@@ -77,17 +77,19 @@ jobs:
       - run: mix format --check-formatted
       - run: mix credo --strict
       # hex.audit has no ignore mechanism, and cowlib (test-only transitive
-      # dep via bypass -> plug_cowboy -> cowboy) has two advisories with NO
-      # fixed release (every version >= 2.9.0 is affected, checked 2026-07-02).
-      # Allowlist exactly those two IDs; any other package, retirement, or new
-      # advisory still fails. Drop this wrapper when cowlib ships a fix.
+      # dep via bypass -> plug_cowboy -> cowboy) has three advisories with NO
+      # fixed release -- 2.19.0 is the newest cowlib and every one of them
+      # affects it (checked 2026-08-22).
+      # Allowlist exactly those IDs and their aliases; any other package,
+      # retirement, or new advisory still fails. Drop this wrapper when cowlib
+      # ships a fix.
       # (mix_audit was evaluated instead — its DB doesn't cover cowlib at all.)
       - name: hex.audit (allowlisted unfixed cowlib advisories)
         run: |
           out=$(mix hex.audit 2>&1) && { echo "$out"; exit 0; }
           echo "$out"
           unexpected_ids=$(echo "$out" | grep -oE "EEF-CVE-[0-9-]+|GHSA-[a-z0-9-]+" | sort -u \
-            | grep -vE "^(EEF-CVE-2026-43966|EEF-CVE-2026-43969|GHSA-g2wm-735q-3f56|GHSA-w4f7-4cxr-rv3c)$" || true)
+            | grep -vE "^(EEF-CVE-2026-43966|EEF-CVE-2026-43969|EEF-CVE-2026-43971|GHSA-g2wm-735q-3f56|GHSA-w4f7-4cxr-rv3c)$" || true)
           other_pkgs=$(echo "$out" | grep -E "^  [a-zA-Z0-9_]+ [0-9]" | awk '{print $1}' | sort -u \
             | grep -v "^cowlib$" || true)
           if [ -n "$unexpected_ids" ] || [ -n "$other_pkgs" ]; then
