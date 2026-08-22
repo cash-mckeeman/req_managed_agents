@@ -33,6 +33,39 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
     end
   end
 
+  describe "the swept prefix" do
+    test "carries the separator, so an unrelated name cannot be claimed" do
+      assert HarnessSweep.prefix() == "rma_live_"
+    end
+
+    test "a harness whose name merely starts with the letters is not the canary's" do
+      report =
+        HarnessSweep.run(
+          list_fun: listing([harness("rma_liveness_probe", "READY", "h-not-ours")]),
+          delete_fun: refusing_delete(self())
+        )
+
+      assert report.matched == [],
+             "the separator is free to require and this step deletes real resources"
+
+      refute_received {:deleted, _}
+    end
+
+    test "a harness stranded under an older, truncated name still matches" do
+      # Name.compose keeps 24 base bytes before the truncation hash, so the
+      # 9-byte rma_live_ prefix survives every scheme this project has shipped.
+      truncated = harness("rma_live_rma_live_bedroc_0e23ce_38ca3140", "READY", "h-old")
+
+      report =
+        HarnessSweep.run(
+          list_fun: listing([truncated]),
+          delete_fun: recording_delete(self())
+        )
+
+      assert report.reclaimed == [truncated]
+    end
+  end
+
   describe "status classification" do
     test "a harness already DELETING is a teardown in flight, not a leak" do
       assert HarnessSweep.action(harness("rma_live_x", "DELETING")) == :skip
@@ -62,8 +95,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
       report =
         HarnessSweep.run(
           list_fun: listing([deleting]),
-          delete_fun: refusing_delete(self()),
-          prefix: "rma_live"
+          delete_fun: refusing_delete(self())
         )
 
       assert report.matched == [deleting]
@@ -79,8 +111,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
       report =
         HarnessSweep.run(
           list_fun: listing([stranded]),
-          delete_fun: recording_delete(self()),
-          prefix: "rma_live"
+          delete_fun: recording_delete(self())
         )
 
       assert report.reclaimed == [stranded]
@@ -92,8 +123,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
       report =
         HarnessSweep.run(
           list_fun: listing([harness("data_analyst_harness_1234abcd", "READY", "h-other")]),
-          delete_fun: refusing_delete(self()),
-          prefix: "rma_live"
+          delete_fun: refusing_delete(self())
         )
 
       assert report.matched == []
@@ -106,8 +136,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
       report =
         HarnessSweep.run(
           list_fun: listing([stuck]),
-          delete_fun: fn _id -> {:error, {:http_error, 409}} end,
-          prefix: "rma_live"
+          delete_fun: fn _id -> {:error, {:http_error, 409}} end
         )
 
       assert report.reclaimed == []
@@ -118,8 +147,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
       report =
         HarnessSweep.run(
           list_fun: fn -> {:ok, %{}} end,
-          delete_fun: refusing_delete(self()),
-          prefix: "rma_live"
+          delete_fun: refusing_delete(self())
         )
 
       assert report.matched == []
@@ -135,8 +163,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
       report =
         HarnessSweep.run(
           list_fun: fn -> {:ok, %{"harnesses" => "nope"}} end,
-          delete_fun: refusing_delete(self()),
-          prefix: "rma_live"
+          delete_fun: refusing_delete(self())
         )
 
       assert [{nil, {:unexpected_list_shape, _}}] = report.unreclaimed
@@ -146,8 +173,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
       report =
         HarnessSweep.run(
           list_fun: fn -> {:error, :timeout} end,
-          delete_fun: refusing_delete(self()),
-          prefix: "rma_live"
+          delete_fun: refusing_delete(self())
         )
 
       assert report.unreclaimed == [{nil, {:list_harnesses_failed, :timeout}}]
@@ -159,8 +185,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
       report =
         HarnessSweep.run(
           list_fun: listing([]),
-          delete_fun: refusing_delete(self()),
-          prefix: "rma_live"
+          delete_fun: refusing_delete(self())
         )
 
       assert report.complete?
@@ -170,8 +195,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
       report =
         HarnessSweep.run(
           list_fun: truncated_listing([]),
-          delete_fun: refusing_delete(self()),
-          prefix: "rma_live"
+          delete_fun: refusing_delete(self())
         )
 
       refute report.complete?,
@@ -182,8 +206,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
       report =
         HarnessSweep.run(
           list_fun: fn -> {:error, :timeout} end,
-          delete_fun: refusing_delete(self()),
-          prefix: "rma_live"
+          delete_fun: refusing_delete(self())
         )
 
       refute report.complete?
@@ -196,8 +219,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
         capture_io(fn ->
           HarnessSweep.main(
             list_fun: listing([harness("rma_live_bedrock_harness_1234abcd", "DELETING")]),
-            delete_fun: refusing_delete(self()),
-            prefix: "rma_live"
+            delete_fun: refusing_delete(self())
           )
         end)
 
@@ -211,8 +233,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
         capture_io(fn ->
           HarnessSweep.main(
             list_fun: listing([harness("rma_live_x_1234abcd", "READY", "h-stuck")]),
-            delete_fun: fn _id -> {:error, :denied} end,
-            prefix: "rma_live"
+            delete_fun: fn _id -> {:error, :denied} end
           )
         end)
 
@@ -224,8 +245,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
         capture_io(fn ->
           HarnessSweep.main(
             list_fun: truncated_listing([]),
-            delete_fun: refusing_delete(self()),
-            prefix: "rma_live"
+            delete_fun: refusing_delete(self())
           )
         end)
 
@@ -238,8 +258,7 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
         capture_io(fn ->
           HarnessSweep.main(
             list_fun: listing([]),
-            delete_fun: refusing_delete(self()),
-            prefix: "rma_live"
+            delete_fun: refusing_delete(self())
           )
         end)
 

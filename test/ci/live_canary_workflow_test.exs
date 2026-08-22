@@ -15,6 +15,8 @@ defmodule ReqManagedAgents.LiveCanaryWorkflowTest do
   # run log alone and stop a failed run from billing indefinitely.
   use ExUnit.Case, async: true
 
+  alias ReqManagedAgents.CI.HarnessSweep
+
   @workflow_path Path.expand("../../.github/workflows/live-canary.yml", __DIR__)
 
   # Every value the canary cannot run without. AWS_ROLE_ARN and
@@ -223,14 +225,11 @@ defmodule ReqManagedAgents.LiveCanaryWorkflowTest do
                "leaked — the step must publish which of the two it earned"
     end
 
-    test "the glob is not narrowed to the current naming scheme", %{sweep: sweep} do
-      assert sweep["run"] =~ "rma_live",
-             "the sweep must match the canary's harness-name prefix"
-
-      refute sweep["run"] =~ ~r/rma_live_[a-z]/,
-             "harnesses stranded by earlier runs carry an older, truncated name that also " <>
-               "begins rma_live; narrowing the prefix to the current scheme strands exactly " <>
-               "the orphans this step exists to reclaim"
+    test "the failure annotation quotes the prefix the sweep actually owns", %{sweep: sweep} do
+      assert sweep["run"] =~ HarnessSweep.prefix() <> "*",
+             "the step's error annotation is what tells an operator which harnesses to go " <>
+               "look for by hand; a prefix that has drifted from the one HarnessSweep " <>
+               "matches (#{HarnessSweep.prefix()}) sends them after the wrong resources"
     end
   end
 end

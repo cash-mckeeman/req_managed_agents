@@ -25,7 +25,12 @@ defmodule ReqManagedAgents.CI.HarnessSweep do
   alias ReqManagedAgents.CI.HarnessSweep.Report
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatus
 
-  @prefix "rma_live"
+  # The separator is part of the prefix. `Name.compose/3` keeps 24 bytes of base
+  # before the truncation hash and every canary base begins `rma_live_` (9
+  # bytes), so no harness this project ever created — however old its naming
+  # scheme — can have lost it. Matching bare `rma_live` buys nothing and would
+  # claim an unrelated `rma_liveness_probe`.
+  @prefix "rma_live_"
 
   @typedoc """
   Seams and knobs. `:list_fun` / `:delete_fun` keep the default suite off the

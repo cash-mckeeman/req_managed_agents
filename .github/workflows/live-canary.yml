@@ -138,10 +138,12 @@ jobs:
       # rules are unit-tested rather than trusted. MIX_ENV must stay `test` —
       # that is the only env whose elixirc_paths compile the module.
       #
-      # The prefix is `rma_live`, not the full current scheme. Harnesses
-      # stranded by earlier runs carry an older, truncated name that also
-      # begins `rma_live`, and nothing else will ever collect them.
-      - name: Sweep orphaned rma_live harnesses
+      # The swept prefix is `rma_live_`, separator included: Name.compose keeps
+      # 24 bytes of base before the truncation hash and every canary base begins
+      # `rma_live_`, so even a harness stranded under an older scheme still
+      # carries it. The module owns the constant; the annotation below only
+      # quotes it.
+      - name: Sweep orphaned rma_live_ harnesses
         id: sweep
         if: ${{ always() && steps.deps.outcome == 'success' }}
         run: |
@@ -157,7 +159,7 @@ jobs:
             echo "complete=true" >> "$GITHUB_OUTPUT"
           fi
           if grep -q "^SWEEP_UNRECLAIMED" "$CANARY_DIAGNOSTICS/harness-sweep.log"; then
-            echo "::error title=Live canary sweep::a harness matching rma_live* could not be reclaimed and is still allocated"
+            echo "::error title=Live canary sweep::a harness matching rma_live_* could not be reclaimed and is still allocated"
             exit 1
           fi
 
@@ -205,10 +207,10 @@ jobs:
             // as clean.
             const sweepComplete = (sweep.outputs || {}).complete === 'true';
             const sweepNote = sweep.outcome !== 'success'
-              ? `The post-suite sweep did NOT succeed (outcome: ${sweep.outcome || 'did not run'}) — an rma_live* harness may still be allocated. Check its step log.`
+              ? `The post-suite sweep did NOT succeed (outcome: ${sweep.outcome || 'did not run'}) — an rma_live_* harness may still be allocated. Check its step log.`
               : sweepComplete
-                ? 'The post-suite sweep ran clean: no rma_live* harness was left allocated.'
-                : 'The post-suite sweep reclaimed everything it saw, but the harness listing was truncated — it did NOT scan the whole account, so an rma_live* harness may still be allocated. Check its step log.';
+                ? 'The post-suite sweep ran clean: no rma_live_* harness was left allocated.'
+                : 'The post-suite sweep reclaimed everything it saw, but the harness listing was truncated — it did NOT scan the whole account, so an rma_live_* harness may still be allocated. Check its step log.';
             const body = [
               lead,
               '',
