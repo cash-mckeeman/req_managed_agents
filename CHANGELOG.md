@@ -18,8 +18,10 @@ The name now forms the harness base, composed through the new shared
 `harness_` literal is gone.
 
 **Migration.** Existing harnesses do not match the new names and will not be
-found by recovery. There is no harness GC, so they must be swept deliberately —
-this is a one-time re-provision. The content digest itself is unchanged.
+found by recovery — this is a one-time re-provision, and the content digest
+itself is unchanged. The live-canary workflow now sweeps orphaned `rma_live_*`
+harnesses after every run, so its own strays are collected; a harness under any
+other name is still yours to delete deliberately.
 
 Claude Managed Agents names are **not** affected: the CMA policy is
 permissive, so every name that composed before is byte-identical now.

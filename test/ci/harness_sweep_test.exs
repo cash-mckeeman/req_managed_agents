@@ -1,0 +1,424 @@
+defmodule ReqManagedAgents.CI.HarnessSweepTest do
+  # The canary's post-suite sweep deletes real AWS resources, so its decisions
+  # are pinned here rather than left to a shell string in the workflow.
+  #
+  # The decision that matters most is the one it used to get wrong: matching on
+  # name alone made a successful run's own teardown — asynchronous, so still
+  # `DELETING` seconds later — look exactly like a leak.
+  use ExUnit.Case, async: true
+
+  import ExUnit.CaptureIO
+
+  alias ReqManagedAgents.CI.HarnessSweep
+
+  defp harness(name, status, id \\ "h-abc"),
+    do: %{"harnessName" => name, "harnessId" => id, "status" => status}
+
+  defp listing(harnesses), do: fn -> {:ok, %{"harnesses" => harnesses}} end
+
+  # A listing that changes between calls, so the post-delete confirmation can be
+  # driven through a real sequence: page N is returned on call N, and the last
+  # page repeats for every call after it.
+  defp listings(pages) do
+    {:ok, agent} = start_supervised({Agent, fn -> pages end})
+
+    fn ->
+      Agent.get_and_update(agent, fn
+        [last] -> {last, [last]}
+        [head | tail] -> {head, tail}
+      end)
+    end
+  end
+
+  # The confirm budget, collapsed so tests do not wait it out.
+  defp fast_confirm, do: [sleep_fun: fn _ms -> :ok end, confirm_interval_ms: 0]
+
+  # A leaked harness the sweep will try to reclaim.
+  defp stuck, do: harness("rma_live_bedrock_harness_1234abcd", "READY", "h-stuck")
+
+  defp truncated_listing(harnesses),
+    do: fn -> {:ok, %{"harnesses" => harnesses, "nextToken" => "page-2"}} end
+
+  defp recording_delete(pid) do
+    fn id ->
+      send(pid, {:deleted, id})
+      {:ok, %{}}
+    end
+  end
+
+  defp refusing_delete(pid) do
+    fn id ->
+      send(pid, {:deleted, id})
+      flunk("the sweep deleted #{id}, which it was supposed to leave alone")
+    end
+  end
+
+  describe "the swept prefix" do
+    test "carries the separator, so an unrelated name cannot be claimed" do
+      assert HarnessSweep.prefix() == "rma_live_"
+    end
+
+    test "a harness whose name merely starts with the letters is not the canary's" do
+      report =
+        HarnessSweep.run(
+          list_fun: listing([harness("rma_liveness_probe", "READY", "h-not-ours")]),
+          delete_fun: refusing_delete(self())
+        )
+
+      assert report.matched == [],
+             "the separator is free to require and this step deletes real resources"
+
+      refute_received {:deleted, _}
+    end
+
+    test "a harness stranded under an older, truncated name still matches" do
+      # Name.compose keeps 24 base bytes before the truncation hash, so the
+      # 9-byte rma_live_ prefix survives every scheme this project has shipped.
+      truncated = harness("rma_live_rma_live_bedroc_0e23ce_38ca3140", "READY", "h-old")
+
+      report =
+        HarnessSweep.run(
+          [
+            list_fun:
+              listings([{:ok, %{"harnesses" => [truncated]}}, {:ok, %{"harnesses" => []}}]),
+            delete_fun: recording_delete(self())
+          ] ++ fast_confirm()
+        )
+
+      assert report.reclaimed == [truncated]
+    end
+  end
+
+  describe "status classification" do
+    test "a harness already DELETING is a teardown in flight, not a leak" do
+      assert HarnessSweep.action(harness("rma_live_x", "DELETING")) == :skip
+    end
+
+    test "a DELETE_FAILED harness is a leak" do
+      assert HarnessSweep.action(harness("rma_live_x", "DELETE_FAILED")) == :reclaim
+    end
+
+    test "a harness still standing after the suite is a leak whatever its phase" do
+      for status <- ~w(READY CREATING UPDATING CREATE_FAILED UPDATE_FAILED) do
+        assert HarnessSweep.action(harness("rma_live_x", status)) == :reclaim,
+               "#{status} is a harness still billing after the suite finished"
+      end
+    end
+
+    test "a status this library does not recognise is reclaimed rather than left billing" do
+      assert HarnessSweep.action(harness("rma_live_x", "SOME_NEW_AWS_STATUS")) == :reclaim
+      assert HarnessSweep.action(%{"harnessName" => "rma_live_x"}) == :reclaim
+    end
+  end
+
+  describe "reclaiming" do
+    test "does not delete this run's own harnesses while they are DELETING" do
+      deleting = harness("rma_live_bedrock_harness_1234abcd", "DELETING")
+
+      report =
+        HarnessSweep.run(
+          list_fun: listing([deleting]),
+          delete_fun: refusing_delete(self())
+        )
+
+      assert report.matched == [deleting]
+      assert report.skipped == [deleting]
+      assert report.reclaimed == []
+      assert report.unreclaimed == []
+      refute_received {:deleted, _}
+    end
+
+    test "deletes a harness stranded in DELETE_FAILED" do
+      stranded = harness("rma_live_bedrock_harness_1234abcd", "DELETE_FAILED", "h-stranded")
+
+      report =
+        HarnessSweep.run(
+          [
+            list_fun:
+              listings([{:ok, %{"harnesses" => [stranded]}}, {:ok, %{"harnesses" => []}}]),
+            delete_fun: recording_delete(self())
+          ] ++ fast_confirm()
+        )
+
+      assert report.reclaimed == [stranded]
+      assert report.skipped == []
+      assert report.unreclaimed == []
+      assert_received {:deleted, "h-stranded"}
+    end
+
+    test "leaves harnesses outside the canary's prefix alone" do
+      report =
+        HarnessSweep.run(
+          list_fun: listing([harness("data_analyst_harness_1234abcd", "READY", "h-other")]),
+          delete_fun: refusing_delete(self())
+        )
+
+      assert report.matched == []
+      refute_received {:deleted, _}
+    end
+
+    test "a delete the provider rejects is reported, not counted as reclaimed" do
+      stuck = harness("rma_live_bedrock_harness_1234abcd", "READY", "h-stuck")
+
+      report =
+        HarnessSweep.run(
+          list_fun: listing([stuck]),
+          delete_fun: fn _id -> {:error, {:http_error, 409}} end
+        )
+
+      assert report.reclaimed == []
+      assert report.unreclaimed == [{stuck, {:http_error, 409}}]
+    end
+
+    test "an account holding no harnesses at all is nothing to reclaim, not a failure" do
+      report =
+        HarnessSweep.run(
+          list_fun: fn -> {:ok, %{}} end,
+          delete_fun: refusing_delete(self())
+        )
+
+      assert report.matched == []
+
+      assert report.unreclaimed == [],
+             "AWS list APIs omit the collection key when it is empty; reporting that as an " <>
+               "unreclaimable harness reddens the canary on the best possible outcome"
+
+      assert report.complete?
+    end
+
+    test "a harnesses key that is not a list is an unexpected shape" do
+      report =
+        HarnessSweep.run(
+          list_fun: fn -> {:ok, %{"harnesses" => "nope"}} end,
+          delete_fun: refusing_delete(self())
+        )
+
+      assert [{nil, {:unexpected_list_shape, _}}] = report.unreclaimed
+    end
+
+    test "a listing the provider refuses is reported rather than silently swept clean" do
+      report =
+        HarnessSweep.run(
+          list_fun: fn -> {:error, :timeout} end,
+          delete_fun: refusing_delete(self())
+        )
+
+      assert report.unreclaimed == [{nil, {:list_harnesses_failed, :timeout}}]
+    end
+  end
+
+  describe "completeness" do
+    test "an untruncated listing is a scan of the whole account" do
+      report =
+        HarnessSweep.run(
+          list_fun: listing([]),
+          delete_fun: refusing_delete(self())
+        )
+
+      assert report.complete?
+    end
+
+    test "a nextToken means orphans beyond the page were never seen" do
+      report =
+        HarnessSweep.run(
+          list_fun: truncated_listing([]),
+          delete_fun: refusing_delete(self())
+        )
+
+      refute report.complete?,
+             "reclaiming nothing off page one is not evidence that nothing leaked"
+    end
+
+    test "a listing that failed vouches for nothing" do
+      report =
+        HarnessSweep.run(
+          list_fun: fn -> {:error, :timeout} end,
+          delete_fun: refusing_delete(self())
+        )
+
+      refute report.complete?
+    end
+  end
+
+  describe "confirming a delete actually happened" do
+    test "a harness the provider accepted but never removed is not reported deleted" do
+      report =
+        HarnessSweep.run(
+          [
+            list_fun:
+              listings([
+                {:ok, %{"harnesses" => [stuck()]}},
+                {:ok,
+                 %{
+                   "harnesses" => [
+                     harness("rma_live_bedrock_harness_1234abcd", "DELETE_FAILED", "h-stuck")
+                   ]
+                 }}
+              ]),
+            delete_fun: recording_delete(self())
+          ] ++ fast_confirm()
+        )
+
+      assert report.reclaimed == []
+
+      assert [{%{"harnessId" => "h-stuck"}, :present_after_delete}] = report.unreclaimed,
+             "a 2xx from DeleteHarness is an acceptance; DELETE_FAILED is still billing"
+    end
+
+    test "a delete still in flight when the budget runs out is unconfirmed, not deleted" do
+      deleting = harness("rma_live_bedrock_harness_1234abcd", "DELETING", "h-stuck")
+
+      report =
+        HarnessSweep.run(
+          [
+            list_fun:
+              listings([
+                {:ok, %{"harnesses" => [stuck()]}},
+                {:ok, %{"harnesses" => [deleting]}}
+              ]),
+            delete_fun: recording_delete(self()),
+            confirm_attempts: 2
+          ] ++ fast_confirm()
+        )
+
+      assert report.reclaimed == []
+      assert report.unreclaimed == []
+
+      assert [%{"harnessId" => "h-stuck"}] = report.unconfirmed,
+             "the harness was still deleting when the budget ran out, so it is neither " <>
+               "confirmed gone nor known to be stranded"
+    end
+
+    test "stops polling as soon as the harness is gone" do
+      report =
+        HarnessSweep.run(
+          [
+            list_fun:
+              listings([
+                {:ok, %{"harnesses" => [stuck()]}},
+                {:ok, %{"harnesses" => []}},
+                {:error, :should_never_be_reached}
+              ]),
+            delete_fun: recording_delete(self()),
+            confirm_attempts: 6
+          ] ++ fast_confirm()
+        )
+
+      assert report.reclaimed == [stuck()]
+      assert report.complete?
+    end
+
+    test "absence on a truncated page is not evidence the harness went away" do
+      report =
+        HarnessSweep.run(
+          [
+            list_fun:
+              listings([
+                {:ok, %{"harnesses" => [stuck()]}},
+                {:ok, %{"harnesses" => [], "nextToken" => "page-2"}}
+              ]),
+            delete_fun: recording_delete(self()),
+            confirm_attempts: 2
+          ] ++ fast_confirm()
+        )
+
+      assert report.reclaimed == []
+      assert [%{"harnessId" => "h-stuck"}] = report.unconfirmed
+      refute report.complete?
+    end
+
+    test "a run whose own teardown worked never enters the confirm loop" do
+      report =
+        HarnessSweep.run(
+          list_fun: listing([harness("rma_live_bedrock_harness_1234abcd", "DELETING")]),
+          delete_fun: refusing_delete(self()),
+          sleep_fun: fn _ms ->
+            flunk("the sweep waited on a confirm it had nothing to confirm")
+          end
+        )
+
+      assert report.skipped != []
+      assert report.complete?
+    end
+  end
+
+  describe "the printed report" do
+    test "a run that leaked nothing raises no leak warning" do
+      output =
+        capture_io(fn ->
+          HarnessSweep.main(
+            list_fun: listing([harness("rma_live_bedrock_harness_1234abcd", "DELETING")]),
+            delete_fun: refusing_delete(self())
+          )
+        end)
+
+      refute output =~ "::warning::"
+      refute output =~ "SWEEP_UNRECLAIMED"
+      assert output =~ "teardown already in flight"
+    end
+
+    test "an unreclaimed harness prints the marker the workflow step fails on" do
+      output =
+        capture_io(fn ->
+          HarnessSweep.main(
+            list_fun: listing([harness("rma_live_x_1234abcd", "READY", "h-stuck")]),
+            delete_fun: fn _id -> {:error, :denied} end,
+            sleep_fun: fn _ms -> :ok end
+          )
+        end)
+
+      assert output =~ ~r/^SWEEP_UNRECLAIMED rma_live_x_1234abcd h-stuck/m
+    end
+
+    test "a truncated listing prints the marker that downgrades the run report" do
+      output =
+        capture_io(fn ->
+          HarnessSweep.main(
+            list_fun: truncated_listing([]),
+            delete_fun: refusing_delete(self())
+          )
+        end)
+
+      assert output =~ "SWEEP_INCOMPLETE"
+      refute output =~ "SWEEP_UNRECLAIMED"
+    end
+
+    test "an unconfirmed delete prints the marker that downgrades the run report" do
+      output =
+        capture_io(fn ->
+          HarnessSweep.main(
+            [
+              list_fun:
+                listings([
+                  {:ok, %{"harnesses" => [stuck()]}},
+                  {:ok,
+                   %{
+                     "harnesses" => [
+                       harness("rma_live_bedrock_harness_1234abcd", "DELETING", "h-stuck")
+                     ]
+                   }}
+                ]),
+              delete_fun: recording_delete(self()),
+              confirm_attempts: 2
+            ] ++ fast_confirm()
+          )
+        end)
+
+      assert output =~ "SWEEP_INCOMPLETE"
+      refute output =~ "reclaimed leaked harness"
+      refute output =~ "SWEEP_UNRECLAIMED"
+    end
+
+    test "a complete listing prints no incompleteness marker" do
+      output =
+        capture_io(fn ->
+          HarnessSweep.main(
+            list_fun: listing([]),
+            delete_fun: refusing_delete(self())
+          )
+        end)
+
+      refute output =~ "SWEEP_INCOMPLETE"
+    end
+  end
+end
