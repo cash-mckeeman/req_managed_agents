@@ -11,36 +11,93 @@ name: Live canary
 #
 # AWS auth is GitHub OIDC — no long-lived AWS keys. The workflow assumes
 # rma-ci-github, whose trust policy only accepts runs from this repo's main
-# branch. Setup reference: docs/aws-ci-setup.md.
+# branch.
 #
 # Required repository secret:  ANTHROPIC_API_KEY
 # Required repository vars:    AWS_ROLE_ARN, HARNESS_EXECUTION_ROLE_ARN
+#
+# The operability invariants below — preflight ordering, step ids, the filer's
+# shape and the concurrency key — are pinned by
+# test/ci/live_canary_workflow_test.exs, which runs in the ordinary CI suite.
 
 on:
   schedule:
     - cron: "0 6 * * 1,4" # Mon + Thu 06:00 UTC
   workflow_dispatch:
 
+# Keyed on the workflow alone, deliberately: not on the ref, not on the event.
+# Harness names are content-addressed, so a manual dispatch and the scheduled
+# run compute the *same* names — overlap them and one run adopts or deletes the
+# harness the other is mid-flight on. Any key that differs between `schedule`
+# and `workflow_dispatch` would let exactly that pair through.
+#
+# Queue rather than cancel: cancelling kills a run from outside its own
+# cleanup, which is precisely how a created harness becomes an orphan.
+concurrency:
+  group: live-canary
+  cancel-in-progress: false
+
 permissions:
   contents: read
   id-token: write # OIDC token for AWS role assumption
+  issues: write # the failure filer opens an issue
 
 env:
   MIX_ENV: test
+  # Everything worth keeping from a failed run is written here and uploaded as
+  # a single artifact.
+  CANARY_DIAGNOSTICS: /tmp/live-canary
 
 jobs:
   live:
     runs-on: ubuntu-latest
+    # Per-test tags bound individual tests; this bounds the job. Without it a
+    # hung provisioning poll holds the runner for GitHub's 6-hour default with
+    # a harness allocated the whole time.
+    timeout-minutes: 45
     # ANTHROPIC_API_KEY / HEX_API_KEY live in the `prod` environment —
     # jobs only see environment secrets when they declare the environment.
     environment: prod
     steps:
-      - uses: actions/checkout@v4
-      - uses: erlef/setup-beam@v1
+      - name: Check out the repository
+        id: checkout
+        uses: actions/checkout@v4
+
+      # Fail fast, BY NAME, before anything expensive. An unset vars.AWS_ROLE_ARN
+      # otherwise surfaces two steps later as the opaque "Credentials could not
+      # be loaded ... from any providers", and an unset
+      # vars.HARNESS_EXECUTION_ROLE_ARN not until the first CreateHarness, deep
+      # inside the suite, as a provider error that reads like drift.
+      - name: Preflight — required vars and secrets
+        id: preflight
+        env:
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          HARNESS_EXECUTION_ROLE_ARN: ${{ vars.HARNESS_EXECUTION_ROLE_ARN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          missing=()
+          [ -n "$AWS_ROLE_ARN" ] || missing+=("vars.AWS_ROLE_ARN — IAM role assumed via OIDC; its trust policy must accept repo:${{ github.repository }}:environment:prod")
+          [ -n "$HARNESS_EXECUTION_ROLE_ARN" ] || missing+=("vars.HARNESS_EXECUTION_ROLE_ARN — execution role passed to CreateHarness")
+          [ -n "$ANTHROPIC_API_KEY" ] || missing+=("secrets.ANTHROPIC_API_KEY")
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error title=Live canary preflight failed::Unprovisioned credentials — set them on the prod environment or at repo scope"
+            for m in "${missing[@]}"; do
+              echo "::error::missing: $m"
+            done
+            exit 1
+          fi
+          echo "preflight OK — every required var and secret is present"
+
+      - name: Set up Elixir and OTP
+        id: setup_beam
+        uses: erlef/setup-beam@v1
         with:
           elixir-version: "1.20"
           otp-version: "29"
-      - uses: actions/cache@v4
+
+      - name: Restore deps and build cache
+        id: cache
+        uses: actions/cache@v4
         with:
           path: |
             deps
@@ -48,13 +105,84 @@ jobs:
           key: mix-quality-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: |
             mix-quality-${{ runner.os }}-
-      - uses: aws-actions/configure-aws-credentials@v4
+
+      - name: Assume the CI role via OIDC
+        id: aws
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-1
-      - run: mix deps.get
+
+      - name: Fetch dependencies
+        id: deps
+        run: mix deps.get
+
       - name: Run live suite against real providers
+        id: live_suite
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           HARNESS_EXECUTION_ROLE_ARN: ${{ vars.HARNESS_EXECUTION_ROLE_ARN }}
-        run: mix test --only live
+        run: |
+          set -o pipefail
+          mkdir -p "$CANARY_DIAGNOSTICS"
+          mix test --only live 2>&1 | tee "$CANARY_DIAGNOSTICS/live-test.log"
+
+      - name: Upload canary diagnostics
+        id: diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-canary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CANARY_DIAGNOSTICS }}
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Fires on ANY job failure. Two shapes, never conflated:
+      #   - the live suite itself failed  → provider drift, the signal this
+      #     canary exists to raise;
+      #   - anything else failed          → a harness/infra failure, where the
+      #     suite never got to speak, so the issue names the first red step
+      #     instead of blaming the providers.
+      # Both carry every step outcome and a link to the run, so the first red
+      # step is one click away rather than a log excavation.
+      - name: File an issue on failure
+        id: filer
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const steps = ${{ toJSON(steps) }};
+            const stepLines = Object.entries(steps)
+              .map(([id, s]) => `- \`${id}\`: ${s.outcome}`).join('\n');
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const date = new Date().toISOString().slice(0, 10);
+            const suite = steps.live_suite || {};
+            const isDrift = suite.outcome === 'failure';
+            const title = isDrift
+              ? `Live canary drift ${date} — the live suite failed`
+              : `Live canary HARNESS failure ${date} — the live suite never reported`;
+            const lead = isDrift
+              ? 'The live suite ran and failed. Treat this as provider drift until the log says otherwise; the full test log is in the run\'s diagnostics artifact.'
+              : 'The canary failed without the live suite reporting a result. This is a harness/infra failure, not measured drift — the first non-success step below is the cause.';
+            const body = [
+              lead,
+              '',
+              `Run: ${runUrl}`,
+              '',
+              'Step outcomes (by id):',
+              stepLines,
+            ].join('\n');
+            const label = 'canary';
+            try {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner, repo: context.repo.repo,
+                name: label, color: 'd93f0b',
+                description: 'Filed by the live canary workflow',
+              });
+            } catch (e) {
+              // Already exists — createLabel is the only way to guarantee it does.
+            }
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title, body, labels: [label],
+            });
