@@ -68,6 +68,10 @@ defmodule ReqManagedAgents.MixProject do
       # Injected chat_funs (tests, Ollama, mimir lanes) work without it;
       # Local raises a clear error at first use if it's missing (Local.Deps).
       {:req_llm, "~> 1.10", optional: true},
+      # Parses .github/workflows/*.yml for the workflow-contract tests in
+      # test/ci/. Test-scoped on purpose: nothing in lib/ reads YAML, and this
+      # package is public on Hex, so it must not become a consumer requirement.
+      {:yaml_elixir, "~> 2.11", only: [:dev, :test]},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
