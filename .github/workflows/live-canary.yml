@@ -182,6 +182,12 @@ jobs:
       #     instead of blaming the providers.
       # Both carry every step outcome and a link to the run, so the first red
       # step is one click away rather than a log excavation.
+      #
+      # One issue per shape, not one per run: the cron fires twice a week and an
+      # operator chasing a failure dispatches it repeatedly, so a filer without
+      # duplicate suppression buries the original under identical copies. The
+      # HTML marker in the body is what makes an existing issue findable after
+      # the date in its title has moved on.
       - name: File an issue on failure
         id: filer
         if: failure()
@@ -212,7 +218,9 @@ jobs:
               : sweepComplete
                 ? 'The post-suite sweep ran clean: no rma_live_* harness was left allocated.'
                 : 'The post-suite sweep did NOT establish that the account is clean: either the harness listing was truncated, or a DeleteHarness it issued was never confirmed to have removed the harness. An rma_live_* harness may still be allocated. Check its step log.';
+            const marker = `<!-- live-canary:${isDrift ? 'drift' : 'harness'} -->`;
             const body = [
+              marker,
               lead,
               '',
               `Run: ${runUrl}`,
@@ -230,9 +238,42 @@ jobs:
                 description: 'Filed by the live canary workflow',
               });
             } catch (e) {
-              // Already exists — createLabel is the only way to guarantee it does.
+              // 422 is the label already existing, which is the ordinary case
+              // and the only reason to ignore. A 403 or a rate limit must not be
+              // swallowed identically: the label is also the key the duplicate
+              // search below reads.
+              if (e.status !== 422) {
+                core.warning(`could not ensure the ${label} label: ${e.message}`);
+              }
             }
-            await github.rest.issues.create({
-              owner: context.repo.owner, repo: context.repo.repo,
-              title, body, labels: [label],
-            });
+            let existing = null;
+            try {
+              const open = await github.rest.issues.listForRepo({
+                owner: context.repo.owner, repo: context.repo.repo,
+                state: 'open', labels: label, per_page: 100,
+              });
+              existing = open.data.find((i) => (i.body || '').includes(marker)) || null;
+            } catch (e) {
+              core.warning(`could not check for an existing canary issue: ${e.message}`);
+            }
+            // Wrapped, because this is the run's only durable report and the
+            // run is already red: an unhandled throw here loses the report
+            // inside a failure nobody will reopen, with no annotation saying so.
+            try {
+              if (existing) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: existing.number,
+                  body: [`Recurred ${date}.`, '', body].join('\n'),
+                });
+                core.notice(`canary failure appended to #${existing.number}`);
+              } else {
+                const created = await github.rest.issues.create({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  title, body, labels: [label],
+                });
+                core.notice(`canary failure filed as #${created.data.number}`);
+              }
+            } catch (e) {
+              core.setFailed(`the canary could not record its failure: ${e.message}`);
+            }

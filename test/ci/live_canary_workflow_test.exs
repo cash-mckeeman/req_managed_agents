@@ -129,6 +129,36 @@ defmodule ReqManagedAgents.LiveCanaryWorkflowTest do
                "writing that the sweep ran clean"
     end
 
+    test "survives its own failure loudly", %{script: script} do
+      assert script =~ "core.setFailed",
+             "the filed issue is the run's only durable report, and the run is already red — " <>
+               "an unhandled throw from the create call loses it inside a failure nobody " <>
+               "reopens, with nothing in the annotations saying why"
+    end
+
+    test "does not swallow a label error that is not the label already existing", %{
+      script: script
+    } do
+      refute script =~ ~r|catch\s*\(\w+\)\s*\{\s*(//[^\n]*\n\s*)*\}|,
+             "an empty catch treats a 403 from a restricted token, or an abuse rate limit, " <>
+               "exactly like the expected 422 already-exists — and the label is also the key " <>
+               "the duplicate search reads"
+    end
+
+    test "comments on the open issue instead of filing another", %{script: script} do
+      assert script =~ "listForRepo",
+             "two crons a week plus an operator re-dispatching to chase a failure file one " <>
+               "issue per run; the filer must look for the open one first"
+
+      assert script =~ "issues.createComment",
+             "having found the existing issue, the filer must add to it rather than open a " <>
+               "duplicate that buries it"
+
+      assert script =~ "live-canary:",
+             "the title carries the run's date, so it cannot match across days — the body " <>
+               "needs a stable marker for the search to key on"
+    end
+
     test "distinguishes a harness failure from provider drift", %{script: script} do
       assert script =~ "live_suite",
              "the filer must branch on whether the live suite itself failed — otherwise a " <>
