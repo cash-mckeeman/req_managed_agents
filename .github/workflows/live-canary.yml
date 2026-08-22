@@ -17,7 +17,7 @@ name: Live canary
 # Required repository vars:    AWS_ROLE_ARN, HARNESS_EXECUTION_ROLE_ARN
 #
 # The operability invariants below — preflight ordering, step ids, the filer's
-# shape and the concurrency key — are pinned by
+# shape, the concurrency key, the sweep prefix — are pinned by
 # test/ci/live_canary_workflow_test.exs, which runs in the ordinary CI suite.
 
 on:
@@ -127,6 +127,55 @@ jobs:
           mkdir -p "$CANARY_DIAGNOSTICS"
           mix test --only live 2>&1 | tee "$CANARY_DIAGNOSTICS/live-test.log"
 
+      # Runs on every exit path — pass, fail, or a job timeout that killed the
+      # suite from outside its own cleanup, which is the path that actually
+      # leaks. Guarded on `deps` rather than on the suite: with no BEAM and no
+      # deps this step is `mix: command not found`, a red step that says
+      # nothing and would file a bogus issue.
+      #
+      # The prefix is `rma_live`, not the full current scheme. Harnesses
+      # stranded by earlier runs carry an older, truncated name that also
+      # begins `rma_live`, and nothing else will ever collect them.
+      - name: Sweep orphaned rma_live harnesses
+        id: sweep
+        if: ${{ always() && steps.deps.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          mkdir -p "$CANARY_DIAGNOSTICS"
+          mix run -e '
+            alias ReqManagedAgents.AgentCore.Client
+
+            prefix = "rma_live"
+            client = Client.new()
+
+            case Client.list_harnesses(client) do
+              {:ok, %{"harnesses" => harnesses}} ->
+                orphans = Enum.filter(harnesses, &String.starts_with?(&1["harnessName"] || "", prefix))
+                IO.puts("sweep: #{length(orphans)} harness(es) matching #{prefix}*")
+
+                Enum.each(orphans, fn h ->
+                  id = h["harnessId"]
+                  name = h["harnessName"]
+                  IO.puts("::warning::reclaiming leaked harness #{name} (#{id}, status #{h["status"]})")
+
+                  case Client.delete_harness(client, id) do
+                    {:ok, _} -> IO.puts("sweep: deleted #{name}")
+                    {:error, reason} -> IO.puts("SWEEP_UNRECLAIMED #{name} #{id} #{inspect(reason)}")
+                  end
+                end)
+
+              {:ok, other} ->
+                IO.puts("SWEEP_UNRECLAIMED ListHarnesses returned an unexpected shape: #{inspect(other)}")
+
+              {:error, reason} ->
+                IO.puts("SWEEP_UNRECLAIMED ListHarnesses failed: #{inspect(reason)}")
+            end
+          ' 2>&1 | tee "$CANARY_DIAGNOSTICS/harness-sweep.log"
+          if grep -q "^SWEEP_UNRECLAIMED" "$CANARY_DIAGNOSTICS/harness-sweep.log"; then
+            echo "::error title=Live canary sweep::a harness matching rma_live* could not be reclaimed and is still allocated"
+            exit 1
+          fi
+
       - name: Upload canary diagnostics
         id: diagnostics
         if: failure()
@@ -157,6 +206,7 @@ jobs:
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const date = new Date().toISOString().slice(0, 10);
             const suite = steps.live_suite || {};
+            const sweep = steps.sweep || {};
             const isDrift = suite.outcome === 'failure';
             const title = isDrift
               ? `Live canary drift ${date} — the live suite failed`
@@ -164,10 +214,15 @@ jobs:
             const lead = isDrift
               ? 'The live suite ran and failed. Treat this as provider drift until the log says otherwise; the full test log is in the run\'s diagnostics artifact.'
               : 'The canary failed without the live suite reporting a result. This is a harness/infra failure, not measured drift — the first non-success step below is the cause.';
+            const sweepNote = sweep.outcome === 'success'
+              ? 'The post-suite sweep ran clean: no rma_live* harness was left allocated.'
+              : `The post-suite sweep did NOT succeed (outcome: ${sweep.outcome || 'did not run'}) — an rma_live* harness may still be allocated. Check its step log.`;
             const body = [
               lead,
               '',
               `Run: ${runUrl}`,
+              '',
+              sweepNote,
               '',
               'Step outcomes (by id):',
               stepLines,
