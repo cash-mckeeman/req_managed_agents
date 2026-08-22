@@ -12,6 +12,26 @@ defmodule ReqManagedAgents.LiveSmokeTest do
 
   @canary_env_spec %{type: "cloud", networking: %{type: "unrestricted"}}
 
+  # Cleanup is registered the MOMENT the resource exists, never from inside a
+  # `try/after`. An ExUnit timeout kills the test process from outside, so no
+  # `after` clause runs — which is exactly how a live run orphaned a billable
+  # harness. `on_exit/1` registers with the supervising handler and survives any
+  # death, including the window between `provision/3` returning and the body
+  # starting.
+  #
+  # The teardown result is ASSERTED rather than inspected: a delete that came
+  # back an error used to be indistinguishable from one that worked, so the
+  # suite went green over a leak.
+  defp teardown_on_exit(provider, handle, opts \\ []) do
+    on_exit(fn ->
+      result = ReqManagedAgents.teardown(provider, handle, opts)
+
+      assert result == :ok,
+             "teardown/2 did not succeed for #{inspect(handle)} — the resource may be " <>
+               "orphaned and still billing. Got: #{inspect(result)}"
+    end)
+  end
+
   @tag timeout: 120_000
   test "full cycle against the live beta" do
     {:ok, _} = Application.ensure_all_started(:req_managed_agents)
@@ -203,26 +223,22 @@ defmodule ReqManagedAgents.LiveSmokeTest do
         name: "rma-live-cma-provision"
       )
 
+    teardown_on_exit(ClaudeManagedAgents, handle, client: client)
+
     IO.inspect(handle, label: "LIVE CMA provisioned handle")
     assert %{agent_id: _, environment_id: _} = handle
 
-    try do
-      assert {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn} = result} =
-               ReqManagedAgents.Session.run(ClaudeManagedAgents,
-                 client: client,
-                 agent_id: handle.agent_id,
-                 environment_id: handle.environment_id,
-                 prompt: "Please echo: hello-provisioned",
-                 handler: Handler,
-                 timeout: 120_000
-               )
+    assert {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn} = result} =
+             ReqManagedAgents.Session.run(ClaudeManagedAgents,
+               client: client,
+               agent_id: handle.agent_id,
+               environment_id: handle.environment_id,
+               prompt: "Please echo: hello-provisioned",
+               handler: Handler,
+               timeout: 120_000
+             )
 
-      IO.inspect(result.usage, label: "LIVE CMA provisioned-run usage")
-    after
-      # Claude archives are synchronous (and permanent), so unlike the async
-      # Bedrock delete below we can assert teardown/2 live.
-      assert :ok = ReqManagedAgents.teardown(ClaudeManagedAgents, handle, client: client)
-    end
+    IO.inspect(result.usage, label: "LIVE CMA provisioned-run usage")
   end
 
   @tag timeout: 600_000
@@ -250,51 +266,50 @@ defmodule ReqManagedAgents.LiveSmokeTest do
       }
     }
 
+    # No name_prefix: the harness base already carries this spec's own `rma-live-`
+    # segment, so prefixing "rma_live" on top pushed the composed name past 40
+    # characters and into the truncation-hash fallback — which replaced the
+    # readable leg name with a hash. Dropped, every leg composes to
+    # `rma_live_bedrock_<leg>_<digest>`: distinct, readable, and still matched by
+    # a prefix sweep for stray `rma_live*` harnesses.
     {:ok, handle} =
-      ReqManagedAgents.provision(BedrockAgentCore, spec,
-        execution_role_arn: role,
-        name_prefix: "rma_live"
-      )
+      ReqManagedAgents.provision(BedrockAgentCore, spec, execution_role_arn: role)
+
+    teardown_on_exit(BedrockAgentCore, handle)
 
     IO.inspect(handle, label: "LIVE Bedrock provisioned handle")
 
-    try do
-      {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn} = result} =
-        ReqManagedAgents.AgentCore.invoke_to_completion(
-          harness_arn: handle.harness_arn,
-          runtime_session_id:
-            "live-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),
-          prompt: "Reply with exactly: hello there",
-          handler: Handler,
-          # Exercise the per-invocation server budgets + a generous idle guard
-          # against a real harness — validates the overrides are accepted on the wire
-          # and that the 300s idle floor holds during server-side tool execution.
-          idle_timeout: 300_000,
-          timeout_seconds: 900,
-          max_iterations: 40,
-          timeout: 300_000
-        )
-
-      metadata_events = Enum.filter(result.events, &(is_map(&1) and Map.has_key?(&1, "metadata")))
-
-      IO.inspect(metadata_events,
-        label: "LIVE Bedrock metadata/usage events",
-        limit: :infinity,
-        printable_limit: :infinity
+    {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn} = result} =
+      ReqManagedAgents.AgentCore.invoke_to_completion(
+        harness_arn: handle.harness_arn,
+        runtime_session_id:
+          "live-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),
+        prompt: "Reply with exactly: hello there",
+        handler: Handler,
+        # Exercise the per-invocation server budgets + a generous idle guard
+        # against a real harness — validates the overrides are accepted on the wire
+        # and that the 300s idle floor holds during server-side tool execution.
+        idle_timeout: 300_000,
+        timeout_seconds: 900,
+        max_iterations: 40,
+        timeout: 300_000
       )
 
-      IO.inspect(result.usage, label: "LIVE Bedrock SessionResult.usage")
+    metadata_events = Enum.filter(result.events, &(is_map(&1) and Map.has_key?(&1, "metadata")))
 
-      assert %ReqManagedAgents.Usage{input_tokens: i, output_tokens: o} = result.usage,
-             "expected %Usage{} on the live Bedrock result, got: #{inspect(result.usage)}"
+    IO.inspect(metadata_events,
+      label: "LIVE Bedrock metadata/usage events",
+      limit: :infinity,
+      printable_limit: :infinity
+    )
 
-      assert i > 0 and o > 0,
-             "expected non-zero live Bedrock usage (does AgentCore emit metadata.usage?) — got #{inspect(result.usage)}"
-    after
-      IO.inspect(ReqManagedAgents.teardown(BedrockAgentCore, handle),
-        label: "LIVE Bedrock teardown"
-      )
-    end
+    IO.inspect(result.usage, label: "LIVE Bedrock SessionResult.usage")
+
+    assert %ReqManagedAgents.Usage{input_tokens: i, output_tokens: o} = result.usage,
+           "expected %Usage{} on the live Bedrock result, got: #{inspect(result.usage)}"
+
+    assert i > 0 and o > 0,
+           "expected non-zero live Bedrock usage (does AgentCore emit metadata.usage?) — got #{inspect(result.usage)}"
   end
 
   # THE OUTPUTS-DIR CONVENTION (established live, 2026-07-03, four probe
@@ -388,37 +403,30 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     }
 
     {:ok, handle} =
-      ReqManagedAgents.provision(BedrockAgentCore, spec,
-        execution_role_arn: role,
-        name_prefix: "rma_live"
-      )
+      ReqManagedAgents.provision(BedrockAgentCore, spec, execution_role_arn: role)
 
-    try do
-      client = Client.new()
-      sid = "live-cmd-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
+    teardown_on_exit(BedrockAgentCore, handle)
 
-      assert {:ok, %CommandResult{exit_code: 0} = ok} =
-               Client.invoke_agent_runtime_command(client, %{
-                 agent_runtime_arn: handle.harness_arn,
-                 runtime_session_id: sid,
-                 command: "echo canary-stdout && echo canary-stderr 1>&2"
-               })
+    client = Client.new()
+    sid = "live-cmd-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
 
-      IO.inspect(ok, label: "LIVE command result")
-      assert ok.stdout =~ "canary-stdout"
-      assert ok.stderr =~ "canary-stderr"
+    assert {:ok, %CommandResult{exit_code: 0} = ok} =
+             Client.invoke_agent_runtime_command(client, %{
+               agent_runtime_arn: handle.harness_arn,
+               runtime_session_id: sid,
+               command: "echo canary-stdout && echo canary-stderr 1>&2"
+             })
 
-      assert {:ok, %CommandResult{exit_code: 7}} =
-               Client.invoke_agent_runtime_command(client, %{
-                 agent_runtime_arn: handle.harness_arn,
-                 runtime_session_id: sid,
-                 command: "exit 7"
-               })
-    after
-      IO.inspect(ReqManagedAgents.teardown(BedrockAgentCore, handle),
-        label: "LIVE command-leg teardown"
-      )
-    end
+    IO.inspect(ok, label: "LIVE command result")
+    assert ok.stdout =~ "canary-stdout"
+    assert ok.stderr =~ "canary-stderr"
+
+    assert {:ok, %CommandResult{exit_code: 7}} =
+             Client.invoke_agent_runtime_command(client, %{
+               agent_runtime_arn: handle.harness_arn,
+               runtime_session_id: sid,
+               command: "exit 7"
+             })
   end
 
   @tag timeout: 600_000
@@ -460,32 +468,27 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     {:ok, handle} =
       ReqManagedAgents.provision(BedrockAgentCore, spec,
         execution_role_arn: role,
-        name_prefix: "rma_live",
         environment: environment
       )
 
-    try do
-      client = ReqManagedAgents.AgentCore.Client.new()
-      sid = "live-mnt-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
+    teardown_on_exit(BedrockAgentCore, handle)
 
-      store =
-        {AgentCoreSessionStorage,
-         AgentCoreSessionStorage.store(client, handle.harness_arn, sid, "/mnt/data")}
+    client = ReqManagedAgents.AgentCore.Client.new()
+    sid = "live-mnt-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
 
-      contents = "mount-canary " <> Base.encode64(:crypto.strong_rand_bytes(64))
-      assert :ok = Artifacts.put(store, "canary.txt", contents)
+    store =
+      {AgentCoreSessionStorage,
+       AgentCoreSessionStorage.store(client, handle.harness_arn, sid, "/mnt/data")}
 
-      {:ok, listed} = Artifacts.list(store)
-      IO.inspect(listed, label: "LIVE mount artifacts")
-      assert Enum.any?(listed, &(&1.name == "canary.txt"))
+    contents = "mount-canary " <> Base.encode64(:crypto.strong_rand_bytes(64))
+    assert :ok = Artifacts.put(store, "canary.txt", contents)
 
-      assert {:ok, ^contents} = Artifacts.fetch(store, "canary.txt")
-      assert :ok = Artifacts.delete(store, "canary.txt")
-    after
-      IO.inspect(ReqManagedAgents.teardown(BedrockAgentCore, handle),
-        label: "LIVE mount-leg teardown"
-      )
-    end
+    {:ok, listed} = Artifacts.list(store)
+    IO.inspect(listed, label: "LIVE mount artifacts")
+    assert Enum.any?(listed, &(&1.name == "canary.txt"))
+
+    assert {:ok, ^contents} = Artifacts.fetch(store, "canary.txt")
+    assert :ok = Artifacts.delete(store, "canary.txt")
   end
 
   @tag timeout: 240_000
@@ -598,7 +601,13 @@ defmodule ReqManagedAgents.LiveSmokeTest do
            "expected 'rt-canary:1.20' in agent output, got: #{inspect(result.text)}"
   end
 
-  @tag timeout: 300_000
+  @tag timeout: 600_000
+  @tag :live_bedrock_reattach
+  @tag skip:
+         if(System.get_env("HARNESS_EXECUTION_ROLE_ARN") in [nil, ""],
+           do: "requires HARNESS_EXECUTION_ROLE_ARN (AWS harness execution role ARN)",
+           else: false
+         )
   test "AgentCore Harness: within-window reattach via session_id: continues the conversation" do
     alias ReqManagedAgents.Providers.BedrockAgentCore
     {:ok, _} = Application.ensure_all_started(:req_managed_agents)
@@ -618,10 +627,9 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     }
 
     {:ok, handle} =
-      ReqManagedAgents.provision(BedrockAgentCore, spec,
-        execution_role_arn: role,
-        name_prefix: "rma_live"
-      )
+      ReqManagedAgents.provision(BedrockAgentCore, spec, execution_role_arn: role)
+
+    teardown_on_exit(BedrockAgentCore, handle)
 
     sid = "live-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
 
@@ -634,37 +642,31 @@ defmodule ReqManagedAgents.LiveSmokeTest do
       timeout: 300_000
     ]
 
-    try do
-      {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn}} =
-        ReqManagedAgents.AgentCore.invoke_to_completion(
-          [
-            runtime_session_id: sid,
-            prompt: "Remember this codeword: quokka. Acknowledge with OK."
-          ] ++ common
-        )
-
-      # Within the session window (seconds later): reattach with the RMA-canonical
-      # session_id: — the 0.10 reattach path (open/2 targets the EXISTING runtime
-      # session, resumed?/1 true, :resume rides the reconnect safe-default, and the
-      # prompt is delivered via the #66 seam). Recall proves server-side continuity.
-      {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn, text: text} = r2} =
-        ReqManagedAgents.AgentCore.invoke_to_completion(
-          [
-            session_id: sid,
-            prompt: "What was the codeword? Reply with just the codeword."
-          ] ++ common
-        )
-
-      IO.inspect(text, label: "LIVE Bedrock reattach recall")
-
-      assert text =~ ~r/quokka/i,
-             "expected the reattached session to recall the codeword — got: #{inspect(text)}"
-
-      assert r2.session_id == sid
-    after
-      IO.inspect(ReqManagedAgents.teardown(BedrockAgentCore, handle),
-        label: "LIVE Bedrock reattach teardown"
+    {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn}} =
+      ReqManagedAgents.AgentCore.invoke_to_completion(
+        [
+          runtime_session_id: sid,
+          prompt: "Remember this codeword: quokka. Acknowledge with OK."
+        ] ++ common
       )
-    end
+
+    # Within the session window (seconds later): reattach with the RMA-canonical
+    # session_id: — the 0.10 reattach path (open/2 targets the EXISTING runtime
+    # session, resumed?/1 true, :resume rides the reconnect safe-default, and the
+    # prompt is delivered via the #66 seam). Recall proves server-side continuity.
+    {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn, text: text} = r2} =
+      ReqManagedAgents.AgentCore.invoke_to_completion(
+        [
+          session_id: sid,
+          prompt: "What was the codeword? Reply with just the codeword."
+        ] ++ common
+      )
+
+    IO.inspect(text, label: "LIVE Bedrock reattach recall")
+
+    assert text =~ ~r/quokka/i,
+           "expected the reattached session to recall the codeword — got: #{inspect(text)}"
+
+    assert r2.session_id == sid
   end
 end

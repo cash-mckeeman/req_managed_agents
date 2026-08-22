@@ -88,6 +88,14 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
 
   defp ok_json(body), do: %Req.Response{status: 200, body: body}
 
+  # A provision polls TWO resources through the real client, and they answer with
+  # different envelopes — a responder that serves a harness body to the endpoint
+  # wait hands it a shape it cannot read.
+  defp ok_harness(status), do: ok_json(%{"harness" => %{"status" => status}})
+  defp ok_endpoint(status), do: ok_json(%{"endpoint" => %{"status" => status}})
+
+  defp endpoint_request?(req), do: String.contains?(req.url.path, "/endpoints/")
+
   # Every request the adapter served, in order. assert_received only reaches the
   # first match, which cannot express "each poll got less than the one before".
   defp collect_requests(acc \\ []) do
@@ -260,6 +268,44 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       assert_receive {:deleted, "h-shared"}
     end
 
+    test "the endpoint wait inherits what the ready-wait left, not a budget of its own" do
+      # A second wait now stands between a create and a handle. Given a budget of
+      # its own it would double what a provision may spend — the additive-budget
+      # defect this module exists to prevent, reintroduced by the new wait.
+      #
+      # The harness spends half the budget becoming READY; the endpoint never
+      # does. Two budgets would run 150 ms + 300 ms.
+      ready_at = System.monotonic_time(:millisecond) + 150
+
+      get_fun = fn _hid ->
+        status = if System.monotonic_time(:millisecond) >= ready_at, do: "READY", else: "CREATING"
+        {:ok, %{"harness" => %{"status" => status}}}
+      end
+
+      started = System.monotonic_time(:millisecond)
+
+      assert {:error,
+              {:endpoint_ready_timeout, %WaitContext{phase: :endpoint, elapsed_ms: elapsed}}} =
+               provision_quietly(
+                 prov_opts("h-ep-shared",
+                   get_fun: get_fun,
+                   endpoint_fun: fn _hid, _name ->
+                     {:ok, %{"endpoint" => %{"status" => "CREATING"}}}
+                   end,
+                   timeout: 300,
+                   # A cadence rather than a spin: this file's other measurements
+                   # run concurrently, and a 300 ms busy-poll is scheduler load
+                   # that shows up in their wall clocks, not in this one's.
+                   ready_poll_ms: 10
+                 )
+               )
+
+      assert elapsed < 250
+      assert System.monotonic_time(:millisecond) - started < 400
+
+      assert_receive {:deleted, "h-ep-shared"}
+    end
+
     test "a re-create the delete-wait left no budget for is named, not attempted" do
       # create_fun builds its client at call time, so on the recover path the
       # re-create runs AFTER the delete-wait — and the delete-wait ends the moment
@@ -315,7 +361,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       # twice, so one hung poll could block ~30 minutes regardless of how short the
       # caller's budget was — which is what made the "360 s budget" not an upper
       # bound on anything.
-      client = reporting_client(fn _req -> ok_json(%{"harness" => %{"status" => "READY"}}) end)
+      client =
+        reporting_client(fn req ->
+          if endpoint_request?(req), do: ok_endpoint("READY"), else: ok_harness("READY")
+        end)
 
       assert {:ok, %{harness_id: "h-bounded"}} =
                provision_quietly(
@@ -329,6 +378,18 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       assert_received {:request, :get, "/harnesses/h-bounded", receive_timeout}
       assert receive_timeout <= 10_000
       assert receive_timeout > 5_000
+
+      # The endpoint poll is a control-plane GET like any other and draws on the
+      # same budget; unbounded, it would reinstate the 600 s-per-attempt hang on
+      # the one call the harness wait does not make.
+      assert_received {:request, :get, "/harnesses/h-bounded/endpoints/DEFAULT", endpoint_timeout}
+      assert endpoint_timeout <= 10_000
+
+      # The band, not just the ceiling: a regression that handed the endpoint poll
+      # the dregs of a budget the harness wait had already spent would satisfy the
+      # upper bound and reinstate the raw-transport-error failure the deadline
+      # exists to replace.
+      assert endpoint_timeout > 5_000
 
       # The harness reached READY, so nothing may be rolled back.
       refute_received {:deleted, _}
@@ -370,7 +431,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
         reporting_client(fn req ->
           case req.method do
             :post -> ok_json(%{"harness" => %{"arn" => "a", "harnessId" => "h-create"}})
-            _ -> ok_json(%{"harness" => %{"status" => "READY"}})
+            _ -> if endpoint_request?(req), do: ok_endpoint("READY"), else: ok_harness("READY")
           end
         end)
 
