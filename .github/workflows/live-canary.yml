@@ -133,6 +133,11 @@ jobs:
       # deps this step is `mix: command not found`, a red step that says
       # nothing and would file a bogus issue.
       #
+      # The decisions live in ReqManagedAgents.CI.HarnessSweep, under
+      # test/support, because this step deletes real AWS resources: there its
+      # rules are unit-tested rather than trusted. MIX_ENV must stay `test` —
+      # that is the only env whose elixirc_paths compile the module.
+      #
       # The prefix is `rma_live`, not the full current scheme. Harnesses
       # stranded by earlier runs carry an older, truncated name that also
       # begins `rma_live`, and nothing else will ever collect them.
@@ -142,35 +147,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p "$CANARY_DIAGNOSTICS"
-          mix run -e '
-            alias ReqManagedAgents.AgentCore.Client
-
-            prefix = "rma_live"
-            client = Client.new()
-
-            case Client.list_harnesses(client) do
-              {:ok, %{"harnesses" => harnesses}} ->
-                orphans = Enum.filter(harnesses, &String.starts_with?(&1["harnessName"] || "", prefix))
-                IO.puts("sweep: #{length(orphans)} harness(es) matching #{prefix}*")
-
-                Enum.each(orphans, fn h ->
-                  id = h["harnessId"]
-                  name = h["harnessName"]
-                  IO.puts("::warning::reclaiming leaked harness #{name} (#{id}, status #{h["status"]})")
-
-                  case Client.delete_harness(client, id) do
-                    {:ok, _} -> IO.puts("sweep: deleted #{name}")
-                    {:error, reason} -> IO.puts("SWEEP_UNRECLAIMED #{name} #{id} #{inspect(reason)}")
-                  end
-                end)
-
-              {:ok, other} ->
-                IO.puts("SWEEP_UNRECLAIMED ListHarnesses returned an unexpected shape: #{inspect(other)}")
-
-              {:error, reason} ->
-                IO.puts("SWEEP_UNRECLAIMED ListHarnesses failed: #{inspect(reason)}")
-            end
-          ' 2>&1 | tee "$CANARY_DIAGNOSTICS/harness-sweep.log"
+          mix run -e "ReqManagedAgents.CI.HarnessSweep.main()" 2>&1 | tee "$CANARY_DIAGNOSTICS/harness-sweep.log"
           if grep -q "^SWEEP_UNRECLAIMED" "$CANARY_DIAGNOSTICS/harness-sweep.log"; then
             echo "::error title=Live canary sweep::a harness matching rma_live* could not be reclaimed and is still allocated"
             exit 1

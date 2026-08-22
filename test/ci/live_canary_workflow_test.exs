@@ -182,18 +182,21 @@ defmodule ReqManagedAgents.LiveCanaryWorkflowTest do
       %{sweep: sweep}
     end
 
-    test "runs after the suite on every exit path and deletes what it finds", ctx do
-      %{sweep: sweep, steps: steps} = ctx
+    test "runs after the suite on every exit path and reclaims through the tested sweep", ctx do
+      %{sweep: sweep, steps: steps, workflow: workflow} = ctx
 
       assert String.trim(sweep["if"] || "") =~ "always()",
              "a leaked harness bills whether the suite passed, failed, or was killed by the " <>
                "job timeout — and the timeout kill is exactly the path that leaks"
 
-      assert sweep["run"] =~ ~r/list[-_]harnesses/,
-             "the sweep must list harnesses before deciding what to reclaim"
+      assert sweep["run"] =~ "ReqManagedAgents.CI.HarnessSweep",
+             "the step deletes real AWS resources; its list/classify/delete decisions must " <>
+               "come from the unit-tested module, not from a script inlined here that no " <>
+               "test, formatter or linter ever reads"
 
-      assert sweep["run"] =~ ~r/delete[-_]harness/,
-             "listing without deleting reports the leak instead of closing it"
+      assert get_in(workflow, ["env", "MIX_ENV"]) == "test",
+             "HarnessSweep sits under test/support, so it is compiled only under MIX_ENV=test " <>
+               "— any other env turns the sweep into an undefined-function crash"
 
       suite_idx = Enum.find_index(steps, &(&1["id"] == "live_suite"))
       sweep_idx = Enum.find_index(steps, &(&1["id"] == "sweep"))
