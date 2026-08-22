@@ -16,6 +16,26 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
 
   defp listing(harnesses), do: fn -> {:ok, %{"harnesses" => harnesses}} end
 
+  # A listing that changes between calls, so the post-delete confirmation can be
+  # driven through a real sequence: page N is returned on call N, and the last
+  # page repeats for every call after it.
+  defp listings(pages) do
+    {:ok, agent} = start_supervised({Agent, fn -> pages end})
+
+    fn ->
+      Agent.get_and_update(agent, fn
+        [last] -> {last, [last]}
+        [head | tail] -> {head, tail}
+      end)
+    end
+  end
+
+  # The confirm budget, collapsed so tests do not wait it out.
+  defp fast_confirm, do: [sleep_fun: fn _ms -> :ok end, confirm_interval_ms: 0]
+
+  # A leaked harness the sweep will try to reclaim.
+  defp stuck, do: harness("rma_live_bedrock_harness_1234abcd", "READY", "h-stuck")
+
   defp truncated_listing(harnesses),
     do: fn -> {:ok, %{"harnesses" => harnesses, "nextToken" => "page-2"}} end
 
@@ -58,8 +78,11 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
 
       report =
         HarnessSweep.run(
-          list_fun: listing([truncated]),
-          delete_fun: recording_delete(self())
+          [
+            list_fun:
+              listings([{:ok, %{"harnesses" => [truncated]}}, {:ok, %{"harnesses" => []}}]),
+            delete_fun: recording_delete(self())
+          ] ++ fast_confirm()
         )
 
       assert report.reclaimed == [truncated]
@@ -110,12 +133,16 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
 
       report =
         HarnessSweep.run(
-          list_fun: listing([stranded]),
-          delete_fun: recording_delete(self())
+          [
+            list_fun:
+              listings([{:ok, %{"harnesses" => [stranded]}}, {:ok, %{"harnesses" => []}}]),
+            delete_fun: recording_delete(self())
+          ] ++ fast_confirm()
         )
 
       assert report.reclaimed == [stranded]
       assert report.skipped == []
+      assert report.unreclaimed == []
       assert_received {:deleted, "h-stranded"}
     end
 
@@ -213,6 +240,108 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
     end
   end
 
+  describe "confirming a delete actually happened" do
+    test "a harness the provider accepted but never removed is not reported deleted" do
+      report =
+        HarnessSweep.run(
+          [
+            list_fun:
+              listings([
+                {:ok, %{"harnesses" => [stuck()]}},
+                {:ok,
+                 %{
+                   "harnesses" => [
+                     harness("rma_live_bedrock_harness_1234abcd", "DELETE_FAILED", "h-stuck")
+                   ]
+                 }}
+              ]),
+            delete_fun: recording_delete(self())
+          ] ++ fast_confirm()
+        )
+
+      assert report.reclaimed == []
+
+      assert [{%{"harnessId" => "h-stuck"}, :present_after_delete}] = report.unreclaimed,
+             "a 2xx from DeleteHarness is an acceptance; DELETE_FAILED is still billing"
+    end
+
+    test "a delete still in flight when the budget runs out is unconfirmed, not deleted" do
+      deleting = harness("rma_live_bedrock_harness_1234abcd", "DELETING", "h-stuck")
+
+      report =
+        HarnessSweep.run(
+          [
+            list_fun:
+              listings([
+                {:ok, %{"harnesses" => [stuck()]}},
+                {:ok, %{"harnesses" => [deleting]}}
+              ]),
+            delete_fun: recording_delete(self()),
+            confirm_attempts: 2
+          ] ++ fast_confirm()
+        )
+
+      assert report.reclaimed == []
+      assert report.unreclaimed == []
+
+      assert [%{"harnessId" => "h-stuck"}] = report.unconfirmed,
+             "the harness was still deleting when the budget ran out, so it is neither " <>
+               "confirmed gone nor known to be stranded"
+    end
+
+    test "stops polling as soon as the harness is gone" do
+      report =
+        HarnessSweep.run(
+          [
+            list_fun:
+              listings([
+                {:ok, %{"harnesses" => [stuck()]}},
+                {:ok, %{"harnesses" => []}},
+                {:error, :should_never_be_reached}
+              ]),
+            delete_fun: recording_delete(self()),
+            confirm_attempts: 6
+          ] ++ fast_confirm()
+        )
+
+      assert report.reclaimed == [stuck()]
+      assert report.complete?
+    end
+
+    test "absence on a truncated page is not evidence the harness went away" do
+      report =
+        HarnessSweep.run(
+          [
+            list_fun:
+              listings([
+                {:ok, %{"harnesses" => [stuck()]}},
+                {:ok, %{"harnesses" => [], "nextToken" => "page-2"}}
+              ]),
+            delete_fun: recording_delete(self()),
+            confirm_attempts: 2
+          ] ++ fast_confirm()
+        )
+
+      assert report.reclaimed == []
+      assert [%{"harnessId" => "h-stuck"}] = report.unconfirmed
+      refute report.complete?
+    end
+
+    test "a run whose own teardown worked never enters the confirm loop" do
+      report =
+        HarnessSweep.run(
+          list_fun: listing([harness("rma_live_bedrock_harness_1234abcd", "DELETING")]),
+          delete_fun: refusing_delete(self()),
+          sleep_fun: fn _ms ->
+            flunk("the sweep waited on a confirm it had nothing to confirm")
+          end
+        )
+
+      assert report.skipped != []
+      assert report.complete?
+    end
+  end
+
   describe "the printed report" do
     test "a run that leaked nothing raises no leak warning" do
       output =
@@ -233,7 +362,8 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
         capture_io(fn ->
           HarnessSweep.main(
             list_fun: listing([harness("rma_live_x_1234abcd", "READY", "h-stuck")]),
-            delete_fun: fn _id -> {:error, :denied} end
+            delete_fun: fn _id -> {:error, :denied} end,
+            sleep_fun: fn _ms -> :ok end
           )
         end)
 
@@ -250,6 +380,32 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
         end)
 
       assert output =~ "SWEEP_INCOMPLETE"
+      refute output =~ "SWEEP_UNRECLAIMED"
+    end
+
+    test "an unconfirmed delete prints the marker that downgrades the run report" do
+      output =
+        capture_io(fn ->
+          HarnessSweep.main(
+            [
+              list_fun:
+                listings([
+                  {:ok, %{"harnesses" => [stuck()]}},
+                  {:ok,
+                   %{
+                     "harnesses" => [
+                       harness("rma_live_bedrock_harness_1234abcd", "DELETING", "h-stuck")
+                     ]
+                   }}
+                ]),
+              delete_fun: recording_delete(self()),
+              confirm_attempts: 2
+            ] ++ fast_confirm()
+          )
+        end)
+
+      assert output =~ "SWEEP_INCOMPLETE"
+      refute output =~ "reclaimed leaked harness"
       refute output =~ "SWEEP_UNRECLAIMED"
     end
 

@@ -150,9 +150,10 @@ jobs:
           set -o pipefail
           mkdir -p "$CANARY_DIAGNOSTICS"
           mix run -e "ReqManagedAgents.CI.HarnessSweep.main()" 2>&1 | tee "$CANARY_DIAGNOSTICS/harness-sweep.log"
-          # ListHarnesses is paginated and the sweep reads one page, so "found
-          # nothing" and "saw everything" are different claims. Publish which
-          # one this run earned; the filer refuses to say `clean` without it.
+          # "Found nothing to reclaim" and "the account is clean" are different
+          # claims: ListHarnesses is paginated and the sweep reads one page, and
+          # a 2xx DeleteHarness is an acceptance rather than a deletion. Publish
+          # which one this run earned; the filer will not say `clean` without it.
           if grep -q "SWEEP_INCOMPLETE" "$CANARY_DIAGNOSTICS/harness-sweep.log"; then
             echo "complete=false" >> "$GITHUB_OUTPUT"
           else
@@ -210,7 +211,7 @@ jobs:
               ? `The post-suite sweep did NOT succeed (outcome: ${sweep.outcome || 'did not run'}) — an rma_live_* harness may still be allocated. Check its step log.`
               : sweepComplete
                 ? 'The post-suite sweep ran clean: no rma_live_* harness was left allocated.'
-                : 'The post-suite sweep reclaimed everything it saw, but the harness listing was truncated — it did NOT scan the whole account, so an rma_live_* harness may still be allocated. Check its step log.';
+                : 'The post-suite sweep did NOT establish that the account is clean: either the harness listing was truncated, or a DeleteHarness it issued was never confirmed to have removed the harness. An rma_live_* harness may still be allocated. Check its step log.';
             const body = [
               lead,
               '',
