@@ -16,6 +16,9 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
 
   defp listing(harnesses), do: fn -> {:ok, %{"harnesses" => harnesses}} end
 
+  defp truncated_listing(harnesses),
+    do: fn -> {:ok, %{"harnesses" => harnesses, "nextToken" => "page-2"}} end
+
   defp recording_delete(pid) do
     fn id ->
       send(pid, {:deleted, id})
@@ -123,6 +126,42 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
     end
   end
 
+  describe "completeness" do
+    test "an untruncated listing is a scan of the whole account" do
+      report =
+        HarnessSweep.run(
+          list_fun: listing([]),
+          delete_fun: refusing_delete(self()),
+          prefix: "rma_live"
+        )
+
+      assert report.complete?
+    end
+
+    test "a nextToken means orphans beyond the page were never seen" do
+      report =
+        HarnessSweep.run(
+          list_fun: truncated_listing([]),
+          delete_fun: refusing_delete(self()),
+          prefix: "rma_live"
+        )
+
+      refute report.complete?,
+             "reclaiming nothing off page one is not evidence that nothing leaked"
+    end
+
+    test "a listing that failed vouches for nothing" do
+      report =
+        HarnessSweep.run(
+          list_fun: fn -> {:error, :timeout} end,
+          delete_fun: refusing_delete(self()),
+          prefix: "rma_live"
+        )
+
+      refute report.complete?
+    end
+  end
+
   describe "the printed report" do
     test "a run that leaked nothing raises no leak warning" do
       output =
@@ -150,6 +189,33 @@ defmodule ReqManagedAgents.CI.HarnessSweepTest do
         end)
 
       assert output =~ ~r/^SWEEP_UNRECLAIMED rma_live_x_1234abcd h-stuck/m
+    end
+
+    test "a truncated listing prints the marker that downgrades the run report" do
+      output =
+        capture_io(fn ->
+          HarnessSweep.main(
+            list_fun: truncated_listing([]),
+            delete_fun: refusing_delete(self()),
+            prefix: "rma_live"
+          )
+        end)
+
+      assert output =~ "SWEEP_INCOMPLETE"
+      refute output =~ "SWEEP_UNRECLAIMED"
+    end
+
+    test "a complete listing prints no incompleteness marker" do
+      output =
+        capture_io(fn ->
+          HarnessSweep.main(
+            list_fun: listing([]),
+            delete_fun: refusing_delete(self()),
+            prefix: "rma_live"
+          )
+        end)
+
+      refute output =~ "SWEEP_INCOMPLETE"
     end
   end
 end

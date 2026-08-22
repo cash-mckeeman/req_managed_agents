@@ -148,6 +148,14 @@ jobs:
           set -o pipefail
           mkdir -p "$CANARY_DIAGNOSTICS"
           mix run -e "ReqManagedAgents.CI.HarnessSweep.main()" 2>&1 | tee "$CANARY_DIAGNOSTICS/harness-sweep.log"
+          # ListHarnesses is paginated and the sweep reads one page, so "found
+          # nothing" and "saw everything" are different claims. Publish which
+          # one this run earned; the filer refuses to say `clean` without it.
+          if grep -q "SWEEP_INCOMPLETE" "$CANARY_DIAGNOSTICS/harness-sweep.log"; then
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "complete=true" >> "$GITHUB_OUTPUT"
+          fi
           if grep -q "^SWEEP_UNRECLAIMED" "$CANARY_DIAGNOSTICS/harness-sweep.log"; then
             echo "::error title=Live canary sweep::a harness matching rma_live* could not be reclaimed and is still allocated"
             exit 1
@@ -191,9 +199,16 @@ jobs:
             const lead = isDrift
               ? 'The live suite ran and failed. Treat this as provider drift until the log says otherwise; the full test log is in the run\'s diagnostics artifact.'
               : 'The canary failed without the live suite reporting a result. This is a harness/infra failure, not measured drift — the first non-success step below is the cause.';
-            const sweepNote = sweep.outcome === 'success'
-              ? 'The post-suite sweep ran clean: no rma_live* harness was left allocated.'
-              : `The post-suite sweep did NOT succeed (outcome: ${sweep.outcome || 'did not run'}) — an rma_live* harness may still be allocated. Check its step log.`;
+            // A green sweep only means "nothing reclaimable on the page it
+            // read". Its `complete` output is what distinguishes that from a
+            // scan of the whole account, and only the latter may be reported
+            // as clean.
+            const sweepComplete = (sweep.outputs || {}).complete === 'true';
+            const sweepNote = sweep.outcome !== 'success'
+              ? `The post-suite sweep did NOT succeed (outcome: ${sweep.outcome || 'did not run'}) — an rma_live* harness may still be allocated. Check its step log.`
+              : sweepComplete
+                ? 'The post-suite sweep ran clean: no rma_live* harness was left allocated.'
+                : 'The post-suite sweep reclaimed everything it saw, but the harness listing was truncated — it did NOT scan the whole account, so an rma_live* harness may still be allocated. Check its step log.';
             const body = [
               lead,
               '',

@@ -8,8 +8,8 @@ defmodule ReqManagedAgents.CI.HarnessSweep.Report do
   always fires carries no information.
   """
 
-  @enforce_keys [:matched, :skipped, :reclaimed, :unreclaimed]
-  defstruct [:matched, :skipped, :reclaimed, :unreclaimed]
+  @enforce_keys [:matched, :skipped, :reclaimed, :unreclaimed, :complete?]
+  defstruct [:matched, :skipped, :reclaimed, :unreclaimed, :complete?]
 
   @typedoc "A harness exactly as `ListHarnesses` returned it."
   @type harness :: %{optional(String.t()) => term()}
@@ -20,10 +20,21 @@ defmodule ReqManagedAgents.CI.HarnessSweep.Report do
   """
   @type unreclaimed :: {harness() | nil, term()}
 
+  @typedoc """
+  Whether the sweep saw the whole account.
+
+  `ListHarnesses` is paginated and the sweep reads one page, so an empty
+  `unreclaimed` is only evidence that nothing leaked when this is true. A
+  caller that reports "swept clean" without consulting it is asserting
+  something it never checked.
+  """
+  @type complete? :: boolean()
+
   @type t :: %__MODULE__{
           matched: [harness()],
           skipped: [harness()],
           reclaimed: [harness()],
-          unreclaimed: [unreclaimed()]
+          unreclaimed: [unreclaimed()],
+          complete?: complete?()
         }
 end

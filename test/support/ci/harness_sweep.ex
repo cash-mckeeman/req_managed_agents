@@ -13,6 +13,12 @@ defmodule ReqManagedAgents.CI.HarnessSweep do
   still `DELETING`; reclaiming those would re-delete a resource that is already
   going away and would report a leak on every green run. `DELETE_FAILED` is the
   status that actually strands one.
+
+  `ListHarnesses` is paginated and this reads one page — the client grows no
+  `nextToken` loop here, since that is library behaviour with its own callers.
+  What the sweep owes its reader instead is honesty: a truncated listing sets
+  `Report.complete?` to false, and nothing downstream may call the account
+  clean without it.
   """
 
   alias ReqManagedAgents.AgentCore.Client
@@ -64,10 +70,10 @@ defmodule ReqManagedAgents.CI.HarnessSweep do
     prefix = opts[:prefix] || @prefix
 
     case list_fun.() do
-      {:ok, %{"harnesses" => harnesses}} when is_list(harnesses) ->
+      {:ok, %{"harnesses" => harnesses} = body} when is_list(harnesses) ->
         harnesses
         |> Enum.filter(&matches?(&1, prefix))
-        |> reclaim(delete_fun)
+        |> reclaim(delete_fun, complete?(body))
 
       {:ok, other} ->
         list_failure({:unexpected_list_shape, other})
@@ -82,7 +88,8 @@ defmodule ReqManagedAgents.CI.HarnessSweep do
 
   Two markers are machine-read by the workflow step and must keep their
   spelling: `SWEEP_UNRECLAIMED` at the start of a line is a harness still
-  allocated, and the step fails on it.
+  allocated, and the step fails on it; `SWEEP_INCOMPLETE` is a sweep that
+  cannot vouch for the account, and the step stays green but says so.
   """
   @spec main([option()]) :: :ok
   def main(opts \\ []) do
@@ -103,8 +110,18 @@ defmodule ReqManagedAgents.CI.HarnessSweep do
       IO.puts("SWEEP_UNRECLAIMED #{label(h)} #{inspect(reason)}")
     end)
 
+    unless report.complete? do
+      IO.puts(
+        "::warning::SWEEP_INCOMPLETE the harness listing was truncated or failed, so only " <>
+          "part of the account was scanned — an orphan outside it was neither seen nor reclaimed"
+      )
+    end
+
     :ok
   end
+
+  # A `nextToken` means the account holds more harnesses than this page shows.
+  defp complete?(body), do: not is_binary(Map.get(body, "nextToken"))
 
   defp from_status(status) do
     case HarnessStatus.classify(status) do
@@ -113,7 +130,7 @@ defmodule ReqManagedAgents.CI.HarnessSweep do
     end
   end
 
-  defp reclaim(matched, delete_fun) do
+  defp reclaim(matched, delete_fun, complete?) do
     {leaked, skipped} = Enum.split_with(matched, &(action(&1) == :reclaim))
     {reclaimed, unreclaimed} = Enum.reduce(leaked, {[], []}, &delete_one(&1, &2, delete_fun))
 
@@ -121,7 +138,8 @@ defmodule ReqManagedAgents.CI.HarnessSweep do
       matched: matched,
       skipped: skipped,
       reclaimed: Enum.reverse(reclaimed),
-      unreclaimed: Enum.reverse(unreclaimed)
+      unreclaimed: Enum.reverse(unreclaimed),
+      complete?: complete?
     }
   end
 
@@ -133,8 +151,16 @@ defmodule ReqManagedAgents.CI.HarnessSweep do
     end
   end
 
-  defp list_failure(reason),
-    do: %Report{matched: [], skipped: [], reclaimed: [], unreclaimed: [{nil, reason}]}
+  # A listing that never arrived establishes nothing about the account either.
+  defp list_failure(reason) do
+    %Report{
+      matched: [],
+      skipped: [],
+      reclaimed: [],
+      unreclaimed: [{nil, reason}],
+      complete?: false
+    }
+  end
 
   defp matches?(harness, prefix), do: String.starts_with?(name(harness), prefix)
 

@@ -116,6 +116,17 @@ defmodule ReqManagedAgents.LiveCanaryWorkflowTest do
              "the filer must link the failing run"
     end
 
+    test "never claims a clean account on the step outcome alone", %{script: script} do
+      assert script =~ "outputs",
+             "the filer states whether an rma_live* harness was left allocated; a green sweep " <>
+               "step only rules that out when the sweep also reports it scanned the whole " <>
+               "account, so the claim must read the sweep's completeness output"
+
+      assert script =~ ~r/complete/,
+             "the sweep publishes a `complete` output; the filer must consult it before " <>
+               "writing that the sweep ran clean"
+    end
+
     test "distinguishes a harness failure from provider drift", %{script: script} do
       assert script =~ "live_suite",
              "the filer must branch on whether the live suite itself failed — otherwise a " <>
@@ -203,6 +214,13 @@ defmodule ReqManagedAgents.LiveCanaryWorkflowTest do
 
       assert is_integer(suite_idx) and suite_idx < sweep_idx,
              "the sweep must run after the suite whose leftovers it collects"
+    end
+
+    test "publishes whether it scanned the whole account", %{sweep: sweep} do
+      assert sweep["run"] =~ ~r/complete=(true|false).*GITHUB_OUTPUT/s,
+             "ListHarnesses is paginated and the sweep reads one page, so a green step means " <>
+               "nothing reclaimable on that page, which is not the same claim as nothing " <>
+               "leaked — the step must publish which of the two it earned"
     end
 
     test "the glob is not narrowed to the current naming scheme", %{sweep: sweep} do
