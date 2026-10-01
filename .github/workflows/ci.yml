@@ -19,14 +19,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Floor claimed by mix.exs (`elixir: "~> 1.16"`).
-          - elixir: "1.16"
-            otp: "26"
-          - elixir: "1.18"
-            otp: "27"
-          # Edge: matches local development (1.20.x / OTP 29). Lint-class
-          # steps run only here — older compilers emit warnings that can't
-          # be fixed without dropping the floor.
+          # Floor claimed by mix.exs (`elixir: "~> 1.20"`), on the two
+          # newest OTP releases.
+          - elixir: "1.20"
+            otp: "28"
+          # Lint-class steps run on the newest OTP, where its deprecation
+          # warnings appear first.
           - elixir: "1.20"
             otp: "29"
             lint: true

@@ -32,6 +32,8 @@ once, run anywhere".)
 
 ## Install
 
+Requires Elixir 1.20 or later.
+
 ```elixir
 def deps do
   [{:req_managed_agents, "~> 0.1"}]
