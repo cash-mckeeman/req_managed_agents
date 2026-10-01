@@ -20,6 +20,7 @@ defmodule ReqManagedAgents.MixProject do
       package: package(),
       docs: docs(),
       dialyzer: dialyzer(),
+      hex: hex(),
       name: "ReqManagedAgents",
       source_url: @source_url,
       elixirc_options: [
@@ -84,6 +85,20 @@ defmodule ReqManagedAgents.MixProject do
       # and CI dialyzes under MIX_ENV=test.
       plt_add_apps: [:mix, :ex_unit, :eex],
       ignore_warnings: ".dialyzer_ignore.exs"
+    ]
+  end
+
+  # Read by `mix hex.audit` (Hex 2.5.1+), which warns once an entry stops
+  # matching. cowlib is test-only (bypass -> plug_cowboy -> cowboy), and no
+  # release fixes these two (checked 2026-10-01).
+  defp hex do
+    [
+      ignore_advisories: [
+        # HTTP response splitting in cow_http_struct_hd:escape_string/2
+        "EEF-CVE-2026-43966",
+        # Cookie request header injection in cow_cookie:cookie/1
+        "EEF-CVE-2026-43969"
+      ]
     ]
   end
 
