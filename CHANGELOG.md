@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-Canary-hardening release. Two breaking changes, both requiring action.
+Canary-hardening release. Three breaking changes, all requiring action.
+
+### Changed (breaking) — requires Elixir 1.20
+
+The minimum Elixir version is now 1.20 (was 1.16). CI tests Elixir 1.20 on
+OTP 28 and 29. Projects on an older Elixir should stay on 0.10.x.
 
 ### Changed (breaking) — AgentCore harness names carry the spec name
 

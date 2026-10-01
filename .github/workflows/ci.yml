@@ -19,14 +19,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Floor claimed by mix.exs (`elixir: "~> 1.16"`).
-          - elixir: "1.16"
-            otp: "26"
-          - elixir: "1.18"
-            otp: "27"
-          # Edge: matches local development (1.20.x / OTP 29). Lint-class
-          # steps run only here — older compilers emit warnings that can't
-          # be fixed without dropping the floor.
+          # Floor claimed by mix.exs (`elixir: "~> 1.20"`), on the two
+          # newest OTP releases.
+          - elixir: "1.20"
+            otp: "28"
+          # Lint-class steps run on the newest OTP, where its deprecation
+          # warnings appear first.
           - elixir: "1.20"
             otp: "29"
             lint: true
@@ -76,25 +74,10 @@ jobs:
       - run: mix deps.get
       - run: mix format --check-formatted
       - run: mix credo --strict
-      # hex.audit has no ignore mechanism, and cowlib (test-only transitive
-      # dep via bypass -> plug_cowboy -> cowboy) has two advisories with NO
-      # fixed release (every version >= 2.9.0 is affected, checked 2026-07-02).
-      # Allowlist exactly those two IDs; any other package, retirement, or new
-      # advisory still fails. Drop this wrapper when cowlib ships a fix.
-      # (mix_audit was evaluated instead — its DB doesn't cover cowlib at all.)
-      - name: hex.audit (allowlisted unfixed cowlib advisories)
-        run: |
-          out=$(mix hex.audit 2>&1) && { echo "$out"; exit 0; }
-          echo "$out"
-          unexpected_ids=$(echo "$out" | grep -oE "EEF-CVE-[0-9-]+|GHSA-[a-z0-9-]+" | sort -u \
-            | grep -vE "^(EEF-CVE-2026-43966|EEF-CVE-2026-43969|GHSA-g2wm-735q-3f56|GHSA-w4f7-4cxr-rv3c)$" || true)
-          other_pkgs=$(echo "$out" | grep -E "^  [a-zA-Z0-9_]+ [0-9]" | awk '{print $1}' | sort -u \
-            | grep -v "^cowlib$" || true)
-          if [ -n "$unexpected_ids" ] || [ -n "$other_pkgs" ]; then
-            echo "::error::hex.audit found issues beyond the cowlib allowlist: ${unexpected_ids} ${other_pkgs}"
-            exit 1
-          fi
-          echo "Only the allowlisted cowlib advisories are present (no upstream fix exists yet)."
+      # Acknowledged advisories are listed in mix.exs under
+      # `hex: [ignore_advisories: ...]`, which needs Hex 2.5.1+; setup-beam
+      # installs the latest Hex.
+      - run: mix hex.audit
       # Broken hexdocs references fail the build here, not after publish.
       - run: mix docs --warnings-as-errors
       # Enforced: all deps are on Hex now, so the tarball must always

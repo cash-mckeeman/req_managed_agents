@@ -13,9 +13,8 @@ defmodule Mix.Tasks.Rma.SyncAgentcoreModel do
       RMA_CORPUS_DIR=/path/to/corpus mix rma.sync_agentcore_model
 
   Exit codes: 0 = model already up to date; 2 = model was updated (drift
-  signal for a maintainer CI job); 1 = task failure. Requires OTP 25+
-  (verified TLS via `:public_key.cacerts_get/0`). Set `GITHUB_TOKEN` for API
-  rate-limit headroom.
+  signal for a maintainer CI job); 1 = task failure. TLS is verified against
+  `:public_key.cacerts_get/0`. Set `GITHUB_TOKEN` for API rate-limit headroom.
   """
   use Mix.Task
 
