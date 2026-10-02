@@ -95,6 +95,9 @@ READY costs zero endpoint calls.
   three attempts, a `:post` one.
 
 ### Fixed
+- `ensure_environment/3` rejects a literal `nil` environment spec with
+  `{:error, {:invalid_environment_spec, nil}}` instead of falling through to
+  `Environment.Spec.new/1`.
 - A harness this library created and could not bring to READY is now
   best-effort deleted before the error is returned, on the error, raise, throw
   and exit paths. **New side effect:** provisioning can now issue
