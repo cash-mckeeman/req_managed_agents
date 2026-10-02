@@ -2,6 +2,11 @@
 
 All notable changes to `req_managed_agents_host` are documented here.
 
+## v0.3.0
+
+- Requires Elixir 1.18 or later (was 1.16). CI tests Elixir 1.18 / OTP 27 and
+  Elixir 1.20 / OTP 29. No API or behaviour changes.
+
 ## v0.2.0
 
 - Transcript persistence: providers that emit `SessionResult.transcript`
