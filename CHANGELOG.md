@@ -131,6 +131,11 @@ READY costs zero endpoint calls.
   the delete-wait left no budget for returns
   `{:harness_ready_timeout, %WaitContext{}}` rather than being attempted on a
   timeout no network can answer inside and failing as a raw transport error.
+- finch is now required at `~> 0.24` (was `~> 0.18`). With mint 1.11, finch
+  0.23 could return a connection to the pool with a response still in flight
+  after a receive timeout, and the next request on it crashed with a
+  `CaseClauseError` (sneako/finch#397). An application that does not pin finch
+  itself moves to 0.24 on its next `mix deps.get`.
 
 ## v0.10.0 (2026-07-15)
 
