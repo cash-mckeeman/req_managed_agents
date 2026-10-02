@@ -8,7 +8,7 @@ defmodule ReqManagedAgentsHost.MixProject do
     [
       app: :req_managed_agents_host,
       version: @version,
-      elixir: "~> 1.18",
+      elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -32,7 +32,7 @@ defmodule ReqManagedAgentsHost.MixProject do
 
   defp deps do
     [
-      {:req_managed_agents, "~> 0.10"},
+      {:req_managed_agents, "~> 0.11.0"},
       {:jason, "~> 1.4"},
       {:mox, "~> 1.1", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},

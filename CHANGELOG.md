@@ -4,8 +4,15 @@ All notable changes to `req_managed_agents_host` are documented here.
 
 ## v0.3.0
 
-- Requires Elixir 1.18 or later (was 1.16). CI tests Elixir 1.18 / OTP 27 and
-  Elixir 1.20 / OTP 29. No API or behaviour changes.
+- Requires Elixir 1.20 or later (was 1.16), forced by `req_managed_agents`
+  0.11's own floor. Projects on an older Elixir should stay on 0.2.x.
+- Requires `{:req_managed_agents, "~> 0.11.0"}` (was `~> 0.10`). No API or
+  behaviour change here: `req_managed_agents` 0.11's breaking changes are
+  confined to AgentCore harness provisioning (see its CHANGELOG) — existing
+  AgentCore harnesses need a one-time re-provision, but this package's surface
+  is unaffected.
+- CI tests Elixir 1.20 on OTP 28 and 29 (was Elixir 1.18 / OTP 27 and
+  Elixir 1.20 / OTP 29).
 
 ## v0.2.0
 
