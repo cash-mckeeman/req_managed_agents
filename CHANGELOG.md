@@ -48,10 +48,10 @@ READY at different times — measured live, a harness was READY in 11 s while it
 alone named an endpoint whose next invoke failed.
 
 **Typical provisioning latency therefore goes from ~11 s to ~162 s.** Nothing
-about a caller's code has to change, and there are no external consumers to
-migrate, but anything sizing a timeout or a job budget around the old figure
-must be resized: `provision :timeout + Session.run/2 :timeout + margin ≤ your
-enclosing deadline`. The worst case is unchanged at ~581 s — the endpoint wait
+about a caller's code has to change, but anything sizing a timeout or a job
+budget around the old figure must be resized: `provision :timeout +
+Session.run/2 :timeout + margin ≤ your enclosing deadline`. The worst case is
+unchanged at ~581 s — the endpoint wait
 draws on the same absolute deadline as the harness and delete waits rather than
 starting a clock of its own.
 
