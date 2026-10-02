@@ -52,7 +52,7 @@ defmodule ReqManagedAgents.MixProject do
   defp deps do
     [
       {:req, "~> 0.5"},
-      {:finch, "~> 0.18"},
+      {:finch, "~> 0.24"},
       {:jason, "~> 1.4"},
       {:telemetry, "~> 1.0"},
       # Req.Test (used to stub HTTP in unary tests) needs Plug; Req lists it as
