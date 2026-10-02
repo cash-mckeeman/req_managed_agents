@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-Canary-hardening release. Three breaking changes, all requiring action, and
+Canary-hardening release. Four breaking changes, all requiring action, and
 one behaviour change that requires none but changes how long provisioning
 takes.
 
@@ -57,6 +57,16 @@ starting a clock of its own.
 
 The wait is gated behind harness readiness, so a harness that never reaches
 READY costs zero endpoint calls.
+
+### Changed (breaking) — invalid provisioning opts are now an error
+
+`BedrockAgentCore.provision/2` now rejects opts it used to ignore. A
+`:timeout`, `:ready_poll_ms` or `:ready_max_polls` that is not a non-negative
+integer returns `{:error, {:invalid_opts, key}}`. `timeout: :infinity` was
+previously a harmless no-op and is now an error — a wait with no deadline is
+the defect this release exists to close. Code that passed `timeout: :infinity`
+(or a non-integer poll opt) to `provision/2` must switch to a concrete,
+non-negative integer.
 
 ### Added
 - `Provisioner.Name` / `Name.Policy` — shared `<base>_<digest>` composition,
@@ -112,11 +122,6 @@ READY costs zero endpoint calls.
 - `Provisioner.Agents` refuses a base too long to compose without truncation
   (`{:error, {:agent_base_too_long, base}}`) rather than creating an agent
   `prune_agents/3` could never reclaim.
-- **`BedrockAgentCore.provision/2` now rejects opts it used to ignore.** A
-  `:timeout`, `:ready_poll_ms` or `:ready_max_polls` that is not a non-negative
-  integer returns `{:error, {:invalid_opts, key}}`. `timeout: :infinity` was
-  previously a harmless no-op and is now an error — a wait with no deadline is
-  the defect this release exists to close.
 - Provisioning waits are bounded by wall-clock rather than by a poll count, so
   a named error is reachable inside the caller's budget. **Behaviour change:**
   a recover-delete-recreate provision used to grant the delete-wait and the
