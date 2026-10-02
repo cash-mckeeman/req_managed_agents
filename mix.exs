@@ -1,14 +1,14 @@
 defmodule ReqManagedAgentsHost.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.3.0"
   @source_url "https://github.com/cash-mckeeman/req_managed_agents_host"
 
   def project do
     [
       app: :req_managed_agents_host,
       version: @version,
-      elixir: "~> 1.16",
+      elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
