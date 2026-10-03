@@ -314,10 +314,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
       # real network answers inside: it comes back a raw %Req.TransportError{}
       # where the named tag is the whole point of the deadline.
       #
-      # The prior harness is gone only once the budget is too short to sleep one
-      # more poll interval, so the delete-wait returns :ok with nothing left.
+      # The final listing completes after spending the budget. The adapter ignores
+      # receive_timeout deliberately so the re-create guard is reached deterministically.
       name = P.harness_name(@spec_bedrock, nil)
-      gone_at = System.monotonic_time(:millisecond) + 250
+      listing = make_ref()
 
       client =
         reporting_client(fn req ->
@@ -327,9 +327,15 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreDeadlineTest do
 
             _ ->
               harnesses =
-                if System.monotonic_time(:millisecond) >= gone_at,
-                  do: [],
-                  else: [%{"harnessName" => name, "status" => "DELETING"}]
+                case Process.get(listing, 0) do
+                  0 ->
+                    Process.put(listing, 1)
+                    [%{"harnessName" => name, "status" => "DELETING"}]
+
+                  _ ->
+                    Process.sleep(350)
+                    []
+                end
 
               ok_json(%{"harnesses" => harnesses})
           end

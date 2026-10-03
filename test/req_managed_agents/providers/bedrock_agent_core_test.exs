@@ -1270,7 +1270,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
       assert log =~ "failed hard"
     end
 
-    test "a delete-wait that gave up unconfirmed says so, rather than logging only :ok" do
+    test "a failed delete-wait listing logs its error at :info" do
       name = P.harness_name(@spec_bedrock, nil)
       {:ok, lists} = Agent.start_link(fn -> 0 end)
 
@@ -1283,18 +1283,16 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
 
       log =
         capture_log([level: :info], fn ->
-          P.provision(@spec_bedrock,
-            execution_role_arn: "r",
-            create_fun: fn _ -> {:error, {:http_error, 409, "exists"}} end,
-            list_fun: list_fun,
-            ready_poll_ms: 0
-          )
+          assert {:error, :listing_down} =
+                   P.provision(@spec_bedrock,
+                     execution_role_arn: "r",
+                     create_fun: fn _ -> {:error, {:http_error, 409, "exists"}} end,
+                     list_fun: list_fun,
+                     ready_poll_ms: 0
+                   )
         end)
 
-      # The control flow is right — the next create arbitrates — but the stop line
-      # reports result=:ok, so without this the log would claim a clean delete.
-      assert log =~ "could not list harnesses"
-      assert log =~ "proceeding unconfirmed"
+      assert log =~ "phase=deleted result={:error, :listing_down}"
     end
 
     test "a name conflict is logged rather than returned silently" do

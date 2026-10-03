@@ -191,6 +191,52 @@ defmodule ReqManagedAgents.AgentCore.ClientTest do
              Client.get_harness_endpoint(client, "h9", "DEFAULT")
   end
 
+  @tag :pagination
+  test "list_harnesses encodes an opaque cursor and signs the complete query", %{client: client} do
+    adapter = fn req ->
+      assert URI.decode_query(req.url.query) == %{
+               "maxResults" => "17",
+               "nextToken" => "opaque +/=&? token"
+             }
+
+      [date] = Req.Request.get_header(req, "x-amz-date")
+
+      <<year::binary-size(4), month::binary-size(2), day::binary-size(2), "T",
+        hour::binary-size(2), minute::binary-size(2), second::binary-size(2), "Z">> = date
+
+      {:ok, timestamp, 0} =
+        DateTime.from_iso8601("#{year}-#{month}-#{day}T#{hour}:#{minute}:#{second}Z")
+
+      credentials = struct!(AWSAuth.Credentials, Map.delete(@creds, :security_token))
+
+      expected =
+        AWSAuth.sign_authorization_header(
+          credentials,
+          "GET",
+          client.control_base_url <>
+            "/harnesses?maxResults=17&nextToken=opaque+%2B%2F%3D%26%3F+token",
+          "bedrock-agentcore",
+          headers: %{"content-type" => "application/json"},
+          payload: "",
+          timestamp: timestamp
+        )
+
+      expected_authorization =
+        expected
+        |> List.keyfind("authorization", 0)
+        |> elem(1)
+
+      assert Req.Request.get_header(req, "authorization") == [expected_authorization]
+
+      {req, %Req.Response{status: 200, body: %{"harnesses" => [], "nextToken" => "another"}}}
+    end
+
+    client = %{client | req_options: [adapter: adapter]}
+
+    assert {:ok, %{"harnesses" => [], "nextToken" => "another"}} =
+             Client.list_harnesses(client, max_results: 17, next_token: "opaque +/=&? token")
+  end
+
   test "telemetry [:req_managed_agents, :agent_core, :request, :stop] fires with operation/service/method metadata",
        %{bypass: bypass, client: client} do
     test_pid = self()
