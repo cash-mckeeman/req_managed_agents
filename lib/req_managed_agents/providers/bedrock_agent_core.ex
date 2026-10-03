@@ -164,7 +164,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
         fn s -> Client.create_harness(budgeted_client(opts, budget, :post), s) end
 
     list_fun =
-      opts[:list_fun] || fn -> Client.list_harnesses(budgeted_client(opts, budget, :get)) end
+      opts[:list_fun] || fn -> list_harness_pages(opts, budget, nil, MapSet.new(), []) end
 
     get_fun =
       opts[:get_fun] || fn hid -> Client.get_harness(budgeted_client(opts, budget, :get), hid) end
@@ -185,6 +185,47 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
         create_and_wait(created, get_fun, budget, opts)
     end
   end
+
+  defp list_harness_pages(opts, budget, token, seen, acc) do
+    if WaitBudget.remaining(budget) <= 0 do
+      {:error, :harness_list_timeout}
+    else
+      result = Client.list_harnesses(budgeted_client(opts, budget, :get), next_token: token)
+
+      with {:ok, harnesses, next_token} <- harness_page(result) do
+        acc = Enum.reverse(harnesses, acc)
+
+        cond do
+          is_nil(next_token) ->
+            {:ok, %{"harnesses" => Enum.reverse(acc)}}
+
+          MapSet.member?(seen, next_token) ->
+            {:error, {:repeated_list_token, next_token}}
+
+          true ->
+            list_harness_pages(opts, budget, next_token, MapSet.put(seen, next_token), acc)
+        end
+      end
+    end
+  end
+
+  defp harness_page({:ok, %{"harnesses" => harnesses} = body} = result)
+       when is_list(harnesses) do
+    token = Map.get(body, "nextToken")
+
+    if Enum.all?(harnesses, &named_harness?/1) and
+         (is_nil(token) or (is_binary(token) and token != "")) do
+      {:ok, harnesses, token}
+    else
+      {:error, {:unexpected_list_response, result}}
+    end
+  end
+
+  defp harness_page({:error, _reason} = error), do: error
+  defp harness_page(other), do: {:error, {:unexpected_list_response, other}}
+
+  defp named_harness?(%{"harnessName" => name}) when is_binary(name) and name != "", do: true
+  defp named_harness?(_), do: false
 
   # Every call made while the budget is still running draws on what is left of it.
   # Unbounded, a single hung request blocks for the client's full 600 s receive
@@ -362,7 +403,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   defp recover_existing(create_fun, harness_spec, list_fun, get_fun, name, budget, opts) do
     case list_fun.() do
-      {:ok, %{"harnesses" => harnesses}} ->
+      {:ok, %{"harnesses" => harnesses}} when is_list(harnesses) ->
         cond do
           harness = recoverable_harness(harnesses, name) ->
             adopt(harness, get_fun, endpoint_fun(opts, budget), endpoint_name(opts), budget)
@@ -468,7 +509,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   defp deleted_loop(list_fun, name, budget, started, poll_n) do
     case list_fun.() do
-      {:ok, %{"harnesses" => hs}} ->
+      {:ok, %{"harnesses" => hs}} when is_list(hs) ->
         n = poll_n + 1
         entry = Enum.find(hs, &(&1["harnessName"] == name))
         status = observed_status(entry)
@@ -485,17 +526,15 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
             {{:error, {:harness_still_deleting, ctx(name, :deleted, status, started, n)}}, n}
         end
 
-      # A listing failure mid-teardown is not evidence the harness survived; the
-      # subsequent create is the real arbiter and 409s if it did. The wait still
-      # ends without ever having seen it go, so say so — the stop line reports
-      # :ok, which here means "stopped waiting", not "confirmed deleted".
+      {:error, reason} ->
+        {{:error, reason}, poll_n}
+
       other ->
         Logger.warning(
-          "agent_core delete-wait for #{name} could not list harnesses " <>
-            "(proceeding unconfirmed; the next create arbitrates): #{inspect(other)}"
+          "agent_core delete-wait for #{name} returned an unexpected listing: #{inspect(other)}"
         )
 
-        {:ok, poll_n}
+        {{:error, {:unexpected_list_response, other}}, poll_n}
     end
   end
 
