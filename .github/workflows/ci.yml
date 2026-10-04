@@ -11,20 +11,17 @@ permissions:
 env:
   MIX_ENV: test
 
-defaults:
-  run:
-    working-directory: req_managed_agents
-
 jobs:
   test:
-    name: test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
+    name: test ${{ matrix.package }} (Elixir ${{ matrix.leg.elixir }} / OTP ${{ matrix.leg.otp }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Floor claimed by mix.exs (`elixir: "~> 1.20"`), on the two
-          # newest OTP releases.
+        package: [req_managed_agents, req_managed_agents_host]
+        leg:
+          # Floor claimed by both mix.exs files (`elixir: "~> 1.20"`), on the
+          # two newest OTP releases.
           - elixir: "1.20"
             otp: "28"
           # Lint-class steps run on the newest OTP, where its deprecation
@@ -32,35 +29,45 @@ jobs:
           - elixir: "1.20"
             otp: "29"
             lint: true
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
         with:
-          elixir-version: ${{ matrix.elixir }}
-          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.leg.elixir }}
+          otp-version: ${{ matrix.leg.otp }}
       - uses: actions/cache@v4
         with:
           path: |
-            req_managed_agents/deps
-            req_managed_agents/_build
-          key: mix-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('req_managed_agents/mix.lock') }}
+            ${{ matrix.package }}/deps
+            ${{ matrix.package }}/_build
+          key: mix-${{ matrix.package }}-${{ runner.os }}-${{ matrix.leg.otp }}-${{ matrix.leg.elixir }}-${{ hashFiles(format('{0}/mix.lock', matrix.package)) }}
           restore-keys: |
-            mix-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-
+            mix-${{ matrix.package }}-${{ runner.os }}-${{ matrix.leg.otp }}-${{ matrix.leg.elixir }}-
       - run: mix deps.get
       - run: mix deps.unlock --check-unused
       - run: mix compile --warnings-as-errors
-        if: ${{ matrix.lint }}
-      # :live tests are excluded in test_helper.exs — contributor PRs never
-      # need Anthropic/AWS credentials. The live-canary workflow covers them.
+        if: ${{ matrix.leg.lint }}
+      # :live tests are excluded in req_managed_agents' test_helper.exs, and
+      # req_managed_agents_host's suite runs on an in-process stub provider:
+      # no PR ever needs Anthropic or AWS credentials.
       - run: mix test
 
   quality:
-    name: quality (format, credo, docs, package)
+    name: quality ${{ matrix.package }} (format, credo, docs, package)
     runs-on: ubuntu-latest
     env:
-      # Override the workflow-wide :test env — ex_doc is `only: :dev`, so
-      # `mix docs` doesn't exist under MIX_ENV=test.
+      # ex_doc is `only: :dev`, so `mix docs` doesn't exist under MIX_ENV=test.
       MIX_ENV: dev
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [req_managed_agents, req_managed_agents_host]
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -70,27 +77,30 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            req_managed_agents/deps
-            req_managed_agents/_build
-          key: mix-quality-${{ runner.os }}-${{ hashFiles('req_managed_agents/mix.lock') }}
+            ${{ matrix.package }}/deps
+            ${{ matrix.package }}/_build
+          key: mix-quality-${{ matrix.package }}-${{ runner.os }}-${{ hashFiles(format('{0}/mix.lock', matrix.package)) }}
           restore-keys: |
-            mix-quality-${{ runner.os }}-
+            mix-quality-${{ matrix.package }}-${{ runner.os }}-
       - run: mix deps.get
       - run: mix format --check-formatted
       - run: mix credo --strict
-      # Acknowledged advisories are listed in mix.exs under
-      # `hex: [ignore_advisories: ...]`, which needs Hex 2.5.1+; setup-beam
-      # installs the latest Hex.
+      # Acknowledged advisories are listed in each mix.exs under
+      # `hex: [ignore_advisories: ...]` (Hex 2.5.1+).
       - run: mix hex.audit
-      # Broken hexdocs references fail the build here, not after publish.
       - run: mix docs --warnings-as-errors
-      # Enforced: all deps are on Hex now, so the tarball must always
-      # assemble.
       - run: mix hex.build
 
   dialyzer:
-    name: dialyzer
+    name: dialyzer ${{ matrix.package }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [req_managed_agents, req_managed_agents_host]
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -100,18 +110,18 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            req_managed_agents/deps
-            req_managed_agents/_build
-          key: mix-dialyzer-${{ runner.os }}-${{ hashFiles('req_managed_agents/mix.lock') }}
+            ${{ matrix.package }}/deps
+            ${{ matrix.package }}/_build
+          key: mix-dialyzer-${{ matrix.package }}-${{ runner.os }}-${{ hashFiles(format('{0}/mix.lock', matrix.package)) }}
           restore-keys: |
-            mix-dialyzer-${{ runner.os }}-
+            mix-dialyzer-${{ matrix.package }}-${{ runner.os }}-
       # PLTs are cached separately from deps: they change on BEAM upgrades,
       # not on every mix.lock bump.
       - uses: actions/cache@v4
         with:
-          path: req_managed_agents/priv/plts
-          key: plt-${{ runner.os }}-29-1.20-${{ hashFiles('req_managed_agents/mix.lock') }}
+          path: ${{ matrix.package }}/priv/plts
+          key: plt-${{ matrix.package }}-${{ runner.os }}-29-1.20-${{ hashFiles(format('{0}/mix.lock', matrix.package)) }}
           restore-keys: |
-            plt-${{ runner.os }}-29-1.20-
+            plt-${{ matrix.package }}-${{ runner.os }}-29-1.20-
       - run: mix deps.get
       - run: mix dialyzer --format github
