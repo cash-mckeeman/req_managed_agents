@@ -164,7 +164,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
         fn s -> Client.create_harness(budgeted_client(opts, budget, :post), s) end
 
     list_fun =
-      opts[:list_fun] || fn -> list_harness_pages(opts, budget, nil, MapSet.new(), []) end
+      opts[:list_fun] ||
+        fn -> list_harness_pages(opts, budget, nil, :sets.new(version: 2), []) end
 
     get_fun =
       opts[:get_fun] || fn hid -> Client.get_harness(budgeted_client(opts, budget, :get), hid) end
@@ -186,6 +187,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     end
   end
 
+  @spec list_harness_pages(keyword(), WaitBudget.t(), String.t() | nil, :sets.set(String.t()), [
+          map()
+        ]) ::
+          {:ok, map()} | {:error, term()}
   defp list_harness_pages(opts, budget, token, seen, acc) do
     if WaitBudget.remaining(budget) <= 0 do
       {:error, :harness_list_timeout}
@@ -199,11 +204,11 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
           is_nil(next_token) ->
             {:ok, %{"harnesses" => Enum.reverse(acc)}}
 
-          MapSet.member?(seen, next_token) ->
+          :sets.is_element(next_token, seen) ->
             {:error, {:repeated_list_token, next_token}}
 
           true ->
-            list_harness_pages(opts, budget, next_token, MapSet.put(seen, next_token), acc)
+            list_harness_pages(opts, budget, next_token, :sets.add_element(next_token, seen), acc)
         end
       end
     end
