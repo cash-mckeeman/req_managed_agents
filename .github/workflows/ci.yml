@@ -11,6 +11,10 @@ permissions:
 env:
   MIX_ENV: test
 
+defaults:
+  run:
+    working-directory: req_managed_agents
+
 jobs:
   test:
     name: test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
@@ -37,9 +41,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            deps
-            _build
-          key: mix-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+            req_managed_agents/deps
+            req_managed_agents/_build
+          key: mix-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('req_managed_agents/mix.lock') }}
           restore-keys: |
             mix-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-
       - run: mix deps.get
@@ -66,9 +70,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            deps
-            _build
-          key: mix-quality-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+            req_managed_agents/deps
+            req_managed_agents/_build
+          key: mix-quality-${{ runner.os }}-${{ hashFiles('req_managed_agents/mix.lock') }}
           restore-keys: |
             mix-quality-${{ runner.os }}-
       - run: mix deps.get
@@ -96,17 +100,17 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            deps
-            _build
-          key: mix-dialyzer-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+            req_managed_agents/deps
+            req_managed_agents/_build
+          key: mix-dialyzer-${{ runner.os }}-${{ hashFiles('req_managed_agents/mix.lock') }}
           restore-keys: |
             mix-dialyzer-${{ runner.os }}-
       # PLTs are cached separately from deps: they change on BEAM upgrades,
       # not on every mix.lock bump.
       - uses: actions/cache@v4
         with:
-          path: priv/plts
-          key: plt-${{ runner.os }}-29-1.20-${{ hashFiles('mix.lock') }}
+          path: req_managed_agents/priv/plts
+          key: plt-${{ runner.os }}-29-1.20-${{ hashFiles('req_managed_agents/mix.lock') }}
           restore-keys: |
             plt-${{ runner.os }}-29-1.20-
       - run: mix deps.get

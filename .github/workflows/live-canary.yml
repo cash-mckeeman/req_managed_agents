@@ -10,8 +10,8 @@ name: Live canary
 # BEDROCK_LIVE_MODEL_ID).
 #
 # AWS auth is GitHub OIDC — no long-lived AWS keys. The workflow assumes
-# rma-ci-github, whose trust policy only accepts runs from this repo's main
-# branch. Setup reference: docs/aws-ci-setup.md.
+# rma-ci-github, whose trust policy accepts this repository's runs that
+# declare the `prod` environment, on any branch. Setup reference: docs/aws-ci-setup.md.
 #
 # Required repository secret:  ANTHROPIC_API_KEY
 # Required repository vars:    AWS_ROLE_ARN, HARNESS_EXECUTION_ROLE_ARN
@@ -34,6 +34,9 @@ jobs:
     # ANTHROPIC_API_KEY / HEX_API_KEY live in the `prod` environment —
     # jobs only see environment secrets when they declare the environment.
     environment: prod
+    defaults:
+      run:
+        working-directory: req_managed_agents
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -43,9 +46,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            deps
-            _build
-          key: mix-quality-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+            req_managed_agents/deps
+            req_managed_agents/_build
+          key: mix-quality-${{ runner.os }}-${{ hashFiles('req_managed_agents/mix.lock') }}
           restore-keys: |
             mix-quality-${{ runner.os }}-
       - uses: aws-actions/configure-aws-credentials@v4
