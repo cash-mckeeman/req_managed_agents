@@ -16,6 +16,9 @@ jobs:
     # ANTHROPIC_API_KEY / HEX_API_KEY live in the `prod` environment —
     # jobs only see environment secrets when they declare the environment.
     environment: prod
+    defaults:
+      run:
+        working-directory: req_managed_agents
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
