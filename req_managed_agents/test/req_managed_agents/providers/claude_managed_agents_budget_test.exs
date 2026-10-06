@@ -412,6 +412,17 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
 
       Bypass.stub(bypass, "POST", "/v1/sessions/s1/archive", fn conn ->
         send(test, {:request, "POST", conn.request_path})
+        Plug.Conn.resp(conn, 503, "{}")
+      end)
+
+      assert {_, {:error, {:budget_not_confirmed, %{archived: {:error, {:http_error, 503, _}}}}}} =
+               open_unconfirmed(client)
+
+      Process.sleep(100)
+      assert strays() == []
+
+      Bypass.stub(bypass, "POST", "/v1/sessions/s1/archive", fn conn ->
+        send(test, {:request, "POST", conn.request_path})
         Bypass.pass(bypass)
         trickle(conn, 100, 40)
       end)
