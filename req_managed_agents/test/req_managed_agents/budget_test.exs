@@ -59,6 +59,7 @@ defmodule ReqManagedAgents.BudgetTest do
       refute Budget.confirmed?(budget, nil)
       refute Budget.confirmed?(budget, limit.("124", "USD"))
       refute Budget.confirmed?(budget, limit.("125", "EUR"))
+      refute Budget.confirmed?(budget, Map.put(limit.("125", "USD"), "type", "other"))
       refute Budget.confirmed?(budget, limit.(125, "USD"))
     end
   end
