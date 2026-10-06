@@ -209,6 +209,28 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
     refute {"POST", "/v1/sessions/s1/archive"} in requests()
   end
 
+  test "a client built with retry: false makes one create attempt, as the Budget docs say",
+       %{bypass: bypass} do
+    test = self()
+
+    Bypass.stub(bypass, "POST", "/v1/sessions", fn conn ->
+      send(test, {:request, "POST", conn.request_path})
+      Plug.Conn.resp(conn, 503, "{}")
+    end)
+
+    client =
+      Client.new(
+        api_key: "sk-test",
+        base_url: "http://localhost:#{bypass.port}",
+        req_options: [retry: false]
+      )
+
+    assert {:error, {:create_session_failed, {:http_error, 503, _}}} =
+             ManagedAgents.open(open_opts(client, budget: %{max_list_cost_cents: 125}), self())
+
+    assert requests() == [{"POST", "/v1/sessions"}]
+  end
+
   describe "a non-confirmed echo with a failing archive" do
     setup %{bypass: bypass} do
       stub_create(bypass, %{"id" => "s1"})
