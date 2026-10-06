@@ -9,6 +9,7 @@ repo="$1"; sha="$2"
 here="$(cd "$(dirname "$0")" && pwd)"
 wait_s="${CI_OK_WAIT_SECONDS:-1200}"; poll_s="${CI_OK_POLL_SECONDS:-30}"
 case "$wait_s" in *[!0-9]*) echo "ci-ok: CI_OK_WAIT_SECONDS must be a non-negative integer, not '$wait_s'" >&2; exit 2 ;; esac
+wait_s=$((10#$wait_s))
 deadline=$(( $(date +%s) + wait_s ))
 while :; do
   verdict="$(gh api "repos/$repo/commits/$sha/check-runs?check_name=ci-ok&filter=all&per_page=100" | jq -r -f "$here/ci-ok-guard.jq")"

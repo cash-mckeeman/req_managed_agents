@@ -58,6 +58,7 @@ check "guard: a failed latest run fails at the first look, without waiting" "1 1
 check "guard: a missing run is logged as missing" "ci-ok: missing on abc; next look in 1s" "$(scripted 2 '{"check_runs":[]}' "$ok" >/dev/null; head -1 "$q/out")"
 check "guard: a pending run is logged as pending" "ci-ok: pending on abc; next look in 1s" "$(scripted 2 "{\"check_runs\":[$(run queued null null)]}" "$ok" >/dev/null; head -1 "$q/out")"
 check "guard: a run that never appears ends with the missing line" "ci-ok: missing on abc after 0s" "$(scripted 0 '{"check_runs":[]}' >/dev/null; tail -1 "$q/out")"
+check "guard: a wait of '08' is read as decimal, not rejected as octal" "0 2" "$(scripted 08 '{"check_runs":[]}' "$ok")"
 for w in abc -1 1.5 "1 2"; do
   check "guard: a wait of '$w' is rejected before any look" "2 0" "$(scripted "$w" '{"check_runs":[]}')"
 done
