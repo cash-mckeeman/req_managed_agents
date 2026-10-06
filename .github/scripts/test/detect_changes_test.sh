@@ -23,7 +23,11 @@ check "--all runs everything" "$ALL" "$(bash "$SCRIPT" --all </dev/null 2>/dev/n
 # A rename across the package boundary must select both sides. The move goes
 # from RMA into RMAH: with rename detection, --name-only lists only the RMAH
 # side, and RMA, which lost the file, would not be tested.
-d="$(mktemp -d)"; ( cd "$d" && git init -q && mkdir -p req_managed_agents/lib && echo "defmodule X, do: nil" > req_managed_agents/lib/x.ex \
+# The fixture repo ignores the runner's git config (signing, hooks, templates)
+# and removes itself.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
+( cd "$d" && git init -q && mkdir -p req_managed_agents/lib && echo "defmodule X, do: nil" > req_managed_agents/lib/x.ex \
   && git add -A && git -c user.email=t@t -c user.name=t commit -qm a && mkdir -p req_managed_agents_host/lib \
   && git mv req_managed_agents/lib/x.ex req_managed_agents_host/lib/x.ex && git -c user.email=t@t -c user.name=t commit -qm b )
 base=$(git -C "$d" rev-parse HEAD~1); head=$(git -C "$d" rev-parse HEAD)
