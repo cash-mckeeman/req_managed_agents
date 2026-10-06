@@ -29,7 +29,7 @@ check "detect-changes cancelled, outputs present" 1 "$(verdict "$(needs cancelle
 
 # Structural: ci-ok needs every other job in ci.yml. A job missing from needs
 # is a job ci-ok cannot see.
-jobs=$(awk '/^jobs:/{f=1; next} f && /^  [A-Za-z0-9_-]+:/ {sub(/^  /, ""); sub(/:.*/, ""); print}' "$CI" | grep -vx ci-ok | sort)
+jobs=$(awk '/^jobs:/{f=1; next} f && /^[^ #]/{exit} f && /^  [A-Za-z0-9_-]+:/ {sub(/^  /, ""); sub(/:.*/, ""); print}' "$CI" | grep -vx ci-ok | sort)
 needs_line=$(awk '/^  ci-ok:/{f=1} f && /^    needs:/ {print; exit}' "$CI" | sed 's/.*\[//; s/\].*//' | tr ',' '\n' | tr -d ' ' | sort)
 check "ci.yml has jobs to compare" yes "$([ "$(printf '%s\n' "$jobs" | grep -c .)" -ge 5 ] && echo yes || echo no)"
 check "ci-ok needs every other job" "$jobs" "$needs_line"
