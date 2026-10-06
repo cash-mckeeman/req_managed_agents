@@ -20,6 +20,10 @@ check "the latest decides in any array order (newer failure listed first)" "fail
   "$(v "$(run completed '"failure"' '"2026-10-02T11:00:00Z"'),$(run completed '"success"' '"2026-10-02T10:00:00Z"')")"
 check "the latest decides in any array order (newer success listed first)" pass \
   "$(v "$(run completed '"success"' '"2026-10-02T11:00:00Z"'),$(run completed '"failure"' '"2026-10-02T10:00:00Z"')")"
+check "a completed_at tie: failure wins (success listed first)" "fail:failure" \
+  "$(v "$(run completed '"success"' '"2026-10-02T10:00:00Z"'),$(run completed '"failure"' '"2026-10-02T10:00:00Z"')")"
+check "a completed_at tie: failure wins (failure listed first)" "fail:failure" \
+  "$(v "$(run completed '"failure"' '"2026-10-02T10:00:00Z"'),$(run completed '"success"' '"2026-10-02T10:00:00Z"')")"
 check "a running re-run is waited on" pending \
   "$(v "$(run completed '"success"' '"2026-10-02T10:00:00Z"'),$(run in_progress null null)")"
 check "another check's name is ignored" missing "$(v '{"name":"scan","status":"completed","conclusion":"success","completed_at":"2026-10-02T10:00:00Z"}')"
