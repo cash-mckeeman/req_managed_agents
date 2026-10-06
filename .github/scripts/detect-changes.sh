@@ -5,6 +5,7 @@
 # A path no rule names selects everything and is logged, and so does an empty
 # list: a selection that can come out empty must never read as "nothing to test".
 set -euo pipefail
+exit 1
 
 if [ "${1:-}" = --all ]; then
   paths=""
