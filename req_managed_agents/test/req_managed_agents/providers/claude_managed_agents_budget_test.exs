@@ -9,6 +9,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
     "max_list_cost" => %{"amount" => "125", "currency" => "USD"}
   }
 
+  @archive_delay_ms 150
+
   setup do
     bypass = Bypass.open()
     test = self()
@@ -25,8 +27,12 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
       Req.Test.json(conn, %{"ok" => true})
     end)
 
+    # The archive answers slowly, as a network round trip does. A stream started before
+    # confirmation would issue its GET inside this window; with an instant archive the
+    # failed open tears the stream task down before the GET lands and the refute is blind.
     Bypass.stub(bypass, "POST", "/v1/sessions/s1/archive", fn conn ->
       send(test, {:request, "POST", conn.request_path})
+      Process.sleep(@archive_delay_ms)
       Req.Test.json(conn, %{"id" => "s1"})
     end)
 
