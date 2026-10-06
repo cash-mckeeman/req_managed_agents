@@ -254,8 +254,13 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
         {:error, {:archive_failed, reason}}
     after
       deadline ->
-        Process.demonitor(monitor, [:flush])
         Process.exit(pid, :kill)
+
+        # A worker's reply always precedes its :DOWN, so once the :DOWN is in no late reply
+        # can still arrive; flushing before it would miss one sent at the kill.
+        receive do
+          {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+        end
 
         receive do
           {^tag, _late} -> :ok
