@@ -218,13 +218,47 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
         req_options: Keyword.merge(client.req_options, opts)
     }
 
-    task = Task.async(fn -> Client.archive_session(bounded, sid) end)
+    run_with_deadline(fn -> Client.archive_session(bounded, sid) end, deadline)
+  end
 
-    case Task.yield(task, deadline) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {:ok, _}} -> :ok
-      {:ok, {:error, _} = error} -> error
-      {:exit, reason} -> {:error, {:archive_failed, reason}}
-      nil -> {:error, :archive_timeout}
+  # Unlinked and monitored, so the caller's mailbox holds nothing afterwards on any path (a
+  # linked Task leaves an {:EXIT, _, :normal} behind for a caller that traps exits). The
+  # worker inherits the caller's $callers, as Task does, so test stubs keyed on the caller
+  # still apply.
+  defp run_with_deadline(fun, deadline) do
+    parent = self()
+    tag = make_ref()
+    callers = [parent | Process.get(:"$callers", [])]
+
+    {pid, monitor} =
+      spawn_monitor(fn ->
+        Process.put(:"$callers", callers)
+        send(parent, {tag, fun.()})
+      end)
+
+    receive do
+      {^tag, {:ok, _}} ->
+        Process.demonitor(monitor, [:flush])
+        :ok
+
+      {^tag, {:error, _} = error} ->
+        Process.demonitor(monitor, [:flush])
+        error
+
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
+        {:error, {:archive_failed, reason}}
+    after
+      deadline ->
+        Process.demonitor(monitor, [:flush])
+        Process.exit(pid, :kill)
+
+        receive do
+          {^tag, _late} -> :ok
+        after
+          0 -> :ok
+        end
+
+        {:error, :archive_timeout}
     end
   end
 

@@ -341,6 +341,47 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
       end)
     end
 
+    # A caller that traps exits (as Session does) must not find the archive's process in its
+    # mailbox afterwards, whether it finished, failed or hit the deadline.
+    # Messages the stubs send the test are expected; anything else is a stray.
+    defp strays do
+      {:messages, messages} = Process.info(self(), :messages)
+
+      Enum.reject(messages, fn
+        {:request, _method, _path} -> true
+        {:create_body, _raw} -> true
+        {:hanging, _pid} -> true
+        _other -> false
+      end)
+    end
+
+    test "the archive leaves nothing in an exit-trapping caller's mailbox on any path",
+         %{bypass: bypass, client: client} do
+      test = self()
+      Process.flag(:trap_exit, true)
+
+      Bypass.stub(bypass, "POST", "/v1/sessions/s1/archive", fn conn ->
+        send(test, {:request, "POST", conn.request_path})
+        Plug.Conn.resp(conn, 200, "{}")
+      end)
+
+      assert {_, {:error, {:budget_not_confirmed, %{archived: :ok}}}} = open_unconfirmed(client)
+      Process.sleep(100)
+      assert strays() == []
+
+      Bypass.stub(bypass, "POST", "/v1/sessions/s1/archive", fn conn ->
+        send(test, {:request, "POST", conn.request_path})
+        Bypass.pass(bypass)
+        trickle(conn, 100, 40)
+      end)
+
+      assert {_, {:error, {:budget_not_confirmed, %{archived: {:error, :archive_timeout}}}}} =
+               open_unconfirmed(%{client | receive_timeout: 400})
+
+      Process.sleep(100)
+      assert strays() == []
+    end
+
     test "a trickling archive is cut off by a total deadline, not just per-read timeouts",
          %{bypass: bypass, client: client} do
       test = self()
