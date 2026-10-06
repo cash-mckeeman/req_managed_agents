@@ -26,6 +26,9 @@ defmodule ReqManagedAgents.Session do
   `%{description:, rubric:, max_iterations:}` — kicks off a
   `user.define_outcome` graded session instead of a `user.message`; mutually exclusive with
   `:prompt`, outcome wins; `{:error, :outcome_unsupported}` on providers without native support),
+  `:budget` (a `%ReqManagedAgents.Budget{}` or a map with the same keys — a provider-enforced
+  spending cap on a fresh Claude Managed Agents session, confirmed by the provider before any
+  prompt is sent; see `ReqManagedAgents.Budget`; an error alongside `:session_id`),
   `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`,
   `:turn_guard` (a 1-arity fun invoked after each turn's usage accumulation with
   `%{usage: %ReqManagedAgents.Usage{}, turns: n, session_id: id}`, returning `:cont` or `{:halt, reason}`;

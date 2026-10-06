@@ -8,6 +8,12 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   `normalize/1` keys off the most recent status event. `events`, `text`, and `server_tool_uses`
   reflect exactly the events passed in (a partial list yields a partial view).
 
+  A `budget:` opt (a `ReqManagedAgents.Budget` or a map with its keys) caps a fresh session's
+  list-priced spend. The provider enforces it between model requests, so a session can
+  overshoot by its in-flight requests. The budget is sent on create and the session opens only if
+  the response echoes it back; see `ReqManagedAgents.Budget`. It cannot be combined with
+  `:session_id`.
+
   A `model_config: %{api_key:, base_url:}` opt builds the client when no `:client` is injected — the canonical way to run a session on a granted key + routed base_url.
   """
   @behaviour ReqManagedAgents.Provider
