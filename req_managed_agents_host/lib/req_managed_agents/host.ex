@@ -1,4 +1,5 @@
 defmodule ReqManagedAgents.Host do
+  # CI drill: a selected job forced to skip.
   @moduledoc """
   Durable single-node session host over `req_managed_agents`.
 

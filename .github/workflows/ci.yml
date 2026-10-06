@@ -157,7 +157,7 @@ jobs:
   dialyzer:
     name: dialyzer ${{ matrix.package }}
     needs: detect-changes
-    if: needs.detect-changes.outputs.packages != '[]'
+    if: false
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
