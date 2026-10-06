@@ -47,6 +47,7 @@ defmodule ReqManagedAgents.Host.SiblingTest do
   test "a floor requirement that is not a ~> requirement fails closed" do
     RMAPublishEnv.with_value("floor", fn ->
       assert_raise FunctionClauseError, fn -> sibling("0.3.7", "0.3.2") end
+      assert_raise MatchError, fn -> sibling("0.3.7", "~> nope") end
     end)
   end
 
