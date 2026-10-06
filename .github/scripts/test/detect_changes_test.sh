@@ -30,6 +30,9 @@ base=$(git -C "$d" rev-parse HEAD~1); head=$(git -C "$d" rev-parse HEAD)
 check "a cross-package rename selects both" "$BOTH root=false" "$( (cd "$d" && bash "$SCRIPT" --diff "$base" "$head") 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
 rc=0; ( cd "$d" && bash "$SCRIPT" --diff "$base" 0000000000000000000000000000000000000000 ) >/dev/null 2>&1 || rc=$?
 check "a failed git diff fails the script" 1 "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
+rc=0; err=$(bash "$SCRIPT" --dif </dev/null 2>&1 >/dev/null) || rc=$?
+check "an unknown flag is rejected" yes "$([ "$rc" -ne 0 ] && grep -q "unknown argument '--dif'" <<<"$err" && echo yes || echo no)"
+
 # git quotes a non-ASCII path ("caf\303\251.ex") unless core.quotePath is off,
 # and a quoted path matches no rule.
 ( cd "$d" && mkdir -p req_managed_agents_host/lib && echo "defmodule Y, do: nil" > "req_managed_agents_host/lib/café.ex" \
