@@ -12,6 +12,10 @@ on:
       tag:
         description: "Tag to rehearse (dry run: nothing is published)"
         required: true
+      ci_ok_wait_seconds:
+        description: "Seconds to wait for ci-ok (a branch has none, so a rehearsal can shorten this)"
+        type: string
+        default: "1200"
 
 permissions:
   contents: read
@@ -32,6 +36,8 @@ jobs:
       TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
       DRY_RUN: ${{ github.event_name == 'push' && '0' || '1' }}
       GH_TOKEN: ${{ github.token }}
+      # Only a manual run may shorten the wait; a tag push is always bounded at 1200 s.
+      CI_OK_WAIT_SECONDS: ${{ github.event_name == 'workflow_dispatch' && inputs.ci_ok_wait_seconds || '1200' }}
     steps:
       - uses: actions/checkout@v4
         with:
