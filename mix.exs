@@ -14,7 +14,8 @@ defmodule ReqManagedAgentsRoot.MixProject do
       # exits 0 having run nothing, so a step that forgot its working
       # directory would pass.
       test: &refuse_root_test/1,
-      publish_order: &publish_order/1
+      publish_order: &publish_order/1,
+      package_version: &package_version/1
     ]
   end
 
@@ -23,4 +24,14 @@ defmodule ReqManagedAgentsRoot.MixProject do
   end
 
   defp publish_order(_args), do: Enum.each(@publish, &IO.puts/1)
+
+  # Reads a package's version from its own mix.exs, for the publish guard.
+  defp package_version([package]) do
+    version =
+      Mix.Project.in_project(String.to_atom(package), package, fn _module ->
+        Mix.Project.config()[:version]
+      end)
+
+    IO.puts(version)
+  end
 end
