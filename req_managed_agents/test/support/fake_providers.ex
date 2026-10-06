@@ -625,6 +625,41 @@ defmodule ReqManagedAgents.FakeProviders do
     def transcript(_conn), do: [%{"role" => "user", "content" => "canned"}]
   end
 
+  defmodule BudgetCapable do
+    @moduledoc false
+    # A request/response fake that declares `supports_budget?/0`. Lives in test/support so it
+    # has a real .beam the code server can reload after a delete/purge in the test.
+    @behaviour ReqManagedAgents.Provider
+    alias ReqManagedAgents.FakeProviders.RequestResponse
+
+    @impl true
+    defdelegate mode, to: RequestResponse
+    @impl true
+    defdelegate provision(spec, opts), to: RequestResponse
+    @impl true
+    defdelegate open(opts, subscriber), to: RequestResponse
+    @impl true
+    defdelegate kickoff_input(opts), to: RequestResponse
+    @impl true
+    defdelegate user_input(text), to: RequestResponse
+    @impl true
+    defdelegate resume_input(uses, results), to: RequestResponse
+    @impl true
+    defdelegate poll_turn(conn, input), to: RequestResponse
+    @impl true
+    defdelegate normalize(events), to: RequestResponse
+    @impl true
+    defdelegate session_id(conn), to: RequestResponse
+    @impl true
+    defdelegate ref(conn), to: RequestResponse
+    @impl true
+    defdelegate consumer(conn), to: RequestResponse
+    @impl true
+    defdelegate resumed?(conn), to: RequestResponse
+    @impl true
+    def supports_budget?, do: true
+  end
+
   defmodule TeardownProbe do
     @moduledoc false
     # Deliberately NOT a full Provider — exists only to prove the facade's
