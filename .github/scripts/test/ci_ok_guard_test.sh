@@ -47,7 +47,7 @@ chmod +x "$q/bin/gh"
 scripted() {
   local wait="$1" i=0 a; shift; rm -f "$q"/[0-9]* "$q/last" "$q/calls"
   for a in "$@"; do i=$((i + 1)); printf '%s\n' "$a" > "$q/$i"; cp "$q/$i" "$q/last"; done
-  PATH="$q/bin:$PATH" Q="$q" CI_OK_WAIT_SECONDS="$wait" CI_OK_POLL_SECONDS=1 bash "$SCRIPT" o/r abc >/dev/null 2>&1
+  PATH="$q/bin:$PATH" Q="$q" CI_OK_WAIT_SECONDS="$wait" CI_OK_POLL_SECONDS=1 bash "$SCRIPT" o/r abc >"$q/out" 2>&1
   echo "$? $(cat "$q/calls")"
 }
 ok="{\"check_runs\":[$(run completed '"success"' '"2026-10-02T10:00:00Z"')]}"
@@ -55,4 +55,7 @@ bad="{\"check_runs\":[$(run completed '"failure"' '"2026-10-02T10:00:00Z"')]}"
 check "guard: a run that appears on the second look is waited for and passes" "0 2" "$(scripted 2 '{"check_runs":[]}' "$ok")"
 check "guard: a pending run that completes is waited for and passes" "0 2" "$(scripted 2 "{\"check_runs\":[$(run queued null null)]}" "$ok")"
 check "guard: a failed latest run fails at the first look, without waiting" "1 1" "$(scripted 2 "$bad" "$ok")"
+check "guard: a missing run is logged as missing" "ci-ok: missing on abc; next look in 1s" "$(scripted 2 '{"check_runs":[]}' "$ok" >/dev/null; head -1 "$q/out")"
+check "guard: a pending run is logged as pending" "ci-ok: pending on abc; next look in 1s" "$(scripted 2 "{\"check_runs\":[$(run queued null null)]}" "$ok" >/dev/null; head -1 "$q/out")"
+check "guard: a run that never appears ends with the missing line" "ci-ok: missing on abc after 0s" "$(scripted 0 '{"check_runs":[]}' >/dev/null; tail -1 "$q/out")"
 exit $fail

@@ -15,7 +15,7 @@ while :; do
     pass) echo "ci-ok: success on $sha"; exit 0 ;;
     pending|missing)
       if [ "$(date +%s)" -ge "$deadline" ]; then echo "ci-ok: $verdict on $sha after ${wait_s}s" >&2; exit 1; fi
-      echo "ci-ok: pending on $sha; next look in ${poll_s}s"; sleep "$poll_s" ;;
+      echo "ci-ok: $verdict on $sha; next look in ${poll_s}s"; sleep "$poll_s" ;;
     *) echo "ci-ok: $verdict on $sha" >&2; exit 1 ;;
   esac
 done
