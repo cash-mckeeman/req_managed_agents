@@ -30,4 +30,9 @@ base=$(git -C "$d" rev-parse HEAD~1); head=$(git -C "$d" rev-parse HEAD)
 check "a cross-package rename selects both" "$BOTH root=false" "$( (cd "$d" && bash "$SCRIPT" --diff "$base" "$head") 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
 rc=0; ( cd "$d" && bash "$SCRIPT" --diff "$base" 0000000000000000000000000000000000000000 ) >/dev/null 2>&1 || rc=$?
 check "a failed git diff fails the script" 1 "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
+# git quotes a non-ASCII path ("caf\303\251.ex") unless core.quotePath is off,
+# and a quoted path matches no rule.
+( cd "$d" && mkdir -p req_managed_agents_host/lib && echo "defmodule Y, do: nil" > "req_managed_agents_host/lib/café.ex" \
+  && git add -A && git -c user.email=t@t -c user.name=t commit -qm c )
+check "a non-ASCII path matches its package rule" 'packages=["req_managed_agents_host"] root=false' "$( (cd "$d" && bash "$SCRIPT" --diff "$head" "$(git rev-parse HEAD)") 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
 exit $fail
