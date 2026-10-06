@@ -120,7 +120,7 @@ defmodule ReqManagedAgents.SessionLiveEventsTest do
 
   test "live provider: handler sees each event exactly once (no batch double-delivery)" do
     assert {:ok, result} =
-             ReqManagedAgents.Session.run(LiveRR,
+             ReqManagedAgents.Session.run_turn(LiveRR,
                handler: CountingHandler,
                context: %{test_pid: self()},
                prompt: "go"
@@ -136,7 +136,7 @@ defmodule ReqManagedAgents.SessionLiveEventsTest do
 
   test "batch provider: handler still sees events exactly once via batch delivery" do
     assert {:ok, result} =
-             ReqManagedAgents.Session.run(BatchRR,
+             ReqManagedAgents.Session.run_turn(BatchRR,
                handler: CountingHandler,
                context: %{test_pid: self()},
                prompt: "go"
@@ -205,7 +205,7 @@ defmodule ReqManagedAgents.SessionLiveEventsTest do
 
   test "session survives a non-map live event (envelope_type catch-all)" do
     assert {:ok, result} =
-             ReqManagedAgents.Session.run(NonMapEventRR,
+             ReqManagedAgents.Session.run_turn(NonMapEventRR,
                handler: CountingHandler,
                context: %{test_pid: self()},
                prompt: "go"
@@ -228,7 +228,7 @@ defmodule ReqManagedAgents.SessionLiveEventsTest do
     on_exit(fn -> :telemetry.detach(handler_id) end)
 
     assert {:ok, _} =
-             ReqManagedAgents.Session.run(LiveRR,
+             ReqManagedAgents.Session.run_turn(LiveRR,
                handler: CountingHandler,
                context: %{test_pid: self()},
                prompt: "go",

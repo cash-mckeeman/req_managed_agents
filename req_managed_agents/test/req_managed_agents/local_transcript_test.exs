@@ -33,7 +33,7 @@ defmodule ReqManagedAgents.LocalTranscriptTest do
     handler = fn _name, _input, _ctx -> {:ok, "unused"} end
 
     assert {:ok, %SessionResult{transcript: transcript}} =
-             Session.run(Local,
+             Session.run_turn(Local,
                prompt: "first",
                handler: handler,
                chat_fun: echo_chat_fun(self()),
@@ -71,7 +71,7 @@ defmodule ReqManagedAgents.LocalTranscriptTest do
     handler = fn _name, _input, _ctx -> {:ok, "unused"} end
 
     {:ok, %SessionResult{transcript: t1}} =
-      Session.run(Local, prompt: "first", handler: handler, chat_fun: chat, spec: %{})
+      Session.run_turn(Local, prompt: "first", handler: handler, chat_fun: chat, spec: %{})
 
     n1 = length(t1)
 
@@ -88,7 +88,7 @@ defmodule ReqManagedAgents.LocalTranscriptTest do
     drain.(drain)
 
     {:ok, %SessionResult{transcript: t2}} =
-      Session.run(Local,
+      Session.run_turn(Local,
         history: t1,
         session_id: "local-42",
         prompt: "second",

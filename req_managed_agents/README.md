@@ -18,7 +18,7 @@ gateway's internals. Direct-to-provider `chat_fun`s remain available for dev and
 
 ```elixir
 {:ok, result} =
-  ReqManagedAgents.Session.run(ReqManagedAgents.Providers.Local,
+  ReqManagedAgents.Session.run_turn(ReqManagedAgents.Providers.Local,
     handler: MyTools,
     spec: %{system_prompt: "...", tools: tools, terminal_tool: "submit", model_config: nil},
     model_config: %{model: "openai:gpt-oss", base_url: lane_url, api_key: granted_key},
@@ -108,7 +108,7 @@ alias ReqManagedAgents.Providers.{ClaudeManagedAgents, BedrockAgentCore}
 # Claude Managed Agents (streaming) — `agent:`/`environment:` take the handle
 # (each lifts the id it needs); no hand-threaded raw ids.
 {:ok, %ReqManagedAgents.SessionResult{} = result} =
-  Session.run(ClaudeManagedAgents,
+  Session.run_turn(ClaudeManagedAgents,
     client: ReqManagedAgents.new(), agent: handle, environment: handle,
     prompt: "…", handler: MyHandler)
 
@@ -120,7 +120,7 @@ result.transcript # client-held history (Local) for reattach, else nil (server-h
 # AWS Bedrock AgentCore (request/response) — same handler, same result struct;
 # its handle carries a `harness_arn`.
 {:ok, %ReqManagedAgents.SessionResult{}} =
-  Session.run(BedrockAgentCore,
+  Session.run_turn(BedrockAgentCore,
     harness_arn: handle.harness_arn, runtime_session_id: sid,
     prompt: "…", handler: MyHandler)
 ```
@@ -129,7 +129,7 @@ result.transcript # client-held history (Local) for reattach, else nil (server-h
 `%{"type" => "end_turn"}`; a string for Bedrock, e.g. `"end_turn"`) — preserved verbatim, never
 flattened. The raw events are always in `events`.
 
-- **Sync:** `Session.run(provider, opts)` blocks until a terminal and returns `{:ok, …}` /
+- **Sync:** `Session.run_turn(provider, opts)` blocks until a terminal and returns `{:ok, …}` /
   `{:error, reason}`.
 - **Live / supervised:** `Session.start_link(provider, opts)` (reconnecting, multi-turn) +
   `Session.message(pid, text)`; pass `notify: pid` to be told when a turn terminates.
@@ -138,12 +138,12 @@ flattened. The raw events are always in `events`.
 
 For the Claude path, thin sugar over the above:
 
-- `ReqManagedAgents.run_to_completion/1` ≡ `Session.run(ClaudeManagedAgents, opts)`
+- `ReqManagedAgents.run_to_completion/1` ≡ `Session.run_turn(ClaudeManagedAgents, opts)`
 - `ReqManagedAgents.start_session/1` ≡ `Session.start_link(ClaudeManagedAgents, opts)`
 - `ReqManagedAgents.new/1` — a control-plane client.
 
 For the Bedrock path, `ReqManagedAgents.AgentCore.invoke_to_completion/1` ≡
-`Session.run(BedrockAgentCore, opts)`.
+`Session.run_turn(BedrockAgentCore, opts)`.
 
 ## Writing a handler
 
@@ -169,7 +169,7 @@ Three runnable, heavily-commented examples ship with the package:
   lifecycle: `provision/3` (agent + environment in one call), a local tool handler, and the
   `%SessionResult{}` (text, terminal, token usage).
 - [`examples/bedrock_agent_core.exs`](examples/bedrock_agent_core.exs) — AgentCore Harness:
-  the same `provision/3` → `Session.run/2` → `teardown/2` shape, plus the AWS
+  the same `provision/3` → `Session.run_turn/2` → `teardown/2` shape, plus the AWS
   gotchas (session-id contract, cross-region model profiles, async deletion).
 - [`examples/provider_agnostic.exs`](examples/provider_agnostic.exs) — the core claim: one
   handler, one loop, two providers, same result shape.
@@ -180,7 +180,7 @@ Both managed providers speak **one vocabulary**: build an `%ReqManagedAgents.Age
 (a `:name` is required — `Agent.Spec.new/1` rejects a nameless spec), provision it — passing
 any environment as the `:environment` option (an `Environment.Spec`, or a flat map that coerces
 to one; its `config` is handed **verbatim** to the provider's wire environment field, no per-key
-indexing) — and thread the returned handle into `Session.run/2`. The provider module is the only
+indexing) — and thread the returned handle into `Session.run_turn/2`. The provider module is the only
 thing you change.
 
 ```elixir
@@ -196,7 +196,7 @@ spec = %Spec{
 # create-or-reuse, cached in-process per {provider, spec}; `teardown/2` releases it
 {:ok, handle} = ReqManagedAgents.provision(provider, spec, environment: env_spec)
 
-# then thread `handle` into Session.run — the connection opts are the one
+# then thread `handle` into Session.run_turn — the connection opts are the one
 # per-provider difference (see the table below).
 ```
 
@@ -209,7 +209,7 @@ What actually differs between the two providers is only this:
 | **`model_config` wire** | plain model-id string (`"claude-haiku-4-5"`) | `%{"bedrockModelConfig" => %{"modelId" => "us.…"}}` (cross-region inference profile) |
 | **provision creates** | a versioned agent **and** an environment (two resources) | one harness folding in model + tools + environment |
 | **provision handle** | `%{agent_id:, environment_id:}` | `%{harness_arn:, harness_id:}` |
-| **`Session.run` connection** | `agent: handle, environment: handle` | `harness_arn: handle.harness_arn, runtime_session_id: sid` (id ≥33 chars) |
+| **`Session.run_turn` connection** | `agent: handle, environment: handle` | `harness_arn: handle.harness_arn, runtime_session_id: sid` (id ≥33 chars) |
 | **capabilities** | outcomes, server-tool observation, cross-batch tool recovery, resume/reconnect (stream-level, with `reconnect/3` event recovery) | `session_id:` reattach within the session window (no event recovery — a dropped turn just re-invokes) |
 
 `:agent`/`:environment` accept a handle (a struct, or a bare map with the same
@@ -220,7 +220,7 @@ Each AgentCore turn is one signed invoke; resume re-sends the assistant `toolUse
 `toolResult` delta. Long runs stream incrementally with **no client wall clock** — only silence
 fails a turn (`idle_timeout:`, inter-chunk guard, default 300s); cost is bounded server-side via
 `timeout_seconds:`/`max_iterations:`/`max_tokens:` (per-invocation overrides of the harness
-defaults). `Session.run/2`'s own `:timeout` must be ≥ the server budget — a client timeout returns
+defaults). `Session.run_turn/2`'s own `:timeout` must be ≥ the server budget — a client timeout returns
 `{:error, :timeout}` but does NOT cancel the in-flight invoke; the harness keeps executing (and
 billing) up to its `timeoutSeconds`. Events reach `Handler.handle_event/2` live either way.
 
@@ -246,12 +246,12 @@ the deadline it is running under. (The best-effort
 `DeleteHarness` that rolls back a harness this call created is the deliberate exception: it
 runs after the budget is spent and carries a small fixed budget of its own.)
 
-**The budgets are additive, so size them that way.** `provision` and `Session.run/2` run in
+**The budgets are additive, so size them that way.** `provision` and `Session.run_turn/2` run in
 sequence, and the defaults do **not** compose: 365 s of provisioning plus `run/2`'s 600 s
 default exceeds a 900 s enclosing limit. The constraint is
 
 ```
-provision :timeout  +  Session.run/2 :timeout  +  margin  ≤  your enclosing deadline
+provision :timeout  +  Session.run_turn/2 :timeout  +  margin  ≤  your enclosing deadline
 ```
 
 where the enclosing deadline is whatever kills you from outside — a CI job timeout, an ExUnit
@@ -277,7 +277,7 @@ harness exists. A mistyped name would otherwise be indistinguishable from an end
 not appeared yet — both are a `404` — so it would spend the whole budget and then roll back a
 harness that is healthy and READY.
 
-`Session.run/2` takes the same `:endpoint_name` and sends it as `InvokeHarness`'s `qualifier`,
+`Session.run_turn/2` takes the same `:endpoint_name` and sends it as `InvokeHarness`'s `qualifier`,
 so the endpoint a provision gates on and the endpoint its turns reach are one option rather than
 two. It belongs on the connection rather than on the provision handle: the endpoint is a
 call-time routing choice, excluded from the content digest, and one harness has many endpoints —
@@ -460,7 +460,7 @@ a runtime version produces a new image automatically, no extra machinery.
 
 `ensure_agent/3` is the content-addressed cousin of `provision/3` ("Provision once, run
 anywhere"): same `%Agent.Spec{}` vocabulary, but Store-backed, digest-named, tag- and
-prune-aware, returning a typed handle you splat straight into `Session.run/2`.
+prune-aware, returning a typed handle you splat straight into `Session.run_turn/2`.
 
 The same content-addressed lifecycle `Provisioner.Environments` gives environments
 applies to agents: `ReqManagedAgents.Agent.Spec` hashes an agent's identity
@@ -496,7 +496,7 @@ A 409 on create (a name collision on the provider side) recovers by name instead
 failing — the provider-side name is `<base>_<digest8>`, so a live agent with that exact
 name IS this exact spec.
 
-Pass the `ensure_agent/3` handle straight into `Session.run/2` alongside an environment
+Pass the `ensure_agent/3` handle straight into `Session.run_turn/2` alongside an environment
 handle — `:agent`/`:environment` are unpacked to `:agent_id`/`:environment_id` before the
 provider opens the session, so callers stop hand-threading raw ids:
 
@@ -504,7 +504,7 @@ provider opens the session, so callers stop hand-threading raw ids:
 {:ok, env} = ReqManagedAgents.ensure_environment(client, env_spec, name: "data_analysis", store: store)
 
 {:ok, result} =
-  ReqManagedAgents.Session.run(ReqManagedAgents.Providers.ClaudeManagedAgents,
+  ReqManagedAgents.Session.run_turn(ReqManagedAgents.Providers.ClaudeManagedAgents,
     agent: agent,
     environment: env,
     handler: MyTools,

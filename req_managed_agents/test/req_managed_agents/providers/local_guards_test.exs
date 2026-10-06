@@ -192,7 +192,7 @@ defmodule ReqManagedAgents.Providers.LocalGuardsTest do
     assert Enum.any?(messages, &(&1["role"] == "user" and &1["content"] == directive))
   end
 
-  test "full Session.run: kickoff → tool → resume → end_turn through Local" do
+  test "full Session.run_turn: kickoff → tool → resume → end_turn through Local" do
     test = self()
 
     chat_fun =
@@ -207,7 +207,7 @@ defmodule ReqManagedAgents.Providers.LocalGuardsTest do
     end
 
     assert {:ok, result} =
-             ReqManagedAgents.Session.run(ReqManagedAgents.Providers.Local,
+             ReqManagedAgents.Session.run_turn(ReqManagedAgents.Providers.Local,
                handler: handler,
                spec: @spec_map,
                chat_fun: chat_fun,

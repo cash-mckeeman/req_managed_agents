@@ -27,7 +27,7 @@ defmodule ReqManagedAgents.SessionMetadataTest do
     on_exit(fn -> :telemetry.detach(handler_id) end)
 
     {:ok, _} =
-      Session.run(RequestResponse,
+      Session.run_turn(RequestResponse,
         handler: fn _, _, _ -> {:ok, ""} end,
         turns: [@end_turn],
         telemetry_metadata: %{step_id: "step_1"},
@@ -42,7 +42,7 @@ defmodule ReqManagedAgents.SessionMetadataTest do
 
   test "model_config metadata reaches handle_event via SessionInfo" do
     {:ok, _} =
-      Session.run(RequestResponse,
+      Session.run_turn(RequestResponse,
         handler: InfoRecorder,
         context: self(),
         turns: [@end_turn],

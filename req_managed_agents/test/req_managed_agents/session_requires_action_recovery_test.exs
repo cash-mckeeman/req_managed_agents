@@ -36,7 +36,7 @@ defmodule ReqManagedAgents.SessionRequiresActionRecoveryTest do
     turn2 = [%{"type" => "stop", "terminal" => :requires_action}]
 
     assert {:ok, %SessionResult{terminal: :end_turn, custom_tool_uses: custom_tool_uses}} =
-             Session.run(PendingRecoveryStreaming, handler: handler, turns: [turn1, turn2])
+             Session.run_turn(PendingRecoveryStreaming, handler: handler, turns: [turn1, turn2])
 
     assert_received {:tool_ran, "a", %{}}
     assert_received {:tool_ran, "b", %{}}
@@ -70,7 +70,7 @@ defmodule ReqManagedAgents.SessionRequiresActionRecoveryTest do
 
     turn2 = [%{"type" => "stop", "terminal" => :requires_action}]
 
-    Session.run(PendingRecoveryStreaming,
+    Session.run_turn(PendingRecoveryStreaming,
       handler: fn _, _, _ -> {:ok, "r"} end,
       turns: [turn1, turn2]
     )
@@ -91,6 +91,9 @@ defmodule ReqManagedAgents.SessionRequiresActionRecoveryTest do
     turn2 = [%{"type" => "stop", "terminal" => :requires_action}]
 
     assert {:error, {:unresolved_requires_action, "requires_action"}} =
-             Session.run(Streaming, handler: fn _, _, _ -> {:ok, "x"} end, turns: [turn1, turn2])
+             Session.run_turn(Streaming,
+               handler: fn _, _, _ -> {:ok, "x"} end,
+               turns: [turn1, turn2]
+             )
   end
 end

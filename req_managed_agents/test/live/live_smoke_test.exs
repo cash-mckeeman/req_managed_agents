@@ -229,7 +229,7 @@ defmodule ReqManagedAgents.LiveSmokeTest do
     assert %{agent_id: _, environment_id: _} = handle
 
     assert {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn} = result} =
-             ReqManagedAgents.Session.run(ClaudeManagedAgents,
+             ReqManagedAgents.Session.run_turn(ClaudeManagedAgents,
                client: client,
                agent_id: handle.agent_id,
                environment_id: handle.environment_id,

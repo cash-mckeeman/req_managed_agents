@@ -103,7 +103,7 @@ IO.puts("provisioned agent #{handle.agent_id}")
 
 # ── 2. Run a session to completion ──────────────────────────────────────────
 #
-# `Session.run/2` blocks until the agent reaches a terminal state and returns
+# `Session.run_turn/2` blocks until the agent reaches a terminal state and returns
 # `{:ok, %ReqManagedAgents.SessionResult{}}`. The provision handle carries both
 # ids; `:agent`/`:environment` accept it directly (each lifts the id it needs),
 # so you never hand-thread raw ids.
@@ -111,9 +111,9 @@ IO.puts("provisioned agent #{handle.agent_id}")
 # For a long-lived, supervised, reconnecting session (a chat), use
 # `ReqManagedAgents.start_session/1` + `ReqManagedAgents.Session.message/2`
 # instead — same opts, same handler. `ReqManagedAgents.run_to_completion/1` is
-# the Claude convenience alias for `Session.run(ClaudeManagedAgents, opts)`.
+# the Claude convenience alias for `Session.run_turn(ClaudeManagedAgents, opts)`.
 {:ok, result} =
-  ReqManagedAgents.Session.run(ClaudeManagedAgents,
+  ReqManagedAgents.Session.run_turn(ClaudeManagedAgents,
     client: client,
     agent: handle,
     environment: handle,

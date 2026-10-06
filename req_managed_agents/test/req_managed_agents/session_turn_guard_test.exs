@@ -71,7 +71,7 @@ defmodule ReqManagedAgents.SessionTurnGuardTest do
 
   test "guard returning :cont leaves the run unaffected" do
     assert {:ok, %SessionResult{terminal: :end_turn, turns: 2}} =
-             Session.run(RequestResponse,
+             Session.run_turn(RequestResponse,
                handler: ok_handler(),
                turns: [@tool_turn, @end_turn],
                turn_guard: fn _ -> :cont end
@@ -80,7 +80,7 @@ defmodule ReqManagedAgents.SessionTurnGuardTest do
 
   test "guard halt terminates: {:error, {:halted, reason}} + :terminated notify" do
     assert {:error, {:halted, {:budget_exceeded, 2}}} =
-             Session.run(RequestResponse,
+             Session.run_turn(RequestResponse,
                handler: ok_handler(),
                notify: self(),
                turns: [@tool_turn, @end_turn],
@@ -96,7 +96,7 @@ defmodule ReqManagedAgents.SessionTurnGuardTest do
     test = self()
 
     {:ok, _} =
-      Session.run(RequestResponse,
+      Session.run_turn(RequestResponse,
         handler: ok_handler(),
         turns: [@end_turn],
         turn_guard: fn payload ->
@@ -112,13 +112,17 @@ defmodule ReqManagedAgents.SessionTurnGuardTest do
 
   test "invalid turn_guard is rejected at start" do
     assert {:error, {:invalid_turn_guard, :nope}} =
-             Session.run(RequestResponse, handler: ok_handler(), turns: [], turn_guard: :nope)
+             Session.run_turn(RequestResponse,
+               handler: ok_handler(),
+               turns: [],
+               turn_guard: :nope
+             )
   end
 
   # (a) Guard on the STREAMING path: halt-at-turns>=2 on the Streaming fake.
   test "guard halts on the streaming path" do
     assert {:error, {:halted, {:budget_exceeded, 2}}} =
-             Session.run(Streaming,
+             Session.run_turn(Streaming,
                handler: ok_handler(),
                notify: self(),
                turns: [@tool_turn, @end_turn],
@@ -133,7 +137,7 @@ defmodule ReqManagedAgents.SessionTurnGuardTest do
   # (b) Guard wins over max_turns when both trip on the same turn.
   test "guard halt wins over max_turns when both fire on the same turn" do
     assert {:error, {:halted, :guard_wins}} =
-             Session.run(RequestResponse,
+             Session.run_turn(RequestResponse,
                handler: ok_handler(),
                turns: [@tool_turn, @end_turn],
                max_turns: 2,
@@ -147,7 +151,7 @@ defmodule ReqManagedAgents.SessionTurnGuardTest do
   test "guard fires on terminal-tool re-prompt turns" do
     test = self()
 
-    Session.run(
+    Session.run_turn(
       Recording,
       handler: ok_handler(),
       test_pid: self(),

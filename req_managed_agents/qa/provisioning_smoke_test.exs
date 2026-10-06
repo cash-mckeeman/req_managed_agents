@@ -1,7 +1,7 @@
 # Provisioning lifecycle smoke (run as an ExUnit test so Bypass works).
 #
 # Exercises the FULL provider-agnostic lifecycle end-to-end for BOTH providers —
-# `provision → Session.run (one turn) → teardown` — with deterministic transports (the Bedrock
+# `provision → Session.run_turn (one turn) → teardown` — with deterministic transports (the Bedrock
 # seams + a Bypass control plane for Claude). Writes a per-provider lifecycle fingerprint to
 # $QA_OUT. Driven by `mix req_managed_agents.qa_provisioning`, which reports PASS/FAIL.
 #
@@ -51,7 +51,7 @@ defmodule QA.ProvisioningSmokeTest do
         execution_role_arn: "arn:aws:iam::1:role/R", create_fun: create, get_fun: get, ready_poll_ms: 0)
 
     {:ok, run} =
-      Session.run(BedrockAgentCore,
+      Session.run_turn(BedrockAgentCore,
         harness_arn: handle.harness_arn,
         runtime_session_id: String.duplicate("s", 33),
         prompt: "hi",
@@ -110,7 +110,7 @@ defmodule QA.ProvisioningSmokeTest do
     {:ok, handle} = ReqManagedAgents.provision(ClaudeManagedAgents, spec("claude-opus-4-8"), client: client)
 
     {:ok, run} =
-      Session.run(ClaudeManagedAgents,
+      Session.run_turn(ClaudeManagedAgents,
         client: client,
         agent_id: handle.agent_id,
         environment_id: handle.environment_id,

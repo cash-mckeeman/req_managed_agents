@@ -1,6 +1,6 @@
 # Provider-agnostic: ONE handler, ONE loop — the provider is a parameter.
 #
-# This is the library's core claim, demonstrated: `ReqManagedAgents.Session.run/2`
+# This is the library's core claim, demonstrated: `ReqManagedAgents.Session.run_turn/2`
 # drives ANY provider to completion and returns the same
 # `%ReqManagedAgents.SessionResult{}`. Between backends, only two things
 # change:
@@ -58,7 +58,7 @@ claude_handle = %{
 }
 
 claude_result =
-  Session.run(ClaudeManagedAgents,
+  Session.run_turn(ClaudeManagedAgents,
     client: ReqManagedAgents.new(),
     agent: claude_handle,
     environment: claude_handle,
@@ -73,7 +73,7 @@ claude_result =
 # fresh session id (33–100 chars, [a-zA-Z0-9-_]).
 # The model was fixed at provision time; pass `model:` only to override it.
 bedrock_result =
-  Session.run(BedrockAgentCore,
+  Session.run_turn(BedrockAgentCore,
     harness_arn: System.fetch_env!("HARNESS_ARN"),
     runtime_session_id:
       "example-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),

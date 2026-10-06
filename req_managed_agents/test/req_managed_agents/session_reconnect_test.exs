@@ -33,7 +33,7 @@ defmodule ReqManagedAgents.SessionReconnectTest do
   test "a synchronous run/2 does NOT reconnect — a stream error surfaces as {:error, _}" do
     # ReconnectingStreaming drops the first push; under run/2 (a sync caller) that must surface.
     assert {:error, :stream_dropped} =
-             Session.run(ReconnectingStreaming,
+             Session.run_turn(ReconnectingStreaming,
                handler: fn _, _, _ -> {:ok, "x"} end,
                pending: [],
                turns: []

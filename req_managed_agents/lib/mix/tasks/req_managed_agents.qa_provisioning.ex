@@ -5,7 +5,7 @@ defmodule Mix.Tasks.ReqManagedAgents.QaProvisioning do
   Provisioning lifecycle smoke — a runnable, deterministic proof that the full provider-agnostic
   lifecycle works cohesively for BOTH providers:
 
-      provision(spec) → Session.run(provider, handle) → teardown(provider, handle)
+      provision(spec) → Session.run_turn(provider, handle) → teardown(provider, handle)
 
   It runs `qa/provisioning_smoke_test.exs` (via `mix test`, so Bypass works), then reports each
   provider's lifecycle. Bedrock runs entirely on injected seams; Claude runs against a Bypass

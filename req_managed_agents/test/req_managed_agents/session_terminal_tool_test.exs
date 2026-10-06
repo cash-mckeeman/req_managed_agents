@@ -70,7 +70,7 @@ defmodule ReqManagedAgents.SessionTerminalToolTest do
               "submit_answer now to finish — produce the result via submit_answer."
 
   defp run(turns, opts) do
-    Session.run(
+    Session.run_turn(
       Recording,
       [
         handler: fn _n, _i, _c -> {:ok, "ok"} end,
@@ -115,7 +115,7 @@ defmodule ReqManagedAgents.SessionTerminalToolTest do
 
   test "require_terminal_tool without terminal_tool is rejected at start" do
     assert {:error, {:invalid_opts, :terminal_tool_required}} =
-             Session.run(Recording,
+             Session.run_turn(Recording,
                handler: fn _, _, _ -> {:ok, ""} end,
                test_pid: self(),
                turns: [],

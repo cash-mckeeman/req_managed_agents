@@ -239,7 +239,7 @@ defmodule ReqManagedAgents.SessionInfoTest do
 
   test "module handler: 4-arity handle_tool_call and 3-arity handle_event receive SessionInfo" do
     assert {:ok, result} =
-             ReqManagedAgents.Session.run(InfoRR,
+             ReqManagedAgents.Session.run_turn(InfoRR,
                handler: FourArityHandler,
                context: %{test_pid: self()},
                prompt: "go"
@@ -252,7 +252,7 @@ defmodule ReqManagedAgents.SessionInfoTest do
 
   test "module handler: 3-arity handler still works unchanged (fallback dispatch)" do
     assert {:ok, result} =
-             ReqManagedAgents.Session.run(InfoRR,
+             ReqManagedAgents.Session.run_turn(InfoRR,
                handler: ThreeArityHandler,
                context: %{test_pid: self()},
                prompt: "go"
@@ -266,7 +266,7 @@ defmodule ReqManagedAgents.SessionInfoTest do
     test_pid = self()
 
     assert {:ok, _} =
-             ReqManagedAgents.Session.run(InfoRR,
+             ReqManagedAgents.Session.run_turn(InfoRR,
                handler: fn _name, _input, _ctx, %SessionInfo{session_id: sid} ->
                  send(test_pid, {:fn4, sid})
                  {:ok, "ok"}
@@ -278,7 +278,7 @@ defmodule ReqManagedAgents.SessionInfoTest do
     assert_received {:fn4, "sess-info-1"}
 
     assert {:ok, _} =
-             ReqManagedAgents.Session.run(InfoRR,
+             ReqManagedAgents.Session.run_turn(InfoRR,
                handler: fn _name, _input, _ctx ->
                  send(test_pid, :fn3)
                  {:ok, "ok"}
@@ -300,7 +300,7 @@ defmodule ReqManagedAgents.SessionInfoTest do
     ]
 
     assert {:ok, result} =
-             ReqManagedAgents.Session.run(InfoStreaming,
+             ReqManagedAgents.Session.run_turn(InfoStreaming,
                handler: FourArityHandler,
                context: %{test_pid: self()},
                turns: turns

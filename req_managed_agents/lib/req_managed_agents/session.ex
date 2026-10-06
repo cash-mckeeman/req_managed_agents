@@ -15,7 +15,7 @@ defmodule ReqManagedAgents.Session do
 
       # synchronous run-to-completion
       {:ok, %ReqManagedAgents.SessionResult{terminal: t, stop_reason: r, events: raw}} =
-        ReqManagedAgents.Session.run(provider, handler: MyTools, prompt: "Hi", ...)
+        ReqManagedAgents.Session.run_turn(provider, handler: MyTools, prompt: "Hi", ...)
 
       # live, long-lived (stays alive after a terminal; `:notify` gets {:managed_agents_session, %ReqManagedAgents.SessionResult{}})
       {:ok, pid} = ReqManagedAgents.Session.start_link(provider, handler: MyTools, notify: self(), ...)
@@ -71,8 +71,9 @@ defmodule ReqManagedAgents.Session do
 
   @max_tool_concurrency 8
 
-  @spec run(module(), keyword()) :: {:ok, ReqManagedAgents.SessionResult.t()} | {:error, term()}
-  def run(provider, opts) do
+  @spec run_turn(module(), keyword()) ::
+          {:ok, ReqManagedAgents.SessionResult.t()} | {:error, term()}
+  def run_turn(provider, opts) do
     # start (NOT start_link) + monitor: an open/init failure or an unexpected GenServer death
     # surfaces as a value here instead of a link exit that would kill the caller.
     case GenServer.start(__MODULE__, {provider, Keyword.put(opts, :caller, self())}) do

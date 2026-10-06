@@ -1,6 +1,6 @@
 defmodule ReqManagedAgents.SessionResumeTest do
   @moduledoc """
-  The reattach seam (issue #66): `Session.run/2` resuming an existing session
+  The reattach seam (issue #66): `Session.run_turn/2` resuming an existing session
   (`session_id:` set) also delivers `opts[:prompt]` as a fresh `user.message` once
   reconnect consolidates to idle with nothing pending — without disturbing the
   existing pending-tool-use redrive.
@@ -20,7 +20,7 @@ defmodule ReqManagedAgents.SessionResumeTest do
     handler = fn _name, _input, _ctx -> {:ok, "unused"} end
 
     assert {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn}} =
-             Session.run(ResumeReattach,
+             Session.run_turn(ResumeReattach,
                session_id: "sess-1",
                prompt: "second turn",
                handler: handler,
@@ -50,7 +50,7 @@ defmodule ReqManagedAgents.SessionResumeTest do
     end
 
     assert {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn}} =
-             Session.run(ResumeReattach,
+             Session.run_turn(ResumeReattach,
                session_id: "sess-1",
                prompt: "ignored",
                handler: handler,

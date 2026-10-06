@@ -50,7 +50,7 @@ alone named an endpoint whose next invoke failed.
 **Typical provisioning latency therefore goes from ~11 s to ~162 s.** Nothing
 about a caller's code has to change, but anything sizing a timeout or a job
 budget around the old figure must be resized: `provision :timeout +
-Session.run/2 :timeout + margin ≤ your enclosing deadline`. The worst case is
+Session.run_turn/2 :timeout + margin ≤ your enclosing deadline`. The worst case is
 unchanged at ~581 s — the endpoint wait
 draws on the same absolute deadline as the harness and delete waits rather than
 starting a clock of its own.
@@ -233,7 +233,7 @@ content-addressed spec. Several public contracts change — see **Migration**.
 ## v0.8.0 (2026-07-13)
 
 ### Added
-- `Session.run/2` with a `session_id:` now delivers a new `:prompt` as a user
+- `Session.run_turn/2` with a `session_id:` now delivers a new `:prompt` as a user
   message on resume. Previously a resume consolidated prior server-side state to a
   terminal but ignored `opts[:prompt]` — there was no way to reattach *and* deliver
   the next user turn in one call. Now, when a resume lands **idle with no pending
@@ -300,7 +300,7 @@ content-addressed spec. Several public contracts change — see **Migration**.
   passthrough are the one exception — those fields have no place in the provider-agnostic
   `Agent.Spec`, so such harnesses intentionally keep their pre-0.7.0 full-spec digest
   instead of folding onto `Agent.Spec.digest/1`.
-- `Session.run/2` (and `start_link/2`) accept `:agent`/`:environment` opts carrying the
+- `Session.run_turn/2` (and `start_link/2`) accept `:agent`/`:environment` opts carrying the
   handle returned by `ensure_agent/3`/`ensure_environment/3`; the handle is unpacked to
   `:agent_id`/`:environment_id` before the provider opens the session, so callers stop
   hand-threading raw ids. An explicit `:agent_id`/`:environment_id` still works and
@@ -437,7 +437,7 @@ re-provision once on upgrade, which is non-destructive.
 ## v0.4.1 (2026-07-04)
 
 ### Fixed
-- `Session.run/2` timeout now shuts down the in-flight poll task (Bedrock AgentCore
+- `Session.run_turn/2` timeout now shuts down the in-flight poll task (Bedrock AgentCore
   invoke) and the streaming SSE consumer, so the client HTTP stream is torn down
   instead of continuing after the caller received `{:error, :timeout}`. Server-side
   execution may still run to the provider's own limit — on AgentCore, `timeoutSeconds`
@@ -532,7 +532,7 @@ re-provision once on upgrade, which is non-destructive.
   `receive_timeout` to cap invokes should now pass `idle_timeout`/`timeout_seconds`).
 
 ### Added
-- Per-invocation AgentCore server budgets on `Session.run/2` opts: `timeout_seconds`,
+- Per-invocation AgentCore server budgets on `Session.run_turn/2` opts: `timeout_seconds`,
   `max_iterations`, `max_tokens` (wire: `timeoutSeconds`/`maxIterations`/`maxTokens`).
 - `idle_timeout` opt on the AgentCore invoke path.
 - `[:req_managed_agents, :stream, :event]` telemetry now also fires for AgentCore turns.

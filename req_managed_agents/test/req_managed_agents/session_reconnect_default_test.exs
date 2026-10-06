@@ -14,7 +14,7 @@ defmodule ReqManagedAgents.SessionReconnectDefaultTest do
     handler = fn _name, _input, _ctx -> {:ok, "unused"} end
 
     assert {:ok, %SessionResult{terminal: :end_turn}} =
-             Session.run(ResumeNoReconnect,
+             Session.run_turn(ResumeNoReconnect,
                session_id: "sess-nr",
                prompt: "second turn",
                handler: handler,
@@ -26,7 +26,7 @@ defmodule ReqManagedAgents.SessionReconnectDefaultTest do
     handler = fn _name, _input, _ctx -> {:ok, "unused"} end
 
     {:ok, _} =
-      Session.run(ResumeNoReconnect,
+      Session.run_turn(ResumeNoReconnect,
         session_id: "sess-nr",
         prompt: "hello again",
         handler: handler,

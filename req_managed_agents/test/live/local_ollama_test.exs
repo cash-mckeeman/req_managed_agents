@@ -62,7 +62,7 @@ defmodule ReqManagedAgents.Live.LocalOllamaTest do
     end
 
     assert {:ok, result} =
-             Session.run(Local,
+             Session.run_turn(Local,
                handler: handler,
                spec: spec,
                model_config: %{model: model},

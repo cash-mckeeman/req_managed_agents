@@ -20,6 +20,6 @@ defmodule ReqManagedAgents.AgentCore do
   """
   @spec invoke_to_completion(keyword()) :: {:ok, map()} | {:error, term()}
   def invoke_to_completion(opts) do
-    ReqManagedAgents.Session.run(ReqManagedAgents.Providers.BedrockAgentCore, opts)
+    ReqManagedAgents.Session.run_turn(ReqManagedAgents.Providers.BedrockAgentCore, opts)
   end
 end

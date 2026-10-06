@@ -18,7 +18,7 @@ defmodule ReqManagedAgents do
     * `ReqManagedAgents.Providers.Local` — in-process loop over a pluggable
       `chat_fun` (default: ReqLLM via the optional `req_llm` dep)
 
-  Whichever backend, `ReqManagedAgents.Session.run/2` returns the same
+  Whichever backend, `ReqManagedAgents.Session.run_turn/2` returns the same
   `ReqManagedAgents.SessionResult` — terminal, text, tool uses, token usage.
 
   See `ReqManagedAgents.Client` for the Anthropic control plane,
@@ -45,15 +45,15 @@ defmodule ReqManagedAgents do
   `{:error, reason}`. For a supervised, reconnecting loop use
   `ReqManagedAgents.Session.start_link/2` instead.
 
-  This is the Claude convenience form of `ReqManagedAgents.Session.run/2` — i.e.
-  `Session.run(ReqManagedAgents.Providers.ClaudeManagedAgents, opts)`.
+  This is the Claude convenience form of `ReqManagedAgents.Session.run_turn/2` — i.e.
+  `Session.run_turn(ReqManagedAgents.Providers.ClaudeManagedAgents, opts)`.
   """
   def run_to_completion(opts),
-    do: ReqManagedAgents.Session.run(ReqManagedAgents.Providers.ClaudeManagedAgents, opts)
+    do: ReqManagedAgents.Session.run_turn(ReqManagedAgents.Providers.ClaudeManagedAgents, opts)
 
   @doc """
   Provision (create-or-reuse) a provider's agent resource for `spec`, returning a durable
-  `handle` you splat into `ReqManagedAgents.Session.run/2` opts. Cached in-process by
+  `handle` you splat into `ReqManagedAgents.Session.run_turn/2` opts. Cached in-process by
   `{provider, spec}`.
   """
   @spec provision(module(), ReqManagedAgents.Provider.spec(), keyword()) ::

@@ -52,7 +52,7 @@ defmodule ReqManagedAgents.SessionTextDeltaTest do
 
   test "synthetic rma.text_delta follows the raw event to the handler, never into events" do
     assert {:ok, result} =
-             Session.run(DeltaProvider, handler: Recorder, context: self())
+             Session.run_turn(DeltaProvider, handler: Recorder, context: self())
 
     assert_received {:handler_event, %{"type" => "say", "text" => "hello"}}
     assert_received {:handler_event, %{"type" => "rma.text_delta", "text" => "hello"}}

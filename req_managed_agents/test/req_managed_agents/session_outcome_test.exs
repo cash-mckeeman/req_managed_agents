@@ -43,7 +43,7 @@ defmodule ReqManagedAgents.SessionOutcomeTest do
     end)
 
     assert {:ok, result} =
-             Session.run(ClaudeManagedAgents,
+             Session.run_turn(ClaudeManagedAgents,
                client: client,
                handler: fn _n, _i, _c -> {:ok, ""} end,
                agent_id: "ag",
@@ -68,7 +68,7 @@ defmodule ReqManagedAgents.SessionOutcomeTest do
 
   test "outcome on a non-supporting provider is rejected at start" do
     assert {:error, :outcome_unsupported} =
-             Session.run(ReqManagedAgents.FakeProviders.RequestResponse,
+             Session.run_turn(ReqManagedAgents.FakeProviders.RequestResponse,
                handler: fn _, _, _ -> {:ok, ""} end,
                turns: [],
                outcome: %{description: "d", rubric: "r"}
@@ -77,7 +77,7 @@ defmodule ReqManagedAgents.SessionOutcomeTest do
 
   test "outcome as a plain string is rejected at start with invalid_opts" do
     assert {:error, {:invalid_opts, :outcome}} =
-             Session.run(ClaudeManagedAgents,
+             Session.run_turn(ClaudeManagedAgents,
                handler: fn _, _, _ -> {:ok, ""} end,
                outcome: "do it"
              )
@@ -85,7 +85,7 @@ defmodule ReqManagedAgents.SessionOutcomeTest do
 
   test "outcome with string keys is rejected at start with invalid_opts" do
     assert {:error, {:invalid_opts, :outcome}} =
-             Session.run(ClaudeManagedAgents,
+             Session.run_turn(ClaudeManagedAgents,
                handler: fn _, _, _ -> {:ok, ""} end,
                outcome: %{"description" => "d", "rubric" => "r"}
              )

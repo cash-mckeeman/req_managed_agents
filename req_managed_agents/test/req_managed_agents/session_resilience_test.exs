@@ -5,12 +5,12 @@ defmodule ReqManagedAgents.SessionResilienceTest do
 
   test "open failure surfaces verbatim (no extra {:open_failed, _} wrapping)" do
     assert {:error, {:create_session_failed, :boom}} =
-             Session.run(FailingOpen, handler: fn _, _, _ -> {:ok, "x"} end)
+             Session.run_turn(FailingOpen, handler: fn _, _, _ -> {:ok, "x"} end)
   end
 
   test "a provider raise in poll_turn surfaces as {:error, _} and does NOT kill the caller" do
     assert {:error, {:provider_error, %RuntimeError{}}} =
-             Session.run(CrashingPoll, handler: fn _, _, _ -> {:ok, "x"} end)
+             Session.run_turn(CrashingPoll, handler: fn _, _, _ -> {:ok, "x"} end)
 
     # If the linked Task crash had propagated, this process would already be dead.
     assert Process.alive?(self())
@@ -31,7 +31,7 @@ defmodule ReqManagedAgents.SessionResilienceTest do
       %{"type" => "stop", "terminal" => :requires_action}
     ]
 
-    Session.run(RequestResponse,
+    Session.run_turn(RequestResponse,
       handler: fn _, _, _ -> {:ok, "r"} end,
       turns: [ra, [%{"type" => "stop", "terminal" => :end_turn}]]
     )

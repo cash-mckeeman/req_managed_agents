@@ -1,6 +1,6 @@
 defmodule ReqManagedAgents.SessionResult do
   @moduledoc """
-  The accumulated outcome of a whole run — what `Session.run/2` and `message/2` deliver.
+  The accumulated outcome of a whole run — what `Session.run_turn/2` and `message/2` deliver.
 
   `transcript` is the provider's client-held history when the provider exports
   `transcript/1` (potentially large); `nil` for server-held providers.

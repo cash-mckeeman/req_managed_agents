@@ -104,14 +104,14 @@ IO.puts("provisioned harness #{handle.harness_id}")
 # Total cost is bounded SERVER-side; the budgets below override the harness
 # defaults (timeoutSeconds 3600, maxIterations 75) for this invocation only.
 # Two things to know for long runs:
-#   * `Session.run/2`'s own `:timeout` (default 600_000 ms) must be ≥ your
+#   * `Session.run_turn/2`'s own `:timeout` (default 600_000 ms) must be ≥ your
 #     server budget — a client timeout returns {:error, :timeout} but does NOT
 #     cancel the in-flight turn; the harness keeps executing (and billing)
 #     server-side up to its `timeoutSeconds`.
 #   * Events reach `handle_event/2` live as the turn runs — you can watch a
 #     multi-minute turn progress instead of waiting for it to finish.
 {:ok, result} =
-  ReqManagedAgents.Session.run(BedrockAgentCore,
+  ReqManagedAgents.Session.run_turn(BedrockAgentCore,
     harness_arn: handle.harness_arn,
     runtime_session_id:
       "example-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),

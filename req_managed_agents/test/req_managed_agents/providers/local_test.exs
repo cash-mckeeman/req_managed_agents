@@ -290,7 +290,7 @@ defmodule ReqManagedAgents.Providers.LocalTest do
 
   test "outcome kickoff is unsupported (Session gate)" do
     assert {:error, :outcome_unsupported} =
-             ReqManagedAgents.Session.run(Local,
+             ReqManagedAgents.Session.run_turn(Local,
                handler: fn _, _, _ -> {:ok, ""} end,
                spec: @spec_map,
                chat_fun: fn _ -> {:ok, %{}} end,

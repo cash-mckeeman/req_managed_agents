@@ -39,7 +39,7 @@ defmodule ReqManagedAgents.SessionTimeoutCancelTest do
 
   test "run/2 timeout shuts down the in-flight poll task" do
     assert {:error, :timeout} =
-             Session.run(BlockingPoll,
+             Session.run_turn(BlockingPoll,
                handler: fn _n, _i, _c -> {:ok, ""} end,
                test_pid: self(),
                timeout: 100

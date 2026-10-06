@@ -20,7 +20,8 @@ defmodule ReqManagedAgents.SessionLoopTest do
         {:ok, "result-#{name}"}
       end
 
-      assert {:ok, result} = Session.run(@provider, handler: handler, turns: [@turn1, @turn2])
+      assert {:ok, result} =
+               Session.run_turn(@provider, handler: handler, turns: [@turn1, @turn2])
 
       assert %SessionResult{
                terminal: :end_turn,
@@ -37,7 +38,7 @@ defmodule ReqManagedAgents.SessionLoopTest do
 
     test "#{inspect(provider)}: a turn that ends immediately returns :end_turn with no tools" do
       assert {:ok, %{terminal: :end_turn}} =
-               Session.run(@provider, handler: fn _, _, _ -> {:ok, "x"} end, turns: [@turn2])
+               Session.run_turn(@provider, handler: fn _, _, _ -> {:ok, "x"} end, turns: [@turn2])
 
       refute_received {:tool_ran, _, _}
     end

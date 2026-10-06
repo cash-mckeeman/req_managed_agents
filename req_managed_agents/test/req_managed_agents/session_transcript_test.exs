@@ -10,12 +10,15 @@ defmodule ReqManagedAgents.SessionTranscriptTest do
 
   test "a provider exporting transcript/1 gets its history embedded at terminal" do
     assert {:ok, %SessionResult{transcript: [%{"role" => "user", "content" => "canned"}]}} =
-             Session.run(WithTranscript, prompt: "hi", handler: fn _, _, _ -> {:ok, "unused"} end)
+             Session.run_turn(WithTranscript,
+               prompt: "hi",
+               handler: fn _, _, _ -> {:ok, "unused"} end
+             )
   end
 
   test "a provider without transcript/1 yields transcript: nil" do
     assert {:ok, %SessionResult{transcript: nil}} =
-             Session.run(RequestResponse,
+             Session.run_turn(RequestResponse,
                prompt: "hi",
                handler: fn _, _, _ -> {:ok, "unused"} end
              )

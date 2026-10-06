@@ -37,7 +37,7 @@ defmodule ReqManagedAgents.SessionAgentHandleTest do
   end
 
   test "an :agent / :environment handle is unpacked to ids before open/2" do
-    Session.run(EchoOpts,
+    Session.run_turn(EchoOpts,
       handler: fn _, _, _ -> {:ok, ""} end,
       test_pid: self(),
       agent: %{agent_id: "a1", name: "x_deadbeef", digest: "deadbeef"},
@@ -48,7 +48,7 @@ defmodule ReqManagedAgents.SessionAgentHandleTest do
   end
 
   test "an explicit :agent_id / :environment_id takes precedence over a handle" do
-    Session.run(EchoOpts,
+    Session.run_turn(EchoOpts,
       handler: fn _, _, _ -> {:ok, ""} end,
       test_pid: self(),
       agent: %{agent_id: "from_handle_a", name: "x_deadbeef", digest: "deadbeef"},
@@ -68,7 +68,7 @@ defmodule ReqManagedAgents.SessionAgentHandleTest do
   # the handle) against the pre-fix code. It must pass once lift_handle
   # consumes struct handles too.
   test "a struct %Agent.Handle{} / %Environment.Handle{} is unpacked to ids before open/2" do
-    Session.run(EchoOpts,
+    Session.run_turn(EchoOpts,
       handler: fn _, _, _ -> {:ok, ""} end,
       test_pid: self(),
       agent: %ReqManagedAgents.Agent.Handle{
