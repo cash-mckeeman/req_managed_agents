@@ -32,4 +32,27 @@ check "guard: pass exits 0" 0 "$(guard "{\"check_runs\":[$(run completed '"succe
 check "guard: pending past the deadline exits 1" 1 "$(guard "{\"check_runs\":[$(run queued null null)]}")"
 check "guard: missing exits 1" 1 "$(guard '{"check_runs":[]}')"
 check "guard: an API error exits non-zero" 1 "$([ "$(guard '{}' yes)" -ne 0 ] && echo 1 || echo 0)"
+
+# Waiting and failing are different exits. A scripted gh answers call N with
+# $Q/N (the last answer repeats) and counts its calls.
+q="$(mktemp -d)"; trap 'rm -rf "$d" "$q"' EXIT; mkdir -p "$q/bin"
+cat > "$q/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+n=$(( $(cat "$Q/calls" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$Q/calls"
+f="$Q/$n"; [ -f "$f" ] || f="$Q/last"
+cat "$f"
+STUB
+chmod +x "$q/bin/gh"
+# scripted <wait s> <answer>...: prints "exit calls"
+scripted() {
+  local wait="$1" i=0 a; shift; rm -f "$q"/[0-9]* "$q/last" "$q/calls"
+  for a in "$@"; do i=$((i + 1)); printf '%s\n' "$a" > "$q/$i"; cp "$q/$i" "$q/last"; done
+  PATH="$q/bin:$PATH" Q="$q" CI_OK_WAIT_SECONDS="$wait" CI_OK_POLL_SECONDS=1 bash "$SCRIPT" o/r abc >/dev/null 2>&1
+  echo "$? $(cat "$q/calls")"
+}
+ok="{\"check_runs\":[$(run completed '"success"' '"2026-10-02T10:00:00Z"')]}"
+bad="{\"check_runs\":[$(run completed '"failure"' '"2026-10-02T10:00:00Z"')]}"
+check "guard: a run that appears on the second look is waited for and passes" "0 2" "$(scripted 2 '{"check_runs":[]}' "$ok")"
+check "guard: a pending run that completes is waited for and passes" "0 2" "$(scripted 2 "{\"check_runs\":[$(run queued null null)]}" "$ok")"
+check "guard: a failed latest run fails at the first look, without waiting" "1 1" "$(scripted 2 "$bad" "$ok")"
 exit $fail
