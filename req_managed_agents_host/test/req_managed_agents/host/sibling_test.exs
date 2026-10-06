@@ -28,6 +28,10 @@ defmodule ReqManagedAgents.Host.SiblingTest do
       assert sibling("0.3.7") == {:req_managed_agents, "~> 0.3.0"}
       assert sibling("12.4.0") == {:req_managed_agents, "~> 12.4.0"}
     end)
+
+    RMAPublishEnv.with_value("floor", fn ->
+      assert sibling("0.3.7") == {:req_managed_agents, "== 0.3.0"}
+    end)
   end
 
   test "a requirement overrides the family minor, and floor pins its lowest version" do
