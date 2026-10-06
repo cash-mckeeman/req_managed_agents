@@ -13,6 +13,9 @@ elif [ "${1:-}" = --diff ]; then
   # --no-renames lists both sides of a rename, so a move across the package
   # boundary selects both packages.
   paths="$(git -c core.quotePath=false diff --name-only --no-renames "$2...$3")"
+elif [ -n "${1:-}" ]; then
+  echo "detect-changes: unknown argument '$1'; usage: --all | --diff <base> <head> | paths on stdin" >&2
+  exit 2
 else
   paths="$(cat)"
 fi
