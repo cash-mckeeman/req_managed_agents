@@ -200,25 +200,31 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   end
 
   # Cleanup is a single request on a connection the create call just proved healthy, so a
-  # healthy archive costs one round trip (tens of milliseconds). A bound two orders of
-  # magnitude above that, below the 60 s receive window and the seconds of backoff that
-  # transient retries add, keeps a dead control plane from stalling the caller's error;
-  # a client configured with a shorter receive timeout keeps it. The figure is a quality-bar
-  # judgement, not a provider limit.
-  @archive_timeout_ms 5_000
+  # healthy archive costs one round trip (tens of milliseconds). The deadline is two orders
+  # of magnitude above that, below the 60 s receive window and the seconds of backoff that
+  # transient retries add; a client configured with a shorter receive timeout keeps it. It
+  # bounds the whole attempt, because a receive timeout alone restarts on every chunk and a
+  # trickling response would outlast it. The figure is a quality-bar judgement, not a
+  # provider limit.
+  @archive_deadline_ms 5_000
 
   defp archive_once(%Client{} = client, sid) do
-    opts = [retry: false, receive_timeout: min(client.receive_timeout, @archive_timeout_ms)]
+    deadline = min(client.receive_timeout, @archive_deadline_ms)
+    opts = [retry: false, receive_timeout: deadline]
 
     bounded = %{
       client
-      | receive_timeout: opts[:receive_timeout],
+      | receive_timeout: deadline,
         req_options: Keyword.merge(client.req_options, opts)
     }
 
-    case Client.archive_session(bounded, sid) do
-      {:ok, _} -> :ok
-      {:error, _} = error -> error
+    task = Task.async(fn -> Client.archive_session(bounded, sid) end)
+
+    case Task.yield(task, deadline) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {:ok, _}} -> :ok
+      {:ok, {:error, _} = error} -> error
+      {:exit, reason} -> {:error, {:archive_failed, reason}}
+      nil -> {:error, :archive_timeout}
     end
   end
 

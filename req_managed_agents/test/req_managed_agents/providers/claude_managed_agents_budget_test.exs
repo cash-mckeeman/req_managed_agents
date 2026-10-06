@@ -326,24 +326,61 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
       release_hanging()
     end
 
-    test "with the default receive timeout the archive is still capped well below it",
+    # One byte every `every_ms` keeps each read under the receive timeout, so only a deadline
+    # on the whole attempt can end it.
+    defp trickle(conn, every_ms, chunks) do
+      conn = Plug.Conn.send_chunked(conn, 200)
+
+      Enum.reduce_while(1..chunks, conn, fn _, conn ->
+        Process.sleep(every_ms)
+
+        case Plug.Conn.chunk(conn, "x") do
+          {:ok, conn} -> {:cont, conn}
+          {:error, _closed} -> {:halt, conn}
+        end
+      end)
+    end
+
+    test "a trickling archive is cut off by a total deadline, not just per-read timeouts",
          %{bypass: bypass, client: client} do
       test = self()
 
       Bypass.stub(bypass, "POST", "/v1/sessions/s1/archive", fn conn ->
         send(test, {:request, "POST", conn.request_path})
         Bypass.pass(bypass)
-        hang(test)
-        late_reply(conn)
+        trickle(conn, 100, 40)
+      end)
+
+      client = %{client | receive_timeout: 400}
+      {micros, result} = open_unconfirmed(client)
+
+      assert {:error,
+              {:budget_not_confirmed, %{session_id: "s1", archived: {:error, :archive_timeout}}}} =
+               result
+
+      assert micros < 1_000_000
+      assert archive_posts() == 1
+    end
+
+    test "with the default client a byte every 3 s is cut off at 5 s, not after 12 s",
+         %{bypass: bypass, client: client} do
+      test = self()
+
+      Bypass.stub(bypass, "POST", "/v1/sessions/s1/archive", fn conn ->
+        send(test, {:request, "POST", conn.request_path})
+        Bypass.pass(bypass)
+        trickle(conn, 3_000, 4)
       end)
 
       assert client.receive_timeout == 60_000
       {micros, result} = open_unconfirmed(client)
 
-      assert {:error, {:budget_not_confirmed, %{archived: {:error, _}}}} = result
-      assert micros in 4_500_000..6_000_000
+      assert {:error,
+              {:budget_not_confirmed, %{session_id: "s1", archived: {:error, :archive_timeout}}}} =
+               result
+
+      assert micros in 4_500_000..5_500_000
       assert archive_posts() == 1
-      release_hanging()
     end
   end
 end
