@@ -36,6 +36,7 @@ check "the key check tests the RMA key for req_managed_agents" 1 \
   "$(lines "              req_managed_agents) [ -n \"\$KEY_RMA\" ] || { echo \"::error::HEX_API_KEY is empty; \$p cannot be published\"; bad=1; } ;;")"
 check "the key check tests the RMAH key for req_managed_agents_host" 1 \
   "$(lines "              req_managed_agents_host) [ -n \"\$KEY_RMAH\" ] || { echo \"::error::HEX_API_KEY_RMAH is empty; \$p cannot be published\"; bad=1; } ;;")"
+check "the key check has one arm per package and one fallback" 3 "$(grep -cE '^              [^ ]+\) ' "$WF")"
 check "no other line reads a secret" 4 "$(grep -v '^ *#' "$WF" | grep -c 'secrets')"
 check "a dry run always ends in the verdict step" "        if: always() && env.DRY_RUN == '1'" "$(step 'dry-run verdict' if)"
 check "the verdict fails on any guard failure" 1 "$(lines "          case \"\$OUTCOMES\" in *failure*) exit 1 ;; esac")"
