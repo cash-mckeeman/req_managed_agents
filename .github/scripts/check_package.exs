@@ -7,12 +7,19 @@ defmodule CheckPackage do
   @siblings ~w(req_managed_agents req_managed_agents_host)
 
   def main([tarball]) do
-    {:ok, outer} = :erl_tar.extract(String.to_charlist(tarball), [:memory])
-    outer = Map.new(outer, fn {name, bin} -> {List.to_string(name), bin} end)
+    outer =
+      tarball
+      |> String.to_charlist()
+      |> extract("tarball #{tarball}", [:memory])
+      |> Map.new(fn {name, bin} -> {List.to_string(name), bin} end)
+
     meta = metadata(Map.fetch!(outer, "metadata.config"))
 
-    {:ok, inner} =
-      :erl_tar.extract({:binary, Map.fetch!(outer, "contents.tar.gz")}, [:memory, :compressed])
+    inner =
+      extract({:binary, Map.fetch!(outer, "contents.tar.gz")}, "contents.tar.gz in #{tarball}", [
+        :memory,
+        :compressed
+      ])
 
     app = meta["name"]
     version = Version.parse!(meta["version"])
@@ -40,6 +47,18 @@ defmodule CheckPackage do
         Enum.each(failures, &IO.puts(:stderr, "check_package: #{app}: " <> &1))
         System.halt(1)
     end
+  end
+
+  defp extract(source, what, opts) do
+    case :erl_tar.extract(source, opts) do
+      {:ok, files} -> files
+      {:error, reason} -> fail("cannot read #{what}: #{inspect(reason)}")
+    end
+  end
+
+  defp fail(message) do
+    IO.puts(:stderr, "check_package: " <> message)
+    System.halt(1)
   end
 
   defp license_failures(inner) do
@@ -91,11 +110,16 @@ defmodule CheckPackage do
 
     File.write!(path, bin)
 
-    try do
-      {:ok, terms} = :file.consult(String.to_charlist(path))
-      Map.new(terms)
-    after
-      File.rm!(path)
+    consulted =
+      try do
+        :file.consult(String.to_charlist(path))
+      after
+        File.rm!(path)
+      end
+
+    case consulted do
+      {:ok, terms} -> Map.new(terms)
+      {:error, reason} -> fail("cannot read metadata.config: #{inspect(reason)}")
     end
   end
 end
