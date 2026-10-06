@@ -30,4 +30,8 @@ jobs=$(awk '/^jobs:/{f=1; next} f && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {sub(/^  
 needs_line=$(awk '/^  ci-ok:/{f=1} f && /^    needs:/ {print; exit}' "$CI" | sed 's/.*\[//; s/\].*//' | tr ',' '\n' | tr -d ' ' | sort)
 check "ci.yml has jobs to compare" yes "$([ "$(printf '%s\n' "$jobs" | grep -c .)" -ge 5 ] && echo yes || echo no)"
 check "ci-ok needs every other job" "$jobs" "$needs_line"
+# Without `if: always()` ci-ok is skipped when a needed job fails, and GitHub
+# reads a skipped required check as passing.
+ci_ok_if=$(awk '/^  ci-ok:/{f=1; next} f && /^  [A-Za-z0-9_-]+:/{exit} f && /^    if:/ {print; exit}' "$CI")
+check "ci-ok runs on every outcome" "    if: always()" "$ci_ok_if"
 exit $fail
