@@ -11,13 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `:budget` option for fresh Claude Managed Agents sessions, with the new
   `ReqManagedAgents.Budget` struct (`max_list_cost_cents`, USD). The budget is validated
-  before any request, sent in the create-session body, and the session opens only if the
-  provider's response echoes the same budget; otherwise the session is archived best-effort
-  and the open returns `{:error, {:budget_not_confirmed, %{session_id:, echoed:, archived:}}}`. Invalid input returns
-  `{:error, {:invalid_opts, :budget}}`, and a budget together with `:session_id` returns
-  `{:error, {:invalid_opts, :budget_with_session_id}}`. The provider enforces the cap between
-  model requests, so a session can overshoot by its in-flight requests. Without `:budget` the
-  create-session body is unchanged.
+  before any request and sent in the create-session body. The session opens only if the
+  provider's response echoes the same budget; otherwise one bounded archive attempt is made
+  and the open returns
+  `{:error, {:budget_not_confirmed, %{session_id:, echoed:, archived:}}}`.
+  Invalid input returns `{:error, {:invalid_opts, :budget}}`; a budget together with
+  `:session_id` returns `{:error, {:invalid_opts, :budget_with_session_id}}`; any provider
+  other than Claude Managed Agents returns `{:error, :budget_unsupported}`. The provider
+  enforces the cap between model requests, so a session can overshoot by its in-flight
+  requests. Without `:budget` the create-session body is unchanged.
 
 ## v0.11.0 (2026-10-02)
 
