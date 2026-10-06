@@ -207,6 +207,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   # trickling response would outlast it. The figure is a quality-bar judgement, not a
   # provider limit.
   @archive_deadline_ms 5_000
+  @worker_grace_ms 250
 
   defp archive_once(%Client{} = client, sid) do
     deadline = min(client.receive_timeout, @archive_deadline_ms)
@@ -232,6 +233,10 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
     {pid, monitor} =
       spawn_monitor(fn ->
+        # Unlinked, so a killed caller cannot take the worker down; it bounds itself. The grace
+        # keeps the caller's own kill at the deadline first, so a timeout reads as
+        # :archive_timeout rather than as a worker exit.
+        {:ok, _timer} = :timer.kill_after(deadline + @worker_grace_ms)
         Process.put(:"$callers", callers)
         send(parent, {tag, fun.()})
       end)

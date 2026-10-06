@@ -341,6 +341,47 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
       end)
     end
 
+    # The archive worker is unlinked, so it must end itself by the deadline even when its
+    # caller is killed mid-attempt. Workers are found by the `$callers` they inherit.
+    defp workers_of(caller) do
+      for pid <- Process.list(),
+          pid != caller,
+          {:dictionary, dict} <- [Process.info(pid, :dictionary)],
+          {:"$callers", [^caller | _]} <- dict,
+          do: pid
+    end
+
+    test "an archive worker whose caller was killed still ends by the deadline",
+         %{bypass: bypass, client: client} do
+      test = self()
+
+      Bypass.stub(bypass, "POST", "/v1/sessions/s1/archive", fn conn ->
+        send(test, {:request, "POST", conn.request_path})
+        Bypass.pass(bypass)
+        trickle(conn, 100, 100)
+      end)
+
+      client = %{client | receive_timeout: 400}
+
+      caller =
+        spawn(fn ->
+          send(
+            test,
+            {:opened,
+             ManagedAgents.open(open_opts(client, budget: %{max_list_cost_cents: 125}), self())}
+          )
+        end)
+
+      assert_receive {:request, "POST", "/v1/sessions/s1/archive"}, 2_000
+      assert [worker] = workers_of(caller)
+      monitor = Process.monitor(worker)
+
+      Process.exit(caller, :kill)
+
+      # Trickling for 10 s; only the worker's own bound can end it in time.
+      assert_receive {:DOWN, ^monitor, :process, ^worker, _reason}, 1_500
+    end
+
     # A caller that traps exits (as Session does) must not find the archive's process in its
     # mailbox afterwards, whether it finished, failed or hit the deadline.
     # Messages the stubs send the test are expected; anything else is a stray.
