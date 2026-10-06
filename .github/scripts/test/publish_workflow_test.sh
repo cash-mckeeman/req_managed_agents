@@ -24,6 +24,11 @@ check "the RMAH step gets the RMAH key, on a tag push only" \
   "          HEX_API_KEY: \${{ github.event_name == 'push' && secrets.HEX_API_KEY_RMAH || '' }}" "$(step 'publish req_managed_agents_host' HEX_API_KEY)"
 check "the key check runs on a tag push only" \
   "        if: github.event_name == 'push'" "$(step "every selected package's Hex key is set" if)"
+check "the key check reads the RMA key" \
+  "          KEY_RMA: \${{ secrets.HEX_API_KEY }}" "$(step "every selected package's Hex key is set" KEY_RMA)"
+check "the key check reads the RMAH key" \
+  "          KEY_RMAH: \${{ secrets.HEX_API_KEY_RMAH }}" "$(step "every selected package's Hex key is set" KEY_RMAH)"
+check "the version check and the key check can each fail" 2 "$(lines "          exit \$bad")"
 check "the key check precedes the first publish" 1 "$([ "$(grep -n "name: every selected package's Hex key is set" "$WF" | cut -d: -f1)" -lt "$(grep -n 'name: publish req_managed_agents$' "$WF" | cut -d: -f1)" ] && echo 1 || echo 0)"
 check "no other line reads a secret" 4 "$(grep -v '^ *#' "$WF" | grep -c 'secrets')"
 check "a dry run always ends in the verdict step" "        if: always() && env.DRY_RUN == '1'" "$(step 'dry-run verdict' if)"
