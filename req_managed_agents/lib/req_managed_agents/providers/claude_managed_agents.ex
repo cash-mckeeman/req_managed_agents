@@ -184,7 +184,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   # Fail closed: a requested budget the provider did not echo back means the session is
   # uncapped, so it is archived (best effort, as provision/2 rolls back an orphaned agent)
-  # before anything can be sent to it.
+  # before anything can be sent to it. The error carries the session id and the archive's
+  # outcome so a caller can clean up if the archive did not land.
   defp confirm_budget(_client, _sid, nil, _created), do: :ok
 
   defp confirm_budget(client, sid, %Budget{} = budget, created) do
@@ -193,8 +194,31 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     if Budget.confirmed?(budget, echoed) do
       :ok
     else
-      _ = Client.archive_session(client, sid)
-      {:error, {:budget_not_confirmed, echoed}}
+      archived = archive_once(client, sid)
+      {:error, {:budget_not_confirmed, %{session_id: sid, echoed: echoed, archived: archived}}}
+    end
+  end
+
+  # Cleanup is a single request on a connection the create call just proved healthy, so a
+  # healthy archive costs one round trip (tens of milliseconds). A bound two orders of
+  # magnitude above that, below the 60 s receive window and the seconds of backoff that
+  # transient retries add, keeps a dead control plane from stalling the caller's error;
+  # a client configured with a shorter receive timeout keeps it. The figure is a quality-bar
+  # judgement, not a provider limit.
+  @archive_timeout_ms 5_000
+
+  defp archive_once(%Client{} = client, sid) do
+    opts = [retry: false, receive_timeout: min(client.receive_timeout, @archive_timeout_ms)]
+
+    bounded = %{
+      client
+      | receive_timeout: opts[:receive_timeout],
+        req_options: Keyword.merge(client.req_options, opts)
+    }
+
+    case Client.archive_session(bounded, sid) do
+      {:ok, _} -> :ok
+      {:error, _} = error -> error
     end
   end
 

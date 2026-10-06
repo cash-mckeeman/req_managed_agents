@@ -155,7 +155,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
          %{bypass: bypass, client: client} do
       stub_create(bypass, unquote(Macro.escape(echo)))
 
-      assert {:error, {:budget_not_confirmed, _echoed}} =
+      assert {:error, {:budget_not_confirmed, %{session_id: "s1", archived: :ok}}} =
                ReqManagedAgents.run_to_completion(
                  client: client,
                  agent_id: "ag",
@@ -171,6 +171,122 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
       refute {"POST", "/v1/sessions/s1/events"} in seen
       refute {"GET", "/v1/sessions/s1/events/stream"} in seen
       assert {"POST", "/v1/sessions/s1/archive"} in seen
+    end
+  end
+
+  describe "a non-confirmed echo with a failing archive" do
+    setup %{bypass: bypass} do
+      stub_create(bypass, %{"id" => "s1"})
+      :ok
+    end
+
+    defp open_unconfirmed(client),
+      do:
+        :timer.tc(fn ->
+          ManagedAgents.open(open_opts(client, budget: %{max_list_cost_cents: 125}), self())
+        end)
+
+    # Holds the handler open until the test releases it. Callers pass `Bypass.pass/1` first:
+    # the client abandons the request, and Bypass would otherwise read the killed handler
+    # as a failed expectation.
+    defp hang(test) do
+      send(test, {:hanging, self()})
+
+      receive do
+        :release -> :ok
+      after
+        15_000 -> :ok
+      end
+    end
+
+    # The client has already given up, so the socket is gone by the time we reply.
+    defp late_reply(conn) do
+      Plug.Conn.resp(conn, 200, "{}")
+    catch
+      _kind, _reason -> conn
+    end
+
+    defp release_hanging do
+      receive do
+        {:hanging, pid} ->
+          ref = Process.monitor(pid)
+          send(pid, :release)
+
+          receive do
+            {:DOWN, ^ref, _, _, _} -> :ok
+          after
+            1_000 -> :ok
+          end
+
+          release_hanging()
+      after
+        0 -> :ok
+      end
+    end
+
+    defp archive_posts, do: Enum.count(requests(), &(&1 == {"POST", "/v1/sessions/s1/archive"}))
+
+    test "a 503 is tried once and the error carries the session id and the failure",
+         %{bypass: bypass, client: client} do
+      test = self()
+
+      Bypass.stub(bypass, "POST", "/v1/sessions/s1/archive", fn conn ->
+        send(test, {:request, "POST", conn.request_path})
+        Plug.Conn.resp(conn, 503, "{}")
+      end)
+
+      {micros, result} = open_unconfirmed(client)
+
+      assert {:error,
+              {:budget_not_confirmed,
+               %{session_id: "s1", echoed: nil, archived: {:error, {:http_error, 503, _}}}}} =
+               result
+
+      # Req's transient retry would add 1s before the second attempt.
+      assert micros < 900_000
+      assert archive_posts() == 1
+    end
+
+    test "a hanging archive is cut off at the client's receive timeout, once",
+         %{bypass: bypass, client: client} do
+      test = self()
+
+      Bypass.stub(bypass, "POST", "/v1/sessions/s1/archive", fn conn ->
+        send(test, {:request, "POST", conn.request_path})
+        Bypass.pass(bypass)
+        hang(test)
+        late_reply(conn)
+      end)
+
+      client = %{client | receive_timeout: 300}
+      {micros, result} = open_unconfirmed(client)
+
+      assert {:error, {:budget_not_confirmed, %{session_id: "s1", archived: {:error, _}}}} =
+               result
+
+      assert micros < 1_500_000
+      assert archive_posts() == 1
+      release_hanging()
+    end
+
+    test "with the default receive timeout the archive is still capped well below it",
+         %{bypass: bypass, client: client} do
+      test = self()
+
+      Bypass.stub(bypass, "POST", "/v1/sessions/s1/archive", fn conn ->
+        send(test, {:request, "POST", conn.request_path})
+        Bypass.pass(bypass)
+        hang(test)
+        late_reply(conn)
+      end)
+
+      assert client.receive_timeout == 60_000
+      {micros, result} = open_unconfirmed(client)
+
+      assert {:error, {:budget_not_confirmed, %{archived: {:error, _}}}} = result
+      assert micros in 4_500_000..6_000_000
+      assert archive_posts() == 1
+      release_hanging()
     end
   end
 end

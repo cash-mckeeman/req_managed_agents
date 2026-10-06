@@ -18,7 +18,9 @@ defmodule ReqManagedAgents.Budget do
   A budget can only be set when the session is created. Passing `:budget` together with
   `:session_id` is an error. When a budget is requested, the session is opened only if the
   provider's create response echoes the same budget; otherwise the session is archived on a
-  best-effort basis and the open fails with `{:budget_not_confirmed, echoed}`.
+  best-effort basis (one attempt, no retries, a few seconds at most) and the open fails with
+  `{:budget_not_confirmed, %{session_id:, echoed:, archived:}}`, where `archived` is `:ok` or
+  `{:error, reason}` so a caller can clean up a session the archive did not reach.
   """
 
   @enforce_keys [:max_list_cost_cents]
