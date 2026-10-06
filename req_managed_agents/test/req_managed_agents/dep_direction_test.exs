@@ -25,10 +25,12 @@ defmodule ReqManagedAgents.DepDirectionTest do
   end
 
   test "no source file under lib/ names ReqManagedAgents.Host" do
-    offenders =
-      for path <- Path.wildcard("lib/**/*.{ex,exs}"),
-          File.read!(path) =~ ~r/ReqManagedAgents\.Host\b/,
-          do: path
+    paths = Path.wildcard("lib/**/*.{ex,exs}")
+
+    # A scan over an empty list passes vacuously: name a file it must have seen.
+    assert "lib/req_managed_agents.ex" in paths
+
+    offenders = for path <- paths, File.read!(path) =~ ~r/ReqManagedAgents\.Host\b/, do: path
 
     assert offenders == []
   end
