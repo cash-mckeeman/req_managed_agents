@@ -14,7 +14,6 @@ defmodule CheckPackage do
     {:ok, inner} =
       :erl_tar.extract({:binary, Map.fetch!(outer, "contents.tar.gz")}, [:memory, :compressed])
 
-    files = Enum.map(inner, fn {name, _} -> List.to_string(name) end)
     app = meta["name"]
     version = Version.parse!(meta["version"])
 
@@ -28,7 +27,7 @@ defmodule CheckPackage do
 
     failures =
       missing_sibling ++
-        license_failures(files) ++
+        license_failures(inner) ++
         Enum.flat_map(requirements, &sibling_failures(&1, app, version))
 
     case failures do
@@ -43,10 +42,12 @@ defmodule CheckPackage do
     end
   end
 
-  defp license_failures(files) do
-    if "LICENSE" in files,
-      do: [],
-      else: ["LICENSE is not in the tarball (add it to package files:)"]
+  defp license_failures(inner) do
+    case Enum.find(inner, fn {name, _} -> List.to_string(name) == "LICENSE" end) do
+      nil -> ["LICENSE is not in the tarball (add it to package files:)"]
+      {_, bin} when byte_size(bin) == 0 -> ["LICENSE in the tarball is empty"]
+      {_, _} -> []
+    end
   end
 
   defp sibling_failures({name, req}, app, %Version{major: major, minor: minor}) do
