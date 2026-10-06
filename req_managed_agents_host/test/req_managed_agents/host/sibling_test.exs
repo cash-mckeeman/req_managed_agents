@@ -21,6 +21,13 @@ defmodule ReqManagedAgents.Host.SiblingTest do
     assert sibling_under("floor") == {:req_managed_agents, "== " <> family}
   end
 
+  test "the family minor drops the patch, and is not the exact version" do
+    project = Mix.Project.get!()
+
+    assert project.family_minor("0.3.7") == "~> 0.3.0"
+    assert project.family_minor("12.4.0") == "~> 12.4.0"
+  end
+
   defp sibling_under(value) do
     deps = RMAPublishEnv.with_value(value, fn -> Mix.Project.get!().project()[:deps] end)
     List.keyfind(deps, :req_managed_agents, 0)

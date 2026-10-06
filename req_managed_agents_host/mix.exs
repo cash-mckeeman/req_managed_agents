@@ -51,8 +51,11 @@ defmodule ReqManagedAgentsHost.MixProject do
     end
   end
 
-  defp family_minor do
-    %Version{major: major, minor: minor} = Version.parse!(@version)
+  @doc false
+  # The family minor of a version: "~> 0.3.0" for 0.3.7. Public so the test can
+  # give it a version with a non-zero patch.
+  def family_minor(version \\ @version) do
+    %Version{major: major, minor: minor} = Version.parse!(version)
     "~> #{major}.#{minor}.0"
   end
 
