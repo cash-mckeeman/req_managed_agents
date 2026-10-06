@@ -24,7 +24,7 @@ check "the RMAH step gets the RMAH key, on a tag push only" \
   "          HEX_API_KEY: \${{ github.event_name == 'push' && secrets.HEX_API_KEY_RMAH || '' }}" "$(step 'publish req_managed_agents_host' HEX_API_KEY)"
 check "the key check runs on a tag push only" \
   "        if: github.event_name == 'push'" "$(step "every selected package's Hex key is set" if)"
-check "no other line reads a secret" 4 "$(grep -v '^ *#' "$WF" | grep -c 'secrets\.')"
+check "no other line reads a secret" 4 "$(grep -v '^ *#' "$WF" | grep -c 'secrets')"
 check "a dry run always ends in the verdict step" "        if: always() && env.DRY_RUN == '1'" "$(step 'dry-run verdict' if)"
 check "the verdict fails on any guard failure" 1 "$(lines "          case \"\$OUTCOMES\" in *failure*) exit 1 ;; esac")"
 check "reachability walks main's first-parent history" 1 "$(lines "        run: git rev-list --first-parent origin/main | grep -x \"\$GITHUB_SHA\" > /dev/null")"
