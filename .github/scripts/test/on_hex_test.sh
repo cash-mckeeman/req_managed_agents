@@ -21,6 +21,8 @@ check "script: 404 prints no" no "$(on_hex 404)"
 out="$(on_hex 000 28)"
 check "script: a curl timeout (exit 28) prints nothing" "" "$out"
 check "script: a curl timeout (exit 28) is an error" 1 "$([ "$(on_hex 000 28 >/dev/null; echo $?)" -ne 0 ] && echo 1 || echo 0)"
+check "script: HTTP 404 with curl exit 28 prints nothing" "" "$(on_hex 404 28)"
+check "script: HTTP 404 with curl exit 28 is an error, not 'no'" 1 "$([ "$(on_hex 404 28 >/dev/null; echo $?)" -ne 0 ] && echo 1 || echo 0)"
 on_hex 404 >/dev/null
 check "script: curl is bounded, shows errors, and asks for this release" \
   "-sS --connect-timeout 10 --max-time 60 -o /dev/null -w %{http_code} https://hex.pm/api/packages/req_managed_agents/releases/0.12.0" "$(cat "$run/argv")"
