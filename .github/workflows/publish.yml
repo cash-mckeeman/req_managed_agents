@@ -82,6 +82,14 @@ jobs:
         name: ci-ok passed on the tagged commit
         continue-on-error: ${{ env.DRY_RUN == '1' }}
         run: bash .github/scripts/ci-ok-guard.sh "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+      # Written before the publish steps, so a dry run's summary opens with the
+      # guards' verdict rather than "would publish".
+      - name: guard verdicts
+        if: env.DRY_RUN == '1'
+        env:
+          OUTCOMES: plan=${{ steps.plan.outcome }} versions=${{ steps.versions.outcome }} reachable=${{ steps.reachable.outcome }} ci_ok=${{ steps.ci_ok.outcome }}
+        run: |
+          echo "guards: $OUTCOMES" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: publish req_managed_agents
         if: contains(format(' {0} ', steps.plan.outputs.packages), ' req_managed_agents ')
         env:
@@ -101,5 +109,4 @@ jobs:
         env:
           OUTCOMES: plan=${{ steps.plan.outcome }} versions=${{ steps.versions.outcome }} reachable=${{ steps.reachable.outcome }} ci_ok=${{ steps.ci_ok.outcome }}
         run: |
-          echo "guards: $OUTCOMES" | tee -a "$GITHUB_STEP_SUMMARY"
           case "$OUTCOMES" in *failure*) exit 1 ;; esac
