@@ -6,6 +6,9 @@ defmodule Mix.Tasks.ReqManagedAgents.QaCheckpointTest do
   test "the baseline directory is required, never derived from the cwd" do
     assert_raise Mix.Error, ~r/--baseline-dir/, fn -> QaCheckpoint.baseline_dir!([]) end
     assert QaCheckpoint.baseline_dir!(baseline_dir: "/tmp/qa-base") == "/tmp/qa-base"
+
+    # run/1 asks for it before its first jj call, so this never creates a workspace.
+    assert_raise Mix.Error, ~r/--baseline-dir/, fn -> QaCheckpoint.run([]) end
   end
 
   @tag :tmp_dir
