@@ -7,6 +7,11 @@ set -euo pipefail
 pkg="$1"; here="$(cd "$(dirname "$0")" && pwd)"; summary="${GITHUB_STEP_SUMMARY:-/dev/stderr}"
 cd "$pkg"
 
+# Anything but the two values the workflow emits is a mistake, and a mistaken
+# DRY_RUN must not fall through to a real publish.
+case "${DRY_RUN-}" in 0|1) ;; *) echo "publish-package: DRY_RUN must be 0 or 1, not '${DRY_RUN-}'" >&2; exit 1 ;; esac
+case "${KIND-}" in lockstep|patch) ;; *) echo "publish-package: KIND must be lockstep or patch, not '${KIND-}'" >&2; exit 1 ;; esac
+
 if [ "$DRY_RUN" != 1 ] && [ -z "${HEX_API_KEY:-}" ]; then
   echo "publish-package: HEX_API_KEY is empty on a real run for $pkg" >&2; exit 1
 fi

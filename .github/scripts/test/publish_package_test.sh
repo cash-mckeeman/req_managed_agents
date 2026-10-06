@@ -38,6 +38,12 @@ for k in "" UNSET; do
   check "a real run with the key '${k:-empty}': never publishes" 0 "$(ran hex.publish)"
 done
 check "a dry run needs no key" 0 "$(KEY= publish req_managed_agents lockstep 1 404)"
+for dry in true yes ""; do
+  check "DRY_RUN='$dry': fails" 1 "$([ "$(publish req_managed_agents lockstep "$dry" 404)" -ne 0 ] && echo 1 || echo 0)"
+  check "DRY_RUN='$dry': nothing runs" 0 "$(ran .)"
+done
+check "KIND=garbage: fails" 1 "$([ "$(publish req_managed_agents garbage 1 404)" -ne 0 ] && echo 1 || echo 0)"
+check "KIND=garbage: nothing runs" 0 "$(ran .)"
 check "a dry run exits 0" 0 "$(publish req_managed_agents lockstep 1 404)"
 check "a dry run checks the tarball" 1 "$(ran "elixir .*check_package.exs")"
 check "a dry run never publishes" 0 "$(ran hex.publish)"
