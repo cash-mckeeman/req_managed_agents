@@ -12,9 +12,10 @@ defmodule ReqManagedAgents.Budget do
   cost can overshoot the cap by up to one model request per thread. Size the cap with
   that margin in mind.
 
-  A session that reaches its cap is not an error: the run returns
-  `{:ok, %ReqManagedAgents.SessionResult{terminal: :terminated, stop_reason: %{"type" => "budget_reached"}}}`
-  (the provider's `session.status_idle` stop reason, which the provider maps to `:terminated`).
+  A session that reaches its cap is not an error: the run returns `{:ok, result}` where
+  `result` is a `ReqManagedAgents.SessionResult` with `terminal: :terminated` and
+  `stop_reason: %{"type" => "budget_reached"}` (the provider's `session.status_idle` stop
+  reason, which the provider maps to `:terminated`).
   The provider leaves the session idle, and RMA does not archive it; raising or removing the
   budget through the provider API resumes it.
 
@@ -28,7 +29,8 @@ defmodule ReqManagedAgents.Budget do
   A budget can only be set when the session is created. Passing `:budget` together with
   `:session_id` is an error. When a budget is requested, the session is opened only if the
   provider's create response echoes the same budget; otherwise the session is archived on a
-  best-effort basis (one attempt, no retries, a 5 s total deadline, shorter if the client's receive timeout is) and the open fails with
+  best-effort basis (one attempt, no retries, a 5 s total deadline, shorter if the client's
+  receive timeout is) and the open fails with
   `{:budget_not_confirmed, %{session_id:, echoed:, archived:}}`, where `archived` is `:ok` or
   `{:error, reason}` so a caller can clean up a session the archive did not reach.
   """
