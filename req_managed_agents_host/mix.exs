@@ -32,13 +32,36 @@ defmodule ReqManagedAgentsHost.MixProject do
 
   defp deps do
     [
-      {:req_managed_agents, "~> 0.11.0"},
+      sibling(:req_managed_agents),
       {:jason, "~> 1.4"},
       {:mox, "~> 1.1", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
+  end
+
+  # Path in development; from Hex when publishing. The requirement is the family
+  # minor unless a patch needs a sibling's patch, which passes its own floor.
+  defp sibling(app, requirement \\ nil) do
+    case System.get_env("RMA_PUBLISH") do
+      "1" -> {app, requirement || family_minor()}
+      "floor" -> {app, "== " <> requirement_floor(requirement || family_minor())}
+      _ -> {app, path: "../#{app}"}
+    end
+  end
+
+  defp family_minor do
+    %Version{major: major, minor: minor} = Version.parse!(@version)
+    "~> #{major}.#{minor}.0"
+  end
+
+  # "~> 0.12.1" -> "0.12.1": the lowest version the requirement admits. Not named
+  # `floor/1`: that clashes with the auto-imported Kernel.floor/1 and the module
+  # does not compile.
+  defp requirement_floor("~> " <> version) do
+    {:ok, _} = Version.parse(version)
+    version
   end
 
   defp package do

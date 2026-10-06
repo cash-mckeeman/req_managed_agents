@@ -62,6 +62,13 @@ jobs:
           key: mix-${{ matrix.package }}-${{ runner.os }}-${{ matrix.leg.otp }}-${{ matrix.leg.elixir }}-${{ hashFiles(format('{0}/mix.lock', matrix.package)) }}
           restore-keys: |
             mix-${{ matrix.package }}-${{ runner.os }}-${{ matrix.leg.otp }}-${{ matrix.leg.elixir }}-
+      - name: the lock holds no Hex entry for the sibling
+        if: matrix.package == 'req_managed_agents_host'
+        run: |
+          if grep -q '"req_managed_agents":' mix.lock; then
+            echo "mix.lock still pins req_managed_agents from Hex; the sibling is a path dep" >&2
+            exit 1
+          fi
       - run: mix deps.get
       - run: mix deps.unlock --check-unused
       - run: mix compile --warnings-as-errors
@@ -105,7 +112,11 @@ jobs:
       # `hex: [ignore_advisories: ...]` (Hex 2.5.1+).
       - run: mix hex.audit
       - run: mix docs --warnings-as-errors
+      # The tarball must assemble against Hex deps: RMA_PUBLISH=1 swaps the
+      # sibling path dep for its Hex requirement.
       - run: mix hex.build
+        env:
+          RMA_PUBLISH: "1"
 
   dialyzer:
     name: dialyzer ${{ matrix.package }}
