@@ -12,8 +12,34 @@ env:
   MIX_ENV: test
 
 jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.select.outputs.packages }}
+      root: ${{ steps.select.outputs.root }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: select
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # A push to main selects everything: the ci-ok the publish guard reads
+          # on a main commit must cover both packages.
+          if [ "$EVENT" = pull_request ]; then
+            bash .github/scripts/detect-changes.sh --diff "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
+          else
+            bash .github/scripts/detect-changes.sh --all >> "$GITHUB_OUTPUT"
+          fi
+
   root:
     name: root (task runner)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.root == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,14 +53,18 @@ jobs:
           grep -qF '** (Mix) run mix test from req_managed_agents/ or req_managed_agents_host/' <<<"$out"
       - name: the publish order lists each package directory, dependency first
         run: test "$(mix publish_order)" = "$(printf 'req_managed_agents\nreq_managed_agents_host')"
+      - name: CI script tests
+        run: for t in .github/scripts/test/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done
 
   test:
     name: test ${{ matrix.package }} (Elixir ${{ matrix.leg.elixir }} / OTP ${{ matrix.leg.otp }})
+    needs: detect-changes
+    if: needs.detect-changes.outputs.packages != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package: [req_managed_agents, req_managed_agents_host]
+        package: ${{ fromJSON(needs.detect-changes.outputs.packages) }}
         leg:
           # Floor claimed by both mix.exs files (`elixir: "~> 1.20"`), on the
           # two newest OTP releases.
@@ -80,6 +110,8 @@ jobs:
 
   quality:
     name: quality ${{ matrix.package }} (format, credo, docs, package)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.packages != '[]'
     runs-on: ubuntu-latest
     env:
       # ex_doc is `only: :dev`, so `mix docs` doesn't exist under MIX_ENV=test.
@@ -87,7 +119,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [req_managed_agents, req_managed_agents_host]
+        package: ${{ fromJSON(needs.detect-changes.outputs.packages) }}
     defaults:
       run:
         working-directory: ${{ matrix.package }}
@@ -112,19 +144,25 @@ jobs:
       # `hex: [ignore_advisories: ...]` (Hex 2.5.1+).
       - run: mix hex.audit
       - run: mix docs --warnings-as-errors
-      # The tarball must assemble against Hex deps: RMA_PUBLISH=1 swaps the
+      # Publishable: Hex deps only (hex.build exits 1 on a path dep), LICENSE
+      # shipped, and a sibling at the family minor. RMA_PUBLISH=1 swaps the
       # sibling path dep for its Hex requirement.
-      - run: mix hex.build
+      - name: publishable
         env:
           RMA_PUBLISH: "1"
+        run: |
+          mix hex.build --output "$RUNNER_TEMP/package.tar"
+          elixir ../.github/scripts/check_package.exs "$RUNNER_TEMP/package.tar"
 
   dialyzer:
     name: dialyzer ${{ matrix.package }}
+    needs: detect-changes
+    if: needs.detect-changes.outputs.packages != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package: [req_managed_agents, req_managed_agents_host]
+        package: ${{ fromJSON(needs.detect-changes.outputs.packages) }}
     defaults:
       run:
         working-directory: ${{ matrix.package }}
@@ -152,3 +190,17 @@ jobs:
             plt-${{ matrix.package }}-${{ runner.os }}-29-1.20-
       - run: mix deps.get
       - run: mix dialyzer --format github
+
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [detect-changes, root, test, quality, dialyzer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: CI graph includes every job
+        run: bash .github/scripts/test/ci_ok_test.sh
+      - name: every selected job passed; every skip was detect-changes' choice
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: bash .github/scripts/ci-ok.sh
