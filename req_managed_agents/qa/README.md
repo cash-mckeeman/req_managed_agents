@@ -45,6 +45,7 @@ tool loops (single + parallel), provider stream errors, and tool-handler errors.
 - `--baseline-dir DIR` — required: where the baseline worktree lives, outside this workspace
 - `--base REV` — baseline revision (default `main@origin`)
 - `--rebuild` — recreate the baseline worktree from scratch (otherwise it's reused for speed)
+- `--keep` — leave the baseline worktree in place after running (the default)
 
 The pass/fail comparison itself is unit-tested in
 `test/req_managed_agents/qa_checkpoint_test.exs` — a gate that cannot fail proves nothing.
