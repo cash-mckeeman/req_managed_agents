@@ -32,7 +32,7 @@ defmodule ReqManagedAgentsHost.MixProject do
 
   defp deps do
     [
-      sibling(:req_managed_agents),
+      sibling(:req_managed_agents, @version),
       {:jason, "~> 1.4"},
       {:mox, "~> 1.1", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
@@ -42,19 +42,19 @@ defmodule ReqManagedAgentsHost.MixProject do
   end
 
   # Path in development; from Hex when publishing. The requirement is the family
-  # minor unless a patch needs a sibling's patch, which passes its own floor.
-  defp sibling(app, requirement \\ nil) do
+  # minor of `version` unless a patch needs a sibling's patch, which passes its
+  # own floor. Public so the test can drive it with any version and requirement.
+  @doc false
+  def sibling(app, version, requirement \\ nil) do
     case System.get_env("RMA_PUBLISH") do
-      "1" -> {app, requirement || family_minor()}
-      "floor" -> {app, "== " <> requirement_floor(requirement || family_minor())}
+      "1" -> {app, requirement || family_minor(version)}
+      "floor" -> {app, "== " <> requirement_floor(requirement || family_minor(version))}
       _ -> {app, path: "../#{app}"}
     end
   end
 
-  @doc false
-  # The family minor of a version: "~> 0.3.0" for 0.3.7. Public so the test can
-  # give it a version with a non-zero patch.
-  def family_minor(version \\ @version) do
+  # The family minor of a version: "~> 0.3.0" for 0.3.7.
+  defp family_minor(version) do
     %Version{major: major, minor: minor} = Version.parse!(version)
     "~> #{major}.#{minor}.0"
   end
