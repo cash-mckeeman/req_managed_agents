@@ -23,6 +23,7 @@ check "not selected, yet it failed" 1 "$(verdict "$(needs success "$NONE" skippe
 check "root missing cannot bypass the gate" 1 "$(verdict "$(needs success "$BOTH" success success success success | jq 'del(.root)')")"
 check "empty needs" 1 "$(verdict '{}')"
 check "no needs at all" 1 "$(verdict '')"
+check "detect-changes cancelled, outputs present" 1 "$(verdict "$(needs cancelled "$BOTH" success success success success)")"
 
 # Structural: ci-ok needs every other job in ci.yml. A job missing from needs
 # is a job ci-ok cannot see.
