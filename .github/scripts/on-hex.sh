@@ -11,6 +11,6 @@ hex_answer() {
 }
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   set -euo pipefail
-  code="$(curl -s -o /dev/null -w '%{http_code}' "https://hex.pm/api/packages/$1/releases/$2")"
+  code="$(curl -sS --connect-timeout 10 --max-time 60 -o /dev/null -w '%{http_code}' "https://hex.pm/api/packages/$1/releases/$2")"
   hex_answer "$code"
 fi
