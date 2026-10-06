@@ -13,7 +13,18 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.Agent.Spec
-  alias ReqManagedAgents.{Client, Environment, Event, Outcome, Stream, ToolUse, TurnResult, Usage}
+
+  alias ReqManagedAgents.{
+    Budget,
+    Client,
+    Environment,
+    Event,
+    Outcome,
+    Stream,
+    ToolUse,
+    TurnResult,
+    Usage
+  }
 
   @default_env_config %{type: "cloud", networking: %{type: "unrestricted"}}
 
@@ -92,37 +103,92 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def open(opts, subscriber) do
-    client = client_from(opts)
+    with {:ok, budget} <- budget_from(opts) do
+      client = client_from(opts)
 
-    case opts[:session_id] do
-      nil ->
-        body = %{
+      case opts[:session_id] do
+        nil -> open_fresh(client, opts, budget, subscriber)
+        sid -> open_resume(client, sid)
+      end
+    end
+  end
+
+  defp open_fresh(client, opts, budget, subscriber) do
+    body =
+      Map.merge(
+        %{
           agent: Keyword.fetch!(opts, :agent_id),
           environment_id: Keyword.fetch!(opts, :environment_id)
-        }
+        },
+        budget_body(budget)
+      )
 
-        case Client.create_session(client, body) do
-          {:ok, %{"id" => sid}} ->
-            ref = make_ref()
+    with {:ok, %{"id" => sid} = created} <- create_session(client, body),
+         :ok <- confirm_budget(client, sid, budget, created) do
+      ref = make_ref()
 
-            {:ok, task} =
-              Task.start_link(fn ->
-                Stream.stream(client, sid, subscriber,
-                  ref: ref,
-                  telemetry_metadata: opts[:telemetry_metadata] || %{}
-                )
-              end)
+      {:ok, task} =
+        Task.start_link(fn ->
+          Stream.stream(client, sid, subscriber,
+            ref: ref,
+            telemetry_metadata: opts[:telemetry_metadata] || %{}
+          )
+        end)
 
-            {:ok, %{client: client, session_id: sid, ref: ref, consumer: task}}
+      {:ok, %{client: client, session_id: sid, ref: ref, consumer: task}}
+    end
+  end
 
-          {:error, reason} ->
-            {:error, {:create_session_failed, reason}}
+  # Resume an existing session: don't create or kick off — the Session consolidates via
+  # reconnect/3 (list history, dedup, re-drive any unanswered tool call), opening the stream there.
+  defp open_resume(client, sid),
+    do: {:ok, %{client: client, session_id: sid, ref: nil, resume: true}}
+
+  defp create_session(client, body) do
+    case Client.create_session(client, body) do
+      {:ok, %{"id" => _sid}} = ok -> ok
+      {:error, reason} -> {:error, {:create_session_failed, reason}}
+    end
+  end
+
+  # A budget is validated before any request and cannot be attached to an existing session.
+  defp budget_from(opts) do
+    case {opts[:budget], opts[:session_id]} do
+      {nil, _sid} ->
+        {:ok, nil}
+
+      {raw, sid} ->
+        with {:ok, budget} <- coerce_budget(raw) do
+          if is_nil(sid),
+            do: {:ok, budget},
+            else: {:error, {:invalid_opts, :budget_with_session_id}}
         end
+    end
+  end
 
-      sid ->
-        # Resume an existing session: don't create or kick off — the Session consolidates via
-        # reconnect/3 (list history, dedup, re-drive any unanswered tool call), opening the stream there.
-        {:ok, %{client: client, session_id: sid, ref: nil, resume: true}}
+  defp coerce_budget(raw) do
+    case Budget.new(raw) do
+      {:ok, budget} -> {:ok, budget}
+      {:error, :invalid_budget} -> {:error, {:invalid_opts, :budget}}
+    end
+  end
+
+  defp budget_body(nil), do: %{}
+  defp budget_body(%Budget{} = budget), do: %{budget: Budget.to_wire(budget)}
+
+  # Fail closed: a requested budget the provider did not echo back means the session is
+  # uncapped, so it is archived (best effort, as provision/2 rolls back an orphaned agent)
+  # before anything can be sent to it.
+  defp confirm_budget(_client, _sid, nil, _created), do: :ok
+
+  defp confirm_budget(client, sid, %Budget{} = budget, created) do
+    echoed = Map.get(created, "budget")
+
+    if Budget.confirmed?(budget, echoed) do
+      :ok
+    else
+      _ = Client.archive_session(client, sid)
+      {:error, {:budget_not_confirmed, echoed}}
     end
   end
 
