@@ -4,9 +4,11 @@ defmodule ReqManagedAgents.BudgetTest do
   alias ReqManagedAgents.Budget
 
   describe "new/1" do
-    test "defaults type and currency" do
-      assert {:ok, %Budget{type: :limit, max_list_cost_cents: 125, currency: "USD"}} =
-               Budget.new(%{max_list_cost_cents: 125})
+    test "stores only the cap; the type and currency the provider fixes are not fields" do
+      assert {:ok, %Budget{max_list_cost_cents: 125} = budget} =
+               Budget.new(%{max_list_cost_cents: 125, type: :limit, currency: "USD"})
+
+      assert budget |> Map.from_struct() |> Map.keys() == [:max_list_cost_cents]
     end
 
     test "accepts an existing struct" do

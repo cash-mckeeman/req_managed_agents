@@ -24,20 +24,16 @@ defmodule ReqManagedAgents.Budget do
   """
 
   @enforce_keys [:max_list_cost_cents]
-  defstruct [:max_list_cost_cents, type: :limit, currency: "USD"]
+  defstruct [:max_list_cost_cents]
 
-  @type t :: %__MODULE__{
-          type: :limit,
-          max_list_cost_cents: pos_integer(),
-          currency: String.t()
-        }
+  @type t :: %__MODULE__{max_list_cost_cents: pos_integer()}
 
   @doc """
   Coerce a map or an existing `%Budget{}` into a validated `%Budget{}`.
 
-  `max_list_cost_cents` must be a positive integer, `type` (default `:limit`) must be
-  `:limit` and `currency` (default `"USD"`) must be `"USD"`. Anything else returns
-  `{:error, :invalid_budget}`.
+  `max_list_cost_cents` must be a positive integer. The provider has one budget type
+  (`:limit`) and one currency (`"USD"`), so the struct does not store them; a map may name
+  them, but only with those values. Anything else returns `{:error, :invalid_budget}`.
   """
   @spec new(t() | map()) :: {:ok, t()} | {:error, :invalid_budget}
   def new(%__MODULE__{} = budget), do: budget |> Map.from_struct() |> new()
