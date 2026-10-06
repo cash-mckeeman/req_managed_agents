@@ -27,8 +27,10 @@ defmodule ReqManagedAgents.DepDirectionTest do
   test "no source file under lib/ names ReqManagedAgents.Host" do
     paths = Path.wildcard("lib/**/*.{ex,exs}")
 
-    # A scan over an empty list passes vacuously: name a file it must have seen.
+    # A scan over an empty list passes vacuously, and a glob that stops at the
+    # top level misses the nested files: name a top-level and a nested one.
     assert "lib/req_managed_agents.ex" in paths
+    assert "lib/mix/tasks/req_managed_agents.qa_checkpoint.ex" in paths
 
     offenders = for path <- paths, File.read!(path) =~ ~r/ReqManagedAgents\.Host\b/, do: path
 
