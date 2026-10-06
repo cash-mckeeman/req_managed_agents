@@ -3,6 +3,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
 
   alias ReqManagedAgents.Client
   alias ReqManagedAgents.Providers.ClaudeManagedAgents, as: ManagedAgents
+  alias ReqManagedAgents.SSEFixtures
 
   @wire_budget %{
     "type" => "limit",
@@ -172,6 +173,40 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
       refute {"GET", "/v1/sessions/s1/events/stream"} in seen
       assert {"POST", "/v1/sessions/s1/archive"} in seen
     end
+  end
+
+  test "a spent budget surfaces as a terminated result with the provider's stop reason, session untouched",
+       %{bypass: bypass, client: client} do
+    stub_create(bypass, %{"id" => "s1", "budget" => @wire_budget})
+
+    Bypass.stub(bypass, "GET", "/v1/sessions/s1/events/stream", fn conn ->
+      Bypass.pass(bypass)
+      conn = Plug.Conn.send_chunked(conn, 200)
+
+      idle = %{"type" => "session.status_idle", "stop_reason" => %{"type" => "budget_reached"}}
+      {:ok, conn} = Plug.Conn.chunk(conn, SSEFixtures.wire([idle]))
+      Process.sleep(200)
+      conn
+    end)
+
+    assert {:ok,
+            %ReqManagedAgents.SessionResult{
+              terminal: :terminated,
+              stop_reason: %{"type" => "budget_reached"},
+              session_id: "s1"
+            }} =
+             ReqManagedAgents.run_to_completion(
+               client: client,
+               agent_id: "ag",
+               environment_id: "env",
+               prompt: "go",
+               handler: fn _name, _input, _ctx -> {:ok, "x"} end,
+               budget: %{max_list_cost_cents: 125},
+               timeout: 5_000
+             )
+
+    # The provider leaves a session at its budget idle; RMA does not archive it.
+    refute {"POST", "/v1/sessions/s1/archive"} in requests()
   end
 
   describe "a non-confirmed echo with a failing archive" do

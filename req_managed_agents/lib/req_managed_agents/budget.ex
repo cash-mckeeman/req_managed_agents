@@ -12,6 +12,12 @@ defmodule ReqManagedAgents.Budget do
   cost can overshoot the cap by up to one model request per thread. Size the cap with
   that margin in mind.
 
+  A session that reaches its cap is not an error: the run returns
+  `{:ok, %ReqManagedAgents.SessionResult{terminal: :terminated, stop_reason: %{"type" => "budget_reached"}}}`
+  (the provider's `session.status_idle` stop reason, which the provider maps to `:terminated`).
+  The provider leaves the session idle, and RMA does not archive it; raising or removing the
+  budget through the provider API resumes it.
+
   Only the Claude Managed Agents provider can enforce a budget; `Session.run/2` and
   `Session.start_link/2` return `{:error, :budget_unsupported}` for any other provider.
 
