@@ -1,4 +1,5 @@
-# Input: the workflow's toJSON(needs). Output: one PASS or FAIL line per job.
+# Input: the workflow's toJSON(needs). Output: one PASS or FAIL line per job, or a single
+# FAIL line when needs lacks a job or detect-changes failed or gave no usable outputs.
 .["detect-changes"] as $dc
 | if (["detect-changes", "root", "test", "quality", "dialyzer"] - keys | length) > 0 then "FAIL needs: required job key missing"
   elif $dc == null then "FAIL detect-changes: not in needs"
