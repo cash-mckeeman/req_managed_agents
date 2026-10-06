@@ -121,16 +121,7 @@
           #
           {Credo.Check.Refactor.Apply, []},
           {Credo.Check.Refactor.CondStatements, []},
-          # Deferred: Client.new/1 and the provider normalizers exceed the default
-          # complexity budget; refactoring them is out of scope for CI bring-up.
-          # Re-enable repo-wide when those modules are decomposed.
-          {Credo.Check.Refactor.CyclomaticComplexity,
-           files: %{
-             excluded: [
-               "lib/req_managed_agents/client.ex",
-               "lib/req_managed_agents/providers/bedrock_agent_core.ex"
-             ]
-           }},
+          {Credo.Check.Refactor.CyclomaticComplexity, []},
           {Credo.Check.Refactor.FilterCount, []},
           {Credo.Check.Refactor.FilterFilter, []},
           {Credo.Check.Refactor.FunctionArity, []},
@@ -139,16 +130,7 @@
           {Credo.Check.Refactor.MatchInCondition, []},
           {Credo.Check.Refactor.NegatedConditionsInUnless, []},
           {Credo.Check.Refactor.NegatedConditionsWithElse, []},
-          # Deferred alongside CyclomaticComplexity (same modules + the dev-only
-          # smoke mix task).
-          {Credo.Check.Refactor.Nesting,
-           files: %{
-             excluded: [
-               "lib/mix/tasks/req_managed_agents.agent_core.smoke.ex",
-               "lib/req_managed_agents/providers/bedrock_agent_core.ex",
-               "lib/req_managed_agents/providers/claude_managed_agents.ex"
-             ]
-           }},
+          {Credo.Check.Refactor.Nesting, []},
           {Credo.Check.Refactor.RedundantWithClauseResult, []},
           {Credo.Check.Refactor.RejectReject, []},
           {Credo.Check.Refactor.UnlessWithElse, []},
@@ -162,9 +144,7 @@
           {Credo.Check.Warning.Dbg, []},
           {Credo.Check.Warning.ExpensiveEmptyEnumCheck, []},
           {Credo.Check.Warning.IExPry, []},
-          # Live smoke tests print provider payloads on purpose (they are run
-          # manually / by the canary workflow and read by humans).
-          {Credo.Check.Warning.IoInspect, files: %{excluded: ["test/live/"]}},
+          {Credo.Check.Warning.IoInspect, []},
           {Credo.Check.Warning.MissedMetadataKeyInLoggerConfig, []},
           {Credo.Check.Warning.OperationOnSameValues, []},
           {Credo.Check.Warning.OperationWithConstantResult, []},
