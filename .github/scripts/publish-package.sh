@@ -15,6 +15,8 @@ case "${KIND-}" in lockstep|patch) ;; *) echo "publish-package: KIND must be loc
 if [ "$DRY_RUN" != 1 ] && [ -z "${HEX_API_KEY:-}" ]; then
   echo "publish-package: HEX_API_KEY is empty on a real run for $pkg" >&2; exit 1
 fi
+# Only hex.publish needs the key: the suites and their test-only deps run without it.
+hex_key="${HEX_API_KEY:-}"; unset HEX_API_KEY
 
 # A plain assignment, so set -e stops on an on-hex error. Inside `[ ... ]` the
 # error would read as "not on Hex" and the publish would go ahead.
@@ -48,5 +50,5 @@ RMA_PUBLISH=1 mix hex.build --output "$RUNNER_TEMP/$pkg.tar"
 elixir "$here/check_package.exs" "$RUNNER_TEMP/$pkg.tar"
 
 if [ "$DRY_RUN" = 1 ]; then echo "- $pkg $VERSION: dry run, would publish" >> "$summary"; exit 0; fi
-RMA_PUBLISH=1 mix hex.publish --yes
+HEX_API_KEY="$hex_key" RMA_PUBLISH=1 mix hex.publish --yes
 echo "- $pkg $VERSION: published" >> "$summary"

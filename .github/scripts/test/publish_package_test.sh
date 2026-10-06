@@ -5,21 +5,22 @@ fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok: $1"; else echo "FAIL: $1 (want '$2', got '$3')"; fail=1; fi; }
 # curl, mix and elixir are stubs: curl answers $FAKE_HTTP (exiting $FAKE_CURL_RC),
 # and mix and elixir record where (cwd, relative to the repo) and how they were called.
-# curl records its argv in its own file, so the sequence rows above count only mix and elixir.
+# mix also records, in its own file, the calls that ran with a key in the environment.
+# curl records its argv in its own file, so the sequence rows count only mix and elixir.
 d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
 mkdir -p "$d/bin" "$d/repo/req_managed_agents" "$d/repo/req_managed_agents_host"
 printf '#!/usr/bin/env bash\necho "$*" >> "$CURLS"; printf "%%s" "$FAKE_HTTP"; exit "${FAKE_CURL_RC:-0}"\n' > "$d/bin/curl"
-printf '#!/usr/bin/env bash\necho "mix cwd=${PWD##*/repo} RMA_PUBLISH=${RMA_PUBLISH:-} MIX_ENV=${MIX_ENV:-} $*" >> "$CALLS"\n' > "$d/bin/mix"
+printf '#!/usr/bin/env bash\necho "mix cwd=${PWD##*/repo} RMA_PUBLISH=${RMA_PUBLISH:-} MIX_ENV=${MIX_ENV:-} $*" >> "$CALLS"\n[ -z "${HEX_API_KEY:-}" ] || echo "$*" >> "$KEYED"\n' > "$d/bin/mix"
 printf '#!/usr/bin/env bash\necho "elixir cwd=${PWD##*/repo} $*" >> "$CALLS"\n' > "$d/bin/elixir"
 chmod +x "$d/bin/"*
 # publish <package> <kind> <dry run> <hex.pm HTTP code> [curl exit]: prints the exit code.
 # The Hex key is "key" unless KEY is set around the call; KEY=UNSET leaves it unset.
 publish() {
-  : > "$d/calls"; : > "$d/curls"; : > "$d/summary"
+  : > "$d/calls"; : > "$d/keyed"; : > "$d/curls"; : > "$d/summary"
   local key="${KEY-key}"; [ "$key" = UNSET ] && key=""
   ( cd "$d/repo"
     export HEX_API_KEY="$key"; [ "${KEY-key}" != UNSET ] || unset HEX_API_KEY
-    PATH="$d/bin:$PATH" CALLS="$d/calls" CURLS="$d/curls" GITHUB_STEP_SUMMARY="$d/summary" RUNNER_TEMP="$d" \
+    PATH="$d/bin:$PATH" CALLS="$d/calls" KEYED="$d/keyed" CURLS="$d/curls" GITHUB_STEP_SUMMARY="$d/summary" RUNNER_TEMP="$d" \
     KIND="$2" VERSION=0.12.1 DRY_RUN="$3" FAKE_HTTP="$4" FAKE_CURL_RC="${5:-0}" bash "$SCRIPT" "$1" >/dev/null 2>&1 )
   echo $?
 }
@@ -72,4 +73,6 @@ mix cwd=$host RMA_PUBLISH=1 MIX_ENV= hex.publish --yes" "$(cat "$d/calls")"
 publish req_managed_agents lockstep 0 404 >/dev/null
 check "an RMA lockstep run: five calls, none at a floor" 5 "$(grep -c . "$d/calls")"
 check "an RMA lockstep run: every call in its directory" 5 "$(grep -c 'cwd=/req_managed_agents ' "$d/calls")"
+publish req_managed_agents_host patch 0 404 >/dev/null
+check "a real host patch: only hex.publish sees the key" "hex.publish --yes" "$(cat "$d/keyed")"
 exit $fail
