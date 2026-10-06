@@ -67,7 +67,9 @@ defmodule ReqManagedAgentsHost.MixProject do
   defp package do
     [
       licenses: ["Apache-2.0"],
-      links: %{"GitHub" => @source_url}
+      links: %{"GitHub" => @source_url},
+      maintainers: ["cash-mckeeman"],
+      files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md .formatter.exs)
     ]
   end
 
