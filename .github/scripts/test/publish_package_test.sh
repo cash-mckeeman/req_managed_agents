@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -u
+# publish.yml sets no MIX_ENV, so the calls below are recorded as that job makes them.
+# CI runs this suite with MIX_ENV=test set for every job.
+unset MIX_ENV
 SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/publish-package.sh"
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok: $1"; else echo "FAIL: $1 (want '$2', got '$3')"; fail=1; fi; }
