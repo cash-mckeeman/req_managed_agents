@@ -38,18 +38,20 @@ defmodule ReqManagedAgents.Host.DepDirectionTest do
   defp opts({_app, _requirement}), do: []
   defp opts({_app, _requirement, opts}), do: opts
 
-  # Modules compiled from lib/; test/support modules (StubProvider and the
-  # rest) are compiled into the app under MIX_ENV=test and are not shipped.
+  # Every module except those compiled from test/; test/support modules
+  # (StubProvider and the rest) are compiled into the app under MIX_ENV=test
+  # and are not shipped. A module with an unrecorded or foreign source counts
+  # as shipped, so it cannot slip past the check.
   defp shipped_modules do
     {:ok, modules} = :application.get_key(:req_managed_agents_host, :modules)
-    Enum.filter(modules, &from_lib?/1)
+    Enum.reject(modules, &from_test?/1)
   end
 
-  defp from_lib?(module) do
+  defp from_test?(module) do
     module.module_info(:compile)[:source]
     |> List.to_string()
     |> Path.relative_to_cwd()
-    |> String.starts_with?("lib/")
+    |> String.starts_with?("test/")
   end
 
   # A protocol implementation (`@derive Jason.Encoder` on a Host struct
