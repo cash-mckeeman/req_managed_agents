@@ -23,6 +23,7 @@ check "not selected, yet it failed" 1 "$(verdict "$(needs success "$NONE" skippe
 check "root missing cannot bypass the gate" 1 "$(verdict "$(needs success "$BOTH" success success success success | jq 'del(.root)')")"
 check "empty needs" 1 "$(verdict '{}')"
 check "no needs at all" 1 "$(verdict '')"
+check "malformed needs" 1 "$(verdict '{')"
 check "no root flag" 1 "$(verdict "$(needs success '{"packages":"[]","root":""}' skipped skipped skipped skipped)")"
 check "detect-changes cancelled, outputs present" 1 "$(verdict "$(needs cancelled "$BOTH" success success success success)")"
 
