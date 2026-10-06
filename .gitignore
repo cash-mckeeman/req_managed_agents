@@ -6,3 +6,7 @@ docs/qa-runs/
 
 # jj workspaces: whole checkouts, never content
 .claude/worktrees/
+
+# Root task runner build output
+/_build/
+/deps/

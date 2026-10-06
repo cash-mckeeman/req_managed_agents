@@ -18,11 +18,12 @@ defmodule Mix.Tasks.ReqManagedAgents.QaCheckpoint do
   `stop_reason_raw_kind` — is informational (the documented Claude map→string change) and is
   reported but not failed.
 
-      mix req_managed_agents.qa_checkpoint
-      mix req_managed_agents.qa_checkpoint --base main@origin --rebuild
+      mix req_managed_agents.qa_checkpoint --baseline-dir ../../qa-baseline
+      mix req_managed_agents.qa_checkpoint --baseline-dir ../../qa-baseline --base main@origin --rebuild
 
   Options:
 
+    * `--baseline-dir DIR`  required: where the baseline worktree lives, outside this workspace
     * `--base REV`   baseline revision (default `main@origin`)
     * `--rebuild`    recreate the baseline worktree from scratch
     * `--keep`       leave the baseline worktree in place after running (default; reused next run)
@@ -35,11 +36,12 @@ defmodule Mix.Tasks.ReqManagedAgents.QaCheckpoint do
   @impl true
   def run(argv) do
     {opts, _, _} =
-      OptionParser.parse(argv, strict: [base: :string, rebuild: :boolean, keep: :boolean])
+      OptionParser.parse(argv,
+        strict: [baseline_dir: :string, base: :string, rebuild: :boolean, keep: :boolean]
+      )
 
     base = opts[:base] || "main@origin"
-    # Sibling worktree under .claude/worktrees/ (this task runs from a worktree there).
-    pr11_dir = Path.expand("../qa-checkpoint-pr11", File.cwd!())
+    pr11_dir = baseline_dir!(opts)
     tmp = System.tmp_dir!()
     pr11_out = Path.join(tmp, "qa_pr11.json")
     pr13_out = Path.join(tmp, "qa_pr13.json")
@@ -55,7 +57,7 @@ defmodule Mix.Tasks.ReqManagedAgents.QaCheckpoint do
     setup_baseline(pr11_dir, base, opts[:rebuild])
 
     say("→ capturing PR11 fingerprint (#{pr11_dir})")
-    capture!(pr11_dir, pr11_out)
+    capture!(capture_dir(pr11_dir), pr11_out)
 
     say("→ capturing PR13 fingerprint (this worktree)")
     capture!(File.cwd!(), pr13_out)
@@ -78,12 +80,29 @@ defmodule Mix.Tasks.ReqManagedAgents.QaCheckpoint do
       IO.write(out)
     end
 
-    File.mkdir_p!(Path.join(dir, "qa"))
-    File.cp!(@capture, Path.join([dir, "qa", "checkpoint_capture_test.exs"]))
+    package = capture_dir(dir)
+    File.mkdir_p!(Path.join(package, "qa"))
+    File.cp!(@capture, Path.join([package, "qa", "checkpoint_capture_test.exs"]))
 
     say("→ fetching baseline deps")
-    {_, status} = cmd("mix", ["deps.get"], cd: dir)
+    {_, status} = cmd("mix", ["deps.get"], cd: package)
     if status != 0, do: Mix.raise("baseline `mix deps.get` failed")
+  end
+
+  @doc false
+  def baseline_dir!(opts) do
+    opts[:baseline_dir] ||
+      Mix.raise(
+        "pass --baseline-dir DIR: a directory outside this workspace for the baseline checkout"
+      )
+  end
+
+  # A baseline taken from before the move is the package itself; one taken
+  # after it holds the package in req_managed_agents/.
+  @doc false
+  def capture_dir(root) do
+    package = Path.join(root, "req_managed_agents")
+    if File.exists?(Path.join(package, "mix.exs")), do: package, else: root
   end
 
   # ── run the capture, producing a fingerprint JSON ──────────────────────────────────────
