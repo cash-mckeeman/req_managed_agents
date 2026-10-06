@@ -71,4 +71,6 @@ defmodule ReqManagedAgents.Host.ConfigTest do
                )
              )
   end
+
+  test "drill", do: flunk("drill")
 end
