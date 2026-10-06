@@ -28,7 +28,8 @@ defmodule ReqManagedAgents.Session do
   `:prompt`, outcome wins; `{:error, :outcome_unsupported}` on providers without native support),
   `:budget` (a `%ReqManagedAgents.Budget{}` or a map with the same keys — a provider-enforced
   spending cap on a fresh Claude Managed Agents session, confirmed by the provider before any
-  prompt is sent; see `ReqManagedAgents.Budget`; an error alongside `:session_id`),
+  prompt is sent; see `ReqManagedAgents.Budget`; `{:error, :budget_unsupported}` on other
+  providers, an error alongside `:session_id`),
   `:timeout`, `:max_turns`, `:notify`, `:name`, `:telemetry_metadata`,
   `:turn_guard` (a 1-arity fun invoked after each turn's usage accumulation with
   `%{usage: %ReqManagedAgents.Usage{}, turns: n, session_id: id}`, returning `:cont` or `{:halt, reason}`;
@@ -156,10 +157,21 @@ defmodule ReqManagedAgents.Session do
       opts[:outcome] != nil and not valid_outcome?(opts[:outcome]) ->
         {:error, {:invalid_opts, :outcome}}
 
+      true ->
+        validate_supported(provider, opts)
+    end
+  end
+
+  defp validate_supported(provider, opts) do
+    cond do
       # AgentCore has no in-session outcome equivalent (Evaluations is trace-level,
       # out-of-session); fail at start rather than silently kicking off a user.message.
       opts[:outcome] != nil and not outcomes_supported?(provider) ->
         {:error, :outcome_unsupported}
+
+      # A spend cap that is silently dropped is worse than none: refuse it where it cannot bind.
+      opts[:budget] != nil and not budget_supported?(provider) ->
+        {:error, :budget_unsupported}
 
       true ->
         :ok
@@ -171,6 +183,11 @@ defmodule ReqManagedAgents.Session do
   defp outcomes_supported?(provider) do
     Code.ensure_loaded?(provider) and function_exported?(provider, :supports_outcomes?, 0) and
       provider.supports_outcomes?()
+  end
+
+  defp budget_supported?(provider) do
+    Code.ensure_loaded?(provider) and function_exported?(provider, :supports_budget?, 0) and
+      provider.supports_budget?()
   end
 
   defp valid_turn_guard?(nil), do: true

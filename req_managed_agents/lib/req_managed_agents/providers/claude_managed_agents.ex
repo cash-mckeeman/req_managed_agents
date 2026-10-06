@@ -231,6 +231,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   def supports_outcomes?, do: true
 
   @impl true
+  def supports_budget?, do: true
+
+  @impl true
   def user_input(text), do: [Event.user_message(text)]
 
   @impl true

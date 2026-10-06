@@ -12,6 +12,9 @@ defmodule ReqManagedAgents.Budget do
   cost can overshoot the cap by up to one model request per thread. Size the cap with
   that margin in mind.
 
+  Only the Claude Managed Agents provider can enforce a budget; `Session.run/2` and
+  `Session.start_link/2` return `{:error, :budget_unsupported}` for any other provider.
+
   A budget can only be set when the session is created. Passing `:budget` together with
   `:session_id` is an error. When a budget is requested, the session is opened only if the
   provider's create response echoes the same budget; otherwise the session is archived on a
