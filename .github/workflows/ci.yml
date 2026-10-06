@@ -12,6 +12,30 @@ env:
   MIX_ENV: test
 
 jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.select.outputs.packages }}
+      root: ${{ steps.select.outputs.root }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: select
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # A push to main selects everything: the ci-ok the publish guard reads
+          # on a main commit must cover both packages.
+          if [ "$EVENT" = pull_request ]; then
+            bash .github/scripts/detect-changes.sh --diff "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
+          else
+            bash .github/scripts/detect-changes.sh --all >> "$GITHUB_OUTPUT"
+          fi
+
   root:
     name: root (task runner)
     runs-on: ubuntu-latest
@@ -27,6 +51,8 @@ jobs:
           grep -qF '** (Mix) run mix test from req_managed_agents/ or req_managed_agents_host/' <<<"$out"
       - name: the publish order lists each package directory, dependency first
         run: test "$(mix publish_order)" = "$(printf 'req_managed_agents\nreq_managed_agents_host')"
+      - name: CI script tests
+        run: for t in .github/scripts/test/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done
 
   test:
     name: test ${{ matrix.package }} (Elixir ${{ matrix.leg.elixir }} / OTP ${{ matrix.leg.otp }})
