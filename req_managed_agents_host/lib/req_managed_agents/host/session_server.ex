@@ -88,11 +88,18 @@ defmodule ReqManagedAgents.Host.SessionServer do
     # history_opts precedes cfg.provider_opts here — the opposite of agent_opts' never-shadow
     # principle below: a persisted transcript's history: wins over (shadows) any explicit
     # provider_opts[:history] a caller supplies.
-    opts =
+    {lead, provider_opts} =
       case existing_session_id(cfg.store, external_id) do
-        nil -> base
-        session_id -> [{:session_id, session_id} | base]
-      end ++ history_opts(cfg.store, external_id) ++ agent_opts(cfg) ++ cfg.provider_opts
+        nil ->
+          {base, cfg.provider_opts}
+
+        # A budget caps a fresh session and cannot be added to an existing one, so only
+        # the turn that creates the session carries it.
+        session_id ->
+          {[{:session_id, session_id} | base], Keyword.delete(cfg.provider_opts, :budget)}
+      end
+
+    opts = lead ++ history_opts(cfg.store, external_id) ++ agent_opts(cfg) ++ provider_opts
 
     Session.run(cfg.provider, opts)
   end

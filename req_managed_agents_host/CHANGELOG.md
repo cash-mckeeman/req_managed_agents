@@ -2,6 +2,13 @@
 
 All notable changes to `req_managed_agents_host` are documented here.
 
+## Unreleased
+
+- A `:budget` in `provider_opts` is passed to the turn that creates the session
+  and dropped from reattach turns. A budget can only be set when a session is
+  created, so a reattach that repeated it would fail every turn after the first.
+  A budget added to the config later does not apply to sessions that already exist.
+
 ## v0.3.0
 
 - Requires Elixir 1.20 or later (was 1.16), forced by `req_managed_agents`
