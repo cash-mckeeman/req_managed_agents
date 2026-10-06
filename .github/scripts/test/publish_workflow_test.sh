@@ -30,6 +30,12 @@ check "the key check reads the RMAH key" \
   "          KEY_RMAH: \${{ secrets.HEX_API_KEY_RMAH }}" "$(step "every selected package's Hex key is set" KEY_RMAH)"
 check "the version check and the key check can each fail" 2 "$(lines "          exit \$bad")"
 check "the key check precedes the first publish" 1 "$([ "$(grep -n "name: every selected package's Hex key is set" "$WF" | cut -d: -f1)" -lt "$(grep -n 'name: publish req_managed_agents$' "$WF" | cut -d: -f1)" ] && echo 1 || echo 0)"
+check "the key check checks the planned packages" \
+  "          PACKAGES: \${{ steps.plan.outputs.packages }}" "$(step "every selected package's Hex key is set" PACKAGES)"
+check "the key check tests the RMA key for req_managed_agents" 1 \
+  "$(lines "              req_managed_agents) [ -n \"\$KEY_RMA\" ] || { echo \"::error::HEX_API_KEY is empty; \$p cannot be published\"; bad=1; } ;;")"
+check "the key check tests the RMAH key for req_managed_agents_host" 1 \
+  "$(lines "              req_managed_agents_host) [ -n \"\$KEY_RMAH\" ] || { echo \"::error::HEX_API_KEY_RMAH is empty; \$p cannot be published\"; bad=1; } ;;")"
 check "no other line reads a secret" 4 "$(grep -v '^ *#' "$WF" | grep -c 'secrets')"
 check "a dry run always ends in the verdict step" "        if: always() && env.DRY_RUN == '1'" "$(step 'dry-run verdict' if)"
 check "the verdict fails on any guard failure" 1 "$(lines "          case \"\$OUTCOMES\" in *failure*) exit 1 ;; esac")"
