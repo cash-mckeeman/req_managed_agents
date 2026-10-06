@@ -90,6 +90,26 @@ jobs:
           OUTCOMES: plan=${{ steps.plan.outcome }} versions=${{ steps.versions.outcome }} reachable=${{ steps.reachable.outcome }} ci_ok=${{ steps.ci_ok.outcome }}
         run: |
           echo "guards: $OUTCOMES" | tee -a "$GITHUB_STEP_SUMMARY"
+      # A lockstep release publishes two packages in turn; a missing second key
+      # would otherwise fail after the first is already on Hex. The keys are read
+      # into this step's env only, and only their presence is tested.
+      - name: every selected package's Hex key is set
+        if: github.event_name == 'push'
+        env:
+          PACKAGES: ${{ steps.plan.outputs.packages }}
+          KEY_RMA: ${{ secrets.HEX_API_KEY }}
+          KEY_RMAH: ${{ secrets.HEX_API_KEY_RMAH }}
+        run: |
+          bad=0
+          read -r -a packages <<<"$PACKAGES"
+          for p in "${packages[@]}"; do
+            case "$p" in
+              req_managed_agents) [ -n "$KEY_RMA" ] || { echo "::error::HEX_API_KEY is empty; $p cannot be published"; bad=1; } ;;
+              req_managed_agents_host) [ -n "$KEY_RMAH" ] || { echo "::error::HEX_API_KEY_RMAH is empty; $p cannot be published"; bad=1; } ;;
+              *) echo "::error::no Hex key is declared for $p"; bad=1 ;;
+            esac
+          done
+          exit $bad
       - name: publish req_managed_agents
         if: contains(format(' {0} ', steps.plan.outputs.packages), ' req_managed_agents ')
         env:
