@@ -4,13 +4,13 @@ Canonical proof that the Provider/Session refactor (the unified `Session` replac
 drivers) changed **no observable behavior** of either provider.
 
 ```
-mix req_managed_agents.qa_checkpoint
+mix req_managed_agents.qa_checkpoint --baseline-dir ../../qa-baseline
 ```
 
 ## What it does
 
-1. Creates a throwaway jj worktree at the baseline revision (`--base`, default `main@origin` =
-   the PR #11 state, with the three old drivers).
+1. Creates a throwaway jj worktree in `--baseline-dir` at the baseline revision (`--base`, default
+   `main@origin` = the PR #11 state, with the three old drivers).
 2. Runs the same capture (`qa/checkpoint_capture_test.exs`) against **both** the baseline (PR11)
    and the current worktree (PR13).
 3. Diffs the two behavior fingerprints scenario-by-scenario and prints a verdict. Exits non-zero
@@ -42,6 +42,7 @@ tool loops (single + parallel), provider stream errors, and tool-handler errors.
 
 ## Options
 
+- `--baseline-dir DIR` — required: where the baseline worktree lives, outside this workspace
 - `--base REV` — baseline revision (default `main@origin`)
 - `--rebuild` — recreate the baseline worktree from scratch (otherwise it's reused for speed)
 
@@ -50,9 +51,11 @@ The pass/fail comparison itself is unit-tested in
 
 ## Cleanup
 
-The baseline worktree is left in place for fast re-runs. To remove it:
+The baseline worktree is left in place for fast re-runs. To remove it, forget the workspace named
+after the basename of `DIR`, then remove `DIR`. With the usage example, run from this package's
+directory:
 
 ```
-jj workspace forget qa-checkpoint-pr11
-rm -rf .claude/worktrees/qa-checkpoint-pr11
+jj workspace forget qa-baseline
+rm -rf ../../qa-baseline
 ```
