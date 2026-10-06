@@ -144,11 +144,15 @@ jobs:
       # `hex: [ignore_advisories: ...]` (Hex 2.5.1+).
       - run: mix hex.audit
       - run: mix docs --warnings-as-errors
-      # The tarball must assemble against Hex deps: RMA_PUBLISH=1 swaps the
+      # Publishable: Hex deps only (hex.build exits 1 on a path dep), LICENSE
+      # shipped, and a sibling at the family minor. RMA_PUBLISH=1 swaps the
       # sibling path dep for its Hex requirement.
-      - run: mix hex.build
+      - name: publishable
         env:
           RMA_PUBLISH: "1"
+        run: |
+          mix hex.build --output "$RUNNER_TEMP/package.tar"
+          elixir ../.github/scripts/check_package.exs "$RUNNER_TEMP/package.tar"
 
   dialyzer:
     name: dialyzer ${{ matrix.package }}
