@@ -7,6 +7,10 @@ set -euo pipefail
 pkg="$1"; here="$(cd "$(dirname "$0")" && pwd)"; summary="${GITHUB_STEP_SUMMARY:-/dev/stderr}"
 cd "$pkg"
 
+if [ "$DRY_RUN" != 1 ] && [ -z "${HEX_API_KEY:-}" ]; then
+  echo "publish-package: HEX_API_KEY is empty on a real run for $pkg" >&2; exit 1
+fi
+
 # A plain assignment, so set -e stops on an on-hex error. Inside `[ ... ]` the
 # error would read as "not on Hex" and the publish would go ahead.
 on_hex="$(bash "$here/on-hex.sh" "$pkg" "$VERSION")"

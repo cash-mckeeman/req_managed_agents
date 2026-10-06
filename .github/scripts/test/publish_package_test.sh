@@ -12,9 +12,13 @@ printf '#!/usr/bin/env bash\necho "mix RMA_PUBLISH=${RMA_PUBLISH:-} MIX_ENV=${MI
 printf '#!/usr/bin/env bash\necho "elixir $*" >> "$CALLS"\n' > "$d/bin/elixir"
 chmod +x "$d/bin/"*
 # publish <package> <kind> <dry run> <hex.pm HTTP code> [curl exit]: prints the exit code.
+# The Hex key is "key" unless KEY is set around the call; KEY=UNSET leaves it unset.
 publish() {
   : > "$d/calls"; : > "$d/summary"
-  ( cd "$d/repo" && PATH="$d/bin:$PATH" CALLS="$d/calls" GITHUB_STEP_SUMMARY="$d/summary" RUNNER_TEMP="$d" \
+  local key="${KEY-key}"; [ "$key" = UNSET ] && key=""
+  ( cd "$d/repo"
+    export HEX_API_KEY="$key"; [ "${KEY-key}" != UNSET ] || unset HEX_API_KEY
+    PATH="$d/bin:$PATH" CALLS="$d/calls" GITHUB_STEP_SUMMARY="$d/summary" RUNNER_TEMP="$d" \
     KIND="$2" VERSION=0.12.1 DRY_RUN="$3" FAKE_HTTP="$4" FAKE_CURL_RC="${5:-0}" bash "$SCRIPT" "$1" >/dev/null 2>&1 )
   echo $?
 }
@@ -28,6 +32,12 @@ for answer in "503 0" "429 0" "000 6"; do
   check "hex.pm HTTP $code (curl exit $rc): fails" 1 "$([ "$(publish req_managed_agents_host patch 0 "$code" "$rc")" -ne 0 ] && echo 1 || echo 0)"
   check "hex.pm HTTP $code (curl exit $rc): nothing runs" 0 "$(ran .)"
 done
+for k in "" UNSET; do
+  check "a real run with the key '${k:-empty}': fails" 1 "$([ "$(KEY="$k" publish req_managed_agents_host patch 0 404)" -ne 0 ] && echo 1 || echo 0)"
+  check "a real run with the key '${k:-empty}': nothing runs" 0 "$(ran .)"
+  check "a real run with the key '${k:-empty}': never publishes" 0 "$(ran hex.publish)"
+done
+check "a dry run needs no key" 0 "$(KEY= publish req_managed_agents lockstep 1 404)"
 check "a dry run exits 0" 0 "$(publish req_managed_agents lockstep 1 404)"
 check "a dry run checks the tarball" 1 "$(ran "elixir .*check_package.exs")"
 check "a dry run never publishes" 0 "$(ran hex.publish)"
