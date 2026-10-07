@@ -89,12 +89,12 @@ arg
 
 ## Public-Repo Hygiene
 
-This package is public on Hex. Internal tracker ids (issue keys like `ABC-123`,
-internal phase tags) **never** appear in code, comments, moduledocs, test names,
-README, CHANGELOG, or commit messages — the only permitted reference is a PR
-**body** `Closes <KEY>` trailer. Keep AWS account numbers, ARNs, and internal
-infra names out of source and tests — use placeholders (`role`, `arn:new`,
-`us-east-1`).
+This repository is public and both packages are on Hex. Internal tracker ids
+(issue keys like `ABC-123`, internal phase tags) **never** appear in code,
+comments, moduledocs, test names, README, CHANGELOG, or commit messages — the
+only permitted reference is a PR **body** `Closes <KEY>` trailer. Keep AWS
+account numbers, ARNs, and internal infra names out of source and tests — use
+placeholders (`role`, `arn:new`, `us-east-1`).
 
 ## Version Control & Release
 

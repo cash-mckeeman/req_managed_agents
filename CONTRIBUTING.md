@@ -21,8 +21,8 @@ All four are enforced in CI for each package a change touches. A change to
 
 ## Public-repo hygiene
 
-This package is public and published to Hex, so treat every tracked file as
-something a consumer may read.
+This repository is public and both packages are published to Hex, so treat every
+tracked file as something a consumer may read.
 
 An internal tracker id must not appear on any tracked surface — not source,
 tests, CI config, commit messages, or PR titles. The single permitted linkage is
