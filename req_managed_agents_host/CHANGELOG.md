@@ -2,12 +2,18 @@
 
 All notable changes to `req_managed_agents_host` are documented here.
 
-## Unreleased
+## v0.12.0
 
+- Requires `{:req_managed_agents, "~> 0.12.0"}` (was `~> 0.11.0`).
 - A `:budget` in `provider_opts` is passed to the turn that creates the session
   and dropped from reattach turns. A budget can only be set when a session is
   created, so a reattach that repeated it would fail every turn after the first.
   A budget added to the config later does not apply to sessions that already exist.
+- The version now follows `req_managed_agents`' minor: both packages release each minor
+  together, so 0.4 to 0.11 were skipped.
+- The source moved to the `req_managed_agents_host/` directory of
+  https://github.com/cash-mckeeman/req_managed_agents, and the package links point there.
+- The package lists its files explicitly, so `priv/plts` no longer ships.
 
 ## v0.3.0
 

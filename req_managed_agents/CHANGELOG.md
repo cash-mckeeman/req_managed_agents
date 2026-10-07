@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## v0.12.0 (<<RELEASE_DATE>>)
 
 ### Added
 
@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other than Claude Managed Agents returns `{:error, :budget_unsupported}`. The provider
   enforces the cap between model requests, so a session can overshoot by its in-flight
   requests. Without `:budget` the create-session body is unchanged.
+- `supports_budget?/0`, a new optional `ReqManagedAgents.Provider` callback: true when the
+  provider can enforce `:budget` on a fresh session. Of the bundled providers, only
+  Claude Managed Agents implements it.
+
+### Changed
+
+- The package's source now lives in the `req_managed_agents/` directory of this repository,
+  beside `req_managed_agents_host/`. The two packages share each minor version from this
+  release on.
 
 ## v0.11.0 (2026-10-02)
 
