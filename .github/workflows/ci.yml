@@ -53,6 +53,13 @@ jobs:
           grep -qF '** (Mix) run mix test from req_managed_agents/ or req_managed_agents_host/' <<<"$out"
       - name: the publish order lists each package directory, dependency first
         run: test "$(mix publish_order)" = "$(printf 'req_managed_agents\nreq_managed_agents_host')"
+      - name: package_version reads each package's @version
+        run: |
+          read -r -a packages <<<"$(mix publish_order | tr '\n' ' ')"
+          for p in "${packages[@]}"; do
+            want=$(grep -m1 '@version "' "$p/mix.exs" | cut -d'"' -f2)
+            test "$(mix package_version "$p")" = "$want" || { echo "$p: package_version disagrees with @version $want"; exit 1; }
+          done
       - name: CI script tests
         run: for t in .github/scripts/test/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done
 

@@ -1,37 +1,132 @@
 name: Publish to Hex
 
-# Tag-triggered release: push a `v*` tag matching @version in mix.exs.
-# Requires the HEX_API_KEY secret (write key scoped to the package).
+# A tag publishes. vX.Y.0 releases every package in the root mix.exs's publish
+# order (a lockstep minor); <package>-vX.Y.Z releases that package alone (a
+# patch). A manual run rehearses a tag: every guard runs, nothing publishes.
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "*-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to rehearse (dry run: nothing is published)"
+        required: true
+      ci_ok_wait_seconds:
+        description: "Seconds to wait for ci-ok (a branch has none, so a rehearsal can shorten this)"
+        type: string
+        default: "1200"
 
 permissions:
   contents: read
+  checks: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # ANTHROPIC_API_KEY / HEX_API_KEY live in the `prod` environment —
-    # jobs only see environment secrets when they declare the environment.
+    timeout-minutes: 45
+    # The Hex keys live in the `prod` environment; jobs only see environment
+    # secrets when they declare the environment.
     environment: prod
-    defaults:
-      run:
-        working-directory: req_managed_agents
+    env:
+      TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+      DRY_RUN: ${{ github.event_name == 'push' && '0' || '1' }}
+      GH_TOKEN: ${{ github.token }}
+      # Only a manual run may shorten the wait; a tag push is always bounded at 1200 s.
+      CI_OK_WAIT_SECONDS: ${{ github.event_name == 'workflow_dispatch' && inputs.ci_ok_wait_seconds || '1200' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: "1.20"
           otp-version: "29"
-      - run: mix deps.get
-      - run: mix test
+      - id: plan
+        name: resolve the publish set
+        continue-on-error: ${{ env.DRY_RUN == '1' }}
+        run: |
+          order="$(mix publish_order | tr '\n' ' ' | sed 's/ $//')"
+          if [ "$order" != "req_managed_agents req_managed_agents_host" ]; then
+            echo "::error::mix publish_order is '$order'; this workflow's publish steps are req_managed_agents, then req_managed_agents_host"
+            exit 1
+          fi
+          read -r -a packages <<<"$order"
+          bash .github/scripts/publish-plan.sh "$TAG" "${packages[@]}" >> "$GITHUB_OUTPUT"
+      - id: versions
+        name: each selected package's @version equals the tag's
+        continue-on-error: ${{ env.DRY_RUN == '1' }}
         env:
-          MIX_ENV: test
-      - name: Publish
-        # No MIX_ENV override: hex.publish builds docs, and ex_doc is
-        # `only: :dev` — the docs task doesn't exist outside dev.
+          PACKAGES: ${{ steps.plan.outputs.packages }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          [ -n "$PACKAGES" ] || { echo "::error::no publish plan"; exit 1; }
+          bad=0
+          read -r -a packages <<<"$PACKAGES"
+          for p in "${packages[@]}"; do
+            v="$(mix package_version "$p")"
+            if [ "$v" != "$VERSION" ]; then echo "::error::$p @version is $v; the tag says $VERSION"; bad=1; fi
+          done
+          exit $bad
+      - id: reachable
+        name: the tagged commit is on main's first-parent history
+        continue-on-error: ${{ env.DRY_RUN == '1' }}
+        # A commit reachable only through a merge's second parent ran a PR's
+        # partial ci-ok, not main's.
+        run: git rev-list --first-parent origin/main | grep -x "$GITHUB_SHA" > /dev/null
+      - id: ci_ok
+        name: ci-ok passed on the tagged commit
+        continue-on-error: ${{ env.DRY_RUN == '1' }}
+        run: bash .github/scripts/ci-ok-guard.sh "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+      # Written before the publish steps, so a dry run's summary opens with the
+      # guards' verdict rather than "would publish".
+      - name: guard verdicts
+        if: env.DRY_RUN == '1'
         env:
-          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
-        run: mix hex.publish --yes
+          OUTCOMES: plan=${{ steps.plan.outcome }} versions=${{ steps.versions.outcome }} reachable=${{ steps.reachable.outcome }} ci_ok=${{ steps.ci_ok.outcome }}
+        run: |
+          echo "guards: $OUTCOMES" | tee -a "$GITHUB_STEP_SUMMARY"
+      # A lockstep release publishes two packages in turn; a missing second key
+      # would otherwise fail after the first is already on Hex. The keys are read
+      # into this step's env only, and only their presence is tested.
+      - name: every selected package's Hex key is set
+        if: github.event_name == 'push'
+        env:
+          PACKAGES: ${{ steps.plan.outputs.packages }}
+          KEY_RMA: ${{ secrets.HEX_API_KEY }}
+          KEY_RMAH: ${{ secrets.HEX_API_KEY_RMAH }}
+        run: |
+          bad=0
+          read -r -a packages <<<"$PACKAGES"
+          for p in "${packages[@]}"; do
+            case "$p" in
+              req_managed_agents) [ -n "$KEY_RMA" ] || { echo "::error::HEX_API_KEY is empty; $p cannot be published"; bad=1; } ;;
+              req_managed_agents_host) [ -n "$KEY_RMAH" ] || { echo "::error::HEX_API_KEY_RMAH is empty; $p cannot be published"; bad=1; } ;;
+              *) echo "::error::no Hex key is declared for $p"; bad=1 ;;
+            esac
+          done
+          exit $bad
+      - name: publish req_managed_agents
+        if: contains(format(' {0} ', steps.plan.outputs.packages), ' req_managed_agents ')
+        env:
+          KIND: ${{ steps.plan.outputs.kind }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          HEX_API_KEY: ${{ github.event_name == 'push' && secrets.HEX_API_KEY || '' }}
+        run: bash .github/scripts/publish-package.sh req_managed_agents
+      - name: publish req_managed_agents_host
+        if: contains(format(' {0} ', steps.plan.outputs.packages), ' req_managed_agents_host ')
+        env:
+          KIND: ${{ steps.plan.outputs.kind }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          HEX_API_KEY: ${{ github.event_name == 'push' && secrets.HEX_API_KEY_RMAH || '' }}
+        run: bash .github/scripts/publish-package.sh req_managed_agents_host
+      - name: dry-run verdict
+        if: always() && env.DRY_RUN == '1'
+        env:
+          OUTCOMES: plan=${{ steps.plan.outcome }} versions=${{ steps.versions.outcome }} reachable=${{ steps.reachable.outcome }} ci_ok=${{ steps.ci_ok.outcome }}
+        run: |
+          case "$OUTCOMES" in *failure*) exit 1 ;; esac
