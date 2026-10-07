@@ -124,5 +124,7 @@ under Public-Repo Hygiene is separate — never put a Linear id in a PR title.)
 
 `req_managed_agents_host/` is the durable session host. Its modules live under
 `ReqManagedAgents.Host`, which `req_managed_agents` never references (a test in each
-package pins the direction). In development it depends on `../req_managed_agents` by path;
-`RMA_PUBLISH=1` swaps in the Hex requirement for building and publishing only.
+package pins the direction). In development it depends on `../req_managed_agents` by path.
+`RMA_PUBLISH=1` swaps in the Hex requirement for building and publishing only, and
+`RMA_PUBLISH=floor` pins the lowest `req_managed_agents` that requirement admits, which the
+publish job runs a host patch against.
