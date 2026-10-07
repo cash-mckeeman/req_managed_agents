@@ -8,12 +8,29 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   `normalize/1` keys off the most recent status event. `events`, `text`, and `server_tool_uses`
   reflect exactly the events passed in (a partial list yields a partial view).
 
+  A `budget:` opt (a `ReqManagedAgents.Budget` or a map with its keys) caps a fresh session's
+  list-priced spend. The provider enforces it between model requests, so a session can
+  overshoot by its in-flight requests. The budget is sent on create and the session opens only if
+  the response echoes it back; see `ReqManagedAgents.Budget`. It cannot be combined with
+  `:session_id`.
+
   A `model_config: %{api_key:, base_url:}` opt builds the client when no `:client` is injected — the canonical way to run a session on a granted key + routed base_url.
   """
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.Agent.Spec
-  alias ReqManagedAgents.{Client, Environment, Event, Outcome, Stream, ToolUse, TurnResult, Usage}
+
+  alias ReqManagedAgents.{
+    Budget,
+    Client,
+    Environment,
+    Event,
+    Outcome,
+    Stream,
+    ToolUse,
+    TurnResult,
+    Usage
+  }
 
   @default_env_config %{type: "cloud", networking: %{type: "unrestricted"}}
 
@@ -92,37 +109,166 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def open(opts, subscriber) do
-    client = client_from(opts)
+    with {:ok, budget} <- budget_from(opts) do
+      client = client_from(opts)
 
-    case opts[:session_id] do
-      nil ->
-        body = %{
+      case opts[:session_id] do
+        nil -> open_fresh(client, opts, budget, subscriber)
+        sid -> open_resume(client, sid)
+      end
+    end
+  end
+
+  defp open_fresh(client, opts, budget, subscriber) do
+    body =
+      Map.merge(
+        %{
           agent: Keyword.fetch!(opts, :agent_id),
           environment_id: Keyword.fetch!(opts, :environment_id)
-        }
+        },
+        budget_body(budget)
+      )
 
-        case Client.create_session(client, body) do
-          {:ok, %{"id" => sid}} ->
-            ref = make_ref()
+    with {:ok, %{"id" => sid} = created} <- create_session(client, body),
+         :ok <- confirm_budget(client, sid, budget, created) do
+      ref = make_ref()
 
-            {:ok, task} =
-              Task.start_link(fn ->
-                Stream.stream(client, sid, subscriber,
-                  ref: ref,
-                  telemetry_metadata: opts[:telemetry_metadata] || %{}
-                )
-              end)
+      {:ok, task} =
+        Task.start_link(fn ->
+          Stream.stream(client, sid, subscriber,
+            ref: ref,
+            telemetry_metadata: opts[:telemetry_metadata] || %{}
+          )
+        end)
 
-            {:ok, %{client: client, session_id: sid, ref: ref, consumer: task}}
+      {:ok, %{client: client, session_id: sid, ref: ref, consumer: task}}
+    end
+  end
 
-          {:error, reason} ->
-            {:error, {:create_session_failed, reason}}
+  # Resume an existing session: don't create or kick off — the Session consolidates via
+  # reconnect/3 (list history, dedup, re-drive any unanswered tool call), opening the stream there.
+  defp open_resume(client, sid),
+    do: {:ok, %{client: client, session_id: sid, ref: nil, resume: true}}
+
+  defp create_session(client, body) do
+    case Client.create_session(client, body) do
+      {:ok, %{"id" => _sid}} = ok -> ok
+      {:error, reason} -> {:error, {:create_session_failed, reason}}
+    end
+  end
+
+  # A budget is validated before any request and cannot be attached to an existing session.
+  defp budget_from(opts) do
+    case {opts[:budget], opts[:session_id]} do
+      {nil, _sid} ->
+        {:ok, nil}
+
+      {raw, sid} ->
+        with {:ok, budget} <- coerce_budget(raw) do
+          if is_nil(sid),
+            do: {:ok, budget},
+            else: {:error, {:invalid_opts, :budget_with_session_id}}
+        end
+    end
+  end
+
+  defp coerce_budget(raw) do
+    case Budget.new(raw) do
+      {:ok, budget} -> {:ok, budget}
+      {:error, :invalid_budget} -> {:error, {:invalid_opts, :budget}}
+    end
+  end
+
+  defp budget_body(nil), do: %{}
+  defp budget_body(%Budget{} = budget), do: %{budget: Budget.to_wire(budget)}
+
+  # Fail closed: a requested budget the provider did not echo back means the session is
+  # uncapped, so it is archived (best effort, as provision/2 rolls back an orphaned agent)
+  # before anything can be sent to it. The error carries the session id and the archive's
+  # outcome so a caller can clean up if the archive did not land.
+  defp confirm_budget(_client, _sid, nil, _created), do: :ok
+
+  defp confirm_budget(client, sid, %Budget{} = budget, created) do
+    echoed = Map.get(created, "budget")
+
+    if Budget.confirmed?(budget, echoed) do
+      :ok
+    else
+      archived = archive_once(client, sid)
+      {:error, {:budget_not_confirmed, %{session_id: sid, echoed: echoed, archived: archived}}}
+    end
+  end
+
+  # Cleanup is a single request on a connection the create call just proved healthy, so a
+  # healthy archive costs one round trip (tens of milliseconds). The deadline is two orders
+  # of magnitude above that, below the 60 s receive window and the seconds of backoff that
+  # transient retries add; a client configured with a shorter receive timeout keeps it. It
+  # bounds the whole attempt, because a receive timeout alone restarts on every chunk and a
+  # trickling response would outlast it. The figure is a quality-bar judgement, not a
+  # provider limit.
+  @archive_deadline_ms 5_000
+  @worker_grace_ms 250
+
+  defp archive_once(%Client{} = client, sid) do
+    deadline = min(client.receive_timeout, @archive_deadline_ms)
+    opts = [retry: false, receive_timeout: deadline]
+
+    bounded = %{
+      client
+      | receive_timeout: deadline,
+        req_options: Keyword.merge(client.req_options, opts)
+    }
+
+    run_with_deadline(fn -> Client.archive_session(bounded, sid) end, deadline)
+  end
+
+  # Unlinked and monitored, so the caller's mailbox holds nothing afterwards on any path (a
+  # linked Task leaves an {:EXIT, _, :normal} behind for a caller that traps exits). The
+  # worker inherits the caller's $callers, as Task does, so test stubs keyed on the caller
+  # still apply.
+  defp run_with_deadline(fun, deadline) do
+    parent = self()
+    tag = make_ref()
+    callers = [parent | Process.get(:"$callers", [])]
+
+    {pid, monitor} =
+      spawn_monitor(fn ->
+        # Unlinked, so a killed caller cannot take the worker down; it bounds itself. The grace
+        # keeps the caller's own kill at the deadline first, so a timeout reads as
+        # :archive_timeout rather than as a worker exit.
+        {:ok, _timer} = :timer.kill_after(deadline + @worker_grace_ms)
+        Process.put(:"$callers", callers)
+        send(parent, {tag, fun.()})
+      end)
+
+    receive do
+      {^tag, {:ok, _}} ->
+        Process.demonitor(monitor, [:flush])
+        :ok
+
+      {^tag, {:error, _} = error} ->
+        Process.demonitor(monitor, [:flush])
+        error
+
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
+        {:error, {:archive_failed, reason}}
+    after
+      deadline ->
+        Process.exit(pid, :kill)
+
+        # A worker's reply always precedes its :DOWN, so once the :DOWN is in no late reply
+        # can still arrive; flushing before it would miss one sent at the kill.
+        receive do
+          {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
         end
 
-      sid ->
-        # Resume an existing session: don't create or kick off — the Session consolidates via
-        # reconnect/3 (list history, dedup, re-drive any unanswered tool call), opening the stream there.
-        {:ok, %{client: client, session_id: sid, ref: nil, resume: true}}
+        receive do
+          {^tag, _late} -> :ok
+        after
+          0 -> :ok
+        end
+
+        {:error, :archive_timeout}
     end
   end
 
@@ -157,6 +303,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def supports_outcomes?, do: true
+
+  @impl true
+  def supports_budget?, do: true
 
   @impl true
   def user_input(text), do: [Event.user_message(text)]

@@ -40,6 +40,24 @@ defmodule ReqManagedAgents.Host.SessionServerTest do
     assert "second" in StubProvider.delivered_messages()
   end
 
+  test "a budget in provider_opts is passed on the fresh turn only" do
+    {:ok, cfg} =
+      Config.new(
+        provider: StubProvider,
+        handler: EchoHandler,
+        store: ets_store(),
+        provider_opts: [budget: %{max_list_cost_cents: 125}]
+      )
+
+    {:ok, pid} = SessionServer.start_link({"thread-budget", cfg})
+
+    {:ok, %SessionResult{session_id: sid}} = SessionServer.deliver(pid, "first")
+    {:ok, _} = SessionServer.deliver(pid, "second")
+
+    assert [{^sid, %{max_list_cost_cents: 125}}, {^sid, nil}] =
+             Enum.filter(StubProvider.opened_budgets(), &match?({^sid, _}, &1))
+  end
+
   test "idle-detach stops the server but the locator row survives" do
     {:ok, cfg} =
       Config.new(

@@ -140,6 +140,9 @@ defmodule ReqManagedAgents.Provider do
   @doc "Optional — true when the provider natively honors the `:outcome` kickoff (`user.define_outcome`)."
   @callback supports_outcomes?() :: boolean()
 
+  @doc "Optional — true when the provider can enforce the `:budget` spend cap on a fresh session."
+  @callback supports_budget?() :: boolean()
+
   @doc """
   Optional — recover unanswered custom tool uses from `events` (the session's full
   accumulated raw event history, oldest first).
@@ -169,6 +172,7 @@ defmodule ReqManagedAgents.Provider do
                       transcript: 1,
                       text_delta: 1,
                       supports_outcomes?: 0,
+                      supports_budget?: 0,
                       pending_tool_uses: 1
 
   @doc """

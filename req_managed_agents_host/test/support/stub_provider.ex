@@ -29,8 +29,14 @@ defmodule StubProvider do
     sid = opts[:session_id] || "sess-#{System.unique_integer([:positive])}"
     record(:opened_with, sid)
     record(:opened_timeout, opts[:timeout])
+    record(:opened_budget, {sid, opts[:budget]})
     {:ok, %{session_id: sid, resume: opts[:session_id] != nil}}
   end
+
+  # The stub records the `:budget` it is opened with and claims to honour one, so a test can
+  # assert which opens carried it.
+  @impl true
+  def supports_budget?, do: true
 
   @impl true
   def session_id(conn), do: conn.session_id
@@ -90,13 +96,18 @@ defmodule StubProvider do
   @spec opened_timeouts() :: [term()]
   def opened_timeouts, do: ensure_recorder() |> Agent.get(& &1.opened_timeout) |> Enum.reverse()
 
+  @doc "`{session_id, budget}` pairs `open/2` has seen, oldest first (budget nil where omitted)."
+  @spec opened_budgets() :: [{String.t(), term()}]
+  def opened_budgets, do: ensure_recorder() |> Agent.get(& &1.opened_budget) |> Enum.reverse()
+
   defp record(key, value) do
     recorder = ensure_recorder()
     Agent.update(recorder, &Map.update!(&1, key, fn list -> [value | list] end))
   end
 
   defp ensure_recorder do
-    case Agent.start(fn -> %{opened_with: [], delivered: [], opened_timeout: []} end,
+    case Agent.start(
+           fn -> %{opened_with: [], delivered: [], opened_timeout: [], opened_budget: []} end,
            name: @recorder
          ) do
       {:ok, pid} -> pid
