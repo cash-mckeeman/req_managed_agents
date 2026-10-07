@@ -14,7 +14,7 @@ behind one `Session` / `Provider` contract. Published to Hex; **public repo**.
 - **`provisioner/`** — content-addressed `ensure`/reconcile for environments (agents on the 0.7 roadmap); the `Store` behaviour (ETS default, File for cross-process reuse).
 - **`agent_core/`** — AWS SigV4 signing + Converse wire shapes for AgentCore.
 - **`open_telemetry/`** — pure `gen_ai.*` attribute mappers (no OTel SDK dependency).
-- **Vocabulary structs** — `ToolUse`, `ToolResult`, `Usage`, `Outcome`, `SessionInfo`, `TurnResult`.
+- **Vocabulary structs** — `ToolUse`, `ToolResult`, `Usage`, `Outcome`, `SessionInfo`, `TurnResult`, `Budget`.
 
 Tests mirror this layout under `req_managed_agents/test/`.
 
