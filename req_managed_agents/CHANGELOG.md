@@ -30,6 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beside `req_managed_agents_host/`. The two packages share each minor version from this
   release on.
 
+### Fixed
+
+- `BedrockAgentCore.provision/2` reads every page of `ListHarnesses`, both when it recovers a
+  harness by name after a `CreateHarness` conflict and while it waits for a delete. It read one
+  page before, so a harness past the first page failed recovery with
+  `{:error, {:harness_name_conflict, name}}` and read as already deleted during the wait. Each
+  page draws on the call's `:timeout`; running out between pages returns
+  `{:error, :harness_list_timeout}`, a repeated page token returns
+  `{:error, {:repeated_list_token, token}}`, and a page that is not a list of named harnesses
+  returns `{:error, {:unexpected_list_response, response}}`. A listing that fails during the
+  delete wait now ends the call with that error; it used to log the failure and proceed.
+- `AgentCore.Client.list_harnesses/2` takes `:next_token` and `:max_results` (1..100) and returns
+  one page.
+
 ## v0.11.0 (2026-10-02)
 
 Canary-hardening release. Four breaking changes, all requiring action, and
