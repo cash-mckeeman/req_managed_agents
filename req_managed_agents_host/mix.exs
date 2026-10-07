@@ -2,7 +2,7 @@ defmodule ReqManagedAgentsHost.MixProject do
   use Mix.Project
 
   @version "0.3.0"
-  @source_url "https://github.com/cash-mckeeman/req_managed_agents_host"
+  @source_url "https://github.com/cash-mckeeman/req_managed_agents"
 
   def project do
     [
@@ -77,7 +77,22 @@ defmodule ReqManagedAgentsHost.MixProject do
   end
 
   defp docs do
-    [main: "readme", extras: ["README.md", "CHANGELOG.md", "LICENSE"], source_ref: "v#{@version}"]
+    [
+      main: "readme",
+      extras: ["README.md", "CHANGELOG.md", "LICENSE"],
+      source_ref: source_ref(),
+      source_url_pattern:
+        "#{@source_url}/blob/#{source_ref()}/req_managed_agents_host/%{path}#L%{line}"
+    ]
+  end
+
+  # The tag that publishes this version: vX.Y.0 for a lockstep minor,
+  # req_managed_agents_host-vX.Y.Z for a patch.
+  defp source_ref do
+    case Version.parse!(@version) do
+      %Version{patch: 0} -> "v#{@version}"
+      _ -> "req_managed_agents_host-v#{@version}"
+    end
   end
 
   defp dialyzer do

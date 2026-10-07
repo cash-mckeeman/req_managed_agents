@@ -6,7 +6,7 @@ behind one `Session` / `Provider` contract. Published to Hex; **public repo**.
 
 ## Project Structure
 
-`lib/req_managed_agents/`:
+`req_managed_agents/lib/req_managed_agents/`:
 
 - **`session.ex`** — the turn loop (backend-held on CMA/AgentCore, in-process on Local); the public entry (`run/2`, `start_link/1`, `message/2`).
 - **`client.ex`** — the Anthropic HTTP client (Req-based); `handler.ex` — the tool-callback behaviour consumers implement.
@@ -14,16 +14,16 @@ behind one `Session` / `Provider` contract. Published to Hex; **public repo**.
 - **`provisioner/`** — content-addressed `ensure`/reconcile for environments (agents on the 0.7 roadmap); the `Store` behaviour (ETS default, File for cross-process reuse).
 - **`agent_core/`** — AWS SigV4 signing + Converse wire shapes for AgentCore.
 - **`open_telemetry/`** — pure `gen_ai.*` attribute mappers (no OTel SDK dependency).
-- **Vocabulary structs** — `ToolUse`, `ToolResult`, `Usage`, `Outcome`, `SessionInfo`, `TurnResult`.
+- **Vocabulary structs** — `ToolUse`, `ToolResult`, `Usage`, `Outcome`, `SessionInfo`, `TurnResult`, `Budget`.
 
-Tests mirror this layout under `test/`.
+Tests mirror this layout under `req_managed_agents/test/`.
 
 ## Configuration
 
 All config/env access goes through **`ReqManagedAgents.Config`** — don't call
-`System.get_env` / `System.fetch_env!` / `Application.get_env` directly in `lib/`.
-(One deliberate exception: `SigV4.from_env`'s `AWS_REGION` → `AWS_DEFAULT_REGION`
-two-env fallback, which a single `Config.resolve` can't express.)
+`System.get_env` / `System.fetch_env!` / `Application.get_env` directly in
+`req_managed_agents/lib/`. (One deliberate exception: `SigV4.from_env`'s `AWS_REGION` →
+`AWS_DEFAULT_REGION` two-env fallback, which a single `Config.resolve` can't express.)
 Resolution ladder, every key:
 
 ```
@@ -32,9 +32,10 @@ opts[key]  →  Application.get_env(:req_managed_agents, key)  →  System.get_e
 
 `Config.resolve/4` returns the first hit; `Config.resolve!/3` raises a clear
 "set opt / app config / env VAR" message when a required value is missing at
-every layer. Add a setting = one `Config.resolve` call + a row in the README
-"Configuration" table. `config/config.exs` is an empty stub by design — the
-resolver reads `Application` env for whenever a host app chooses to set it.
+every layer. Add a setting = one `Config.resolve` call + a row in the
+`req_managed_agents/README.md` "Configuration" table.
+`req_managed_agents/config/config.exs` is an empty stub by design — the resolver reads
+`Application` env for whenever a host app chooses to set it.
 
 ## Struct Discipline
 
@@ -88,20 +89,21 @@ arg
 
 ## Public-Repo Hygiene
 
-This package is public on Hex. Internal tracker ids (issue keys like `ABC-123`,
-internal phase tags) **never** appear in code, comments, moduledocs, test names,
-README, CHANGELOG, or commit messages — the only permitted reference is a PR
-**body** `Closes <KEY>` trailer. Keep AWS account numbers, ARNs, and internal
-infra names out of source and tests — use placeholders (`role`, `arn:new`,
-`us-east-1`).
+This repository is public and both packages are on Hex. Internal tracker ids
+(issue keys like `ABC-123`, internal phase tags) **never** appear in code,
+comments, moduledocs, test names, README, CHANGELOG, or commit messages — the
+only permitted reference is a PR **body** `Closes <KEY>` trailer. Keep AWS
+account numbers, ARNs, and internal infra names out of source and tests — use
+placeholders (`role`, `arn:new`, `us-east-1`).
 
 ## Version Control & Release
 
 Local dev uses **jj** (see the global CLAUDE.md). Releases are **tag-triggered and
-immutable**: pushing a `v<version>` tag runs CI `mix hex.publish` — the tagged tree
-publishes to Hex immediately and cannot be recalled. Only tag when `@version` in
-`mix.exs` matches the tree and the tree is exactly what should be public. Bump
-`@version` + CHANGELOG in the release commit; tag **after** merge to `main`.
+immutable**: `vX.Y.0` publishes both packages (req_managed_agents first), and
+`<package>-vX.Y.Z` publishes one package's patch. The workflow refuses a tag whose version
+differs from the package's `@version`, a commit not on `main`'s first-parent history, or a
+commit without a green `ci-ok`. Bump `@version` + CHANGELOG in the release commit; tag
+**after** merge to `main`, on the commit the merge put at its tip.
 
 **Close what you shipped.** For every GitHub issue a change resolves, put
 `Closes #<n>` (or `Fixes #<n>`) in the **PR body** so GitHub auto-closes it on
@@ -114,5 +116,15 @@ under Public-Repo Hygiene is separate — never put a Linear id in a PR title.)
 ## Code Quality
 
 ```bash
-mix format --check-formatted && mix credo --strict && mix test
+(cd req_managed_agents && mix format --check-formatted && mix credo --strict && mix test)
+(cd req_managed_agents_host && mix format --check-formatted && mix credo --strict && mix test)
 ```
+
+## req_managed_agents_host
+
+`req_managed_agents_host/` is the durable session host. Its modules live under
+`ReqManagedAgents.Host`, which `req_managed_agents` never references (a test in each
+package pins the direction). In development it depends on `../req_managed_agents` by path.
+`RMA_PUBLISH=1` swaps in the Hex requirement for building and publishing only, and
+`RMA_PUBLISH=floor` pins the lowest `req_managed_agents` that requirement admits, which the
+publish job runs a host patch against.

@@ -119,7 +119,18 @@ defmodule ReqManagedAgents.MixProject do
     [
       main: "readme",
       extras: ["README.md", "CHANGELOG.md"],
-      source_ref: "v#{@version}"
+      source_ref: source_ref(),
+      source_url_pattern:
+        "#{@source_url}/blob/#{source_ref()}/req_managed_agents/%{path}#L%{line}"
     ]
+  end
+
+  # The tag that publishes this version: vX.Y.0 for a lockstep minor,
+  # req_managed_agents-vX.Y.Z for a patch.
+  defp source_ref do
+    case Version.parse!(@version) do
+      %Version{patch: 0} -> "v#{@version}"
+      _ -> "req_managed_agents-v#{@version}"
+    end
   end
 end
