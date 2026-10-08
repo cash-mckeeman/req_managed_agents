@@ -162,7 +162,23 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
 
   @impl true
   def list_events(c, session_id, params \\ %{}),
-    do: get(c, "/v1/sessions/#{session_id}/events", params)
+    do: get(c, "/v1/sessions/#{segment(session_id)}/events", params)
+
+  @doc "Lists session threads using the API's `page` / `next_page` pagination."
+  @spec list_threads(t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  @impl true
+  def list_threads(c, session_id, params \\ %{}),
+    do: get(c, "/v1/sessions/#{segment(session_id)}/threads", params)
+
+  @doc "Lists persisted events for one thread using `page` / `next_page` pagination."
+  @spec list_thread_events(t(), String.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  @impl true
+  def list_thread_events(c, session_id, thread_id, params \\ %{}),
+    do: get(c, "/v1/sessions/#{segment(session_id)}/threads/#{segment(thread_id)}/events", params)
+
+  defp segment("."), do: "%2E"
+  defp segment(".."), do: "%2E%2E"
+  defp segment(id), do: URI.encode(id, &URI.char_unreserved?/1)
 
   @page_limit 100
 

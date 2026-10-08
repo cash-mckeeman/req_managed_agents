@@ -27,6 +27,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client.Behaviour do
   @callback send_events(Client.t(), String.t(), [map()]) :: result()
   @callback send_event(Client.t(), String.t(), map()) :: result()
   @callback list_events(Client.t(), String.t(), map()) :: result()
+  @callback list_threads(Client.t(), String.t(), map()) :: result()
+  @callback list_thread_events(Client.t(), String.t(), String.t(), map()) :: result()
   @callback list_all_events(Client.t(), String.t(), map()) :: {:ok, [map()]} | {:error, term()}
 
   @callback upload_file(Client.t(), map()) :: result()
