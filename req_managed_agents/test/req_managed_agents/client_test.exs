@@ -78,6 +78,37 @@ defmodule ReqManagedAgents.ClientTest do
     assert {:ok, %{"data" => []}} = Client.list_events(client, "sess_1", %{limit: 100})
   end
 
+  test "history endpoints escape individual path segments and forward page cursors", %{
+    client: client
+  } do
+    Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+      assert conn.method == "GET"
+
+      assert conn.request_path in [
+               "/v1/sessions/s%2F%3F%23/events",
+               "/v1/sessions/s%2F%3F%23/threads",
+               "/v1/sessions/s%2F%3F%23/threads/t%2F%3F%23/events"
+             ]
+
+      assert Plug.Conn.fetch_query_params(conn).query_params == %{"page" => "cursor/?#"}
+      assert ["sk-test"] = Plug.Conn.get_req_header(conn, "x-api-key")
+      Req.Test.json(conn, %{"data" => [], "next_page" => nil})
+    end)
+
+    assert {:ok, _} = Client.list_events(client, "s/?#", %{page: "cursor/?#"})
+    assert {:ok, _} = Client.list_threads(client, "s/?#", %{page: "cursor/?#"})
+    assert {:ok, _} = Client.list_thread_events(client, "s/?#", "t/?#", %{page: "cursor/?#"})
+  end
+
+  test "dot-only session and thread IDs cannot change the requested route", %{client: client} do
+    Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+      assert conn.request_path == "/v1/sessions/%2E%2E/threads/%2E/events"
+      Req.Test.json(conn, %{"data" => []})
+    end)
+
+    assert {:ok, _} = Client.list_thread_events(client, "..", ".", %{})
+  end
+
   test "non-2xx returns a typed http_error", %{client: client} do
     Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
       conn |> Plug.Conn.put_status(400) |> Req.Test.json(%{"error" => "bad"})

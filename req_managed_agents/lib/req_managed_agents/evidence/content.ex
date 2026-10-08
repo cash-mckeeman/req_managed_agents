@@ -3,7 +3,8 @@ defmodule ReqManagedAgents.Evidence.Content do
   alias ReqManagedAgents.Evidence.{Record, Validation}
 
   @claude_types ~w(agent.message agent.custom_tool_use agent.tool_use agent.tool_result user.message
-    user.custom_tool_result session.status_idle session.status_running session.status_terminated
+    user.custom_tool_result agent.mcp_tool_use agent.mcp_tool_result user.tool_result
+    user.tool_confirmation session.status_idle session.status_running session.status_terminated
     session.error span.model_request_start span.model_request_end)
   @strings ~w(id session_id thread_id span_id parent_span_id tool_use_id name status stop_reason model_request_start_id mcp_tool_use_id custom_tool_use_id session_thread_id from_session_thread_id to_session_thread_id)
   @times ~w(created_at timestamp started_at ended_at processed_at)

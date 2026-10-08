@@ -123,6 +123,17 @@ defmodule ReqManagedAgents.Client do
   defdelegate list_events(client, arg1, arg2),
     to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
+  @doc false
+  defdelegate list_threads(client, session_id), to: CanonicalClient
+  @impl true
+  defdelegate list_threads(client, session_id, params), to: CanonicalClient
+
+  @doc false
+  defdelegate list_thread_events(client, session_id, thread_id), to: CanonicalClient
+  @impl true
+  defdelegate list_thread_events(client, session_id, thread_id, params), to: CanonicalClient
+
+  @doc false
   defdelegate list_all_events(client, arg1),
     to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
