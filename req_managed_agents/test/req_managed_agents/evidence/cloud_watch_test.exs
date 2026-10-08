@@ -36,6 +36,7 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
     assert Enum.take(capture.records, 1) == original.records
     assert capture.capture_id == original.capture_id
     assert Enum.map(tl(capture.records), & &1.native_id) == ["first", "last"]
+    assert List.last(capture.sources).scope == "us-east-1:/example/agent"
     assert List.last(capture.sources).pages == 3
     assert List.last(capture.sources).status == :complete
     assert List.last(capture.sources).interval.from == ~U[2026-01-01 00:00:00Z]

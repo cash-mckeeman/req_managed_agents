@@ -193,7 +193,7 @@ defmodule ReqManagedAgents.Evidence.CloudWatch do
       source: %Source{
         id: id(),
         kind: :cloudwatch,
-        scope: query.log_group,
+        scope: query.region <> ":" <> query.log_group,
         interval: %Source.Interval{from: query.from, to: query.to},
         status: :complete
       },
