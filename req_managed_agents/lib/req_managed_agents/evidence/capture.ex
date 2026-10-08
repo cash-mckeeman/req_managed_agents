@@ -46,7 +46,7 @@ defmodule ReqManagedAgents.Evidence.Capture do
   def new(attrs, opts \\ []) do
     with {:ok, options} <- Options.new(opts), {:ok, capture} <- parse(attrs) do
       capture
-      |> annotate(attrs)
+      |> annotate()
       |> deduplicate()
       |> retain(options.content)
       |> bound(options)
@@ -57,7 +57,7 @@ defmodule ReqManagedAgents.Evidence.Capture do
   @spec restore(map()) :: {:ok, t()} | {:error, Error.t()}
   def restore(attrs) do
     with {:ok, capture} <- parse(attrs) do
-      {:ok, capture |> annotate(attrs) |> retain(:retain)}
+      {:ok, capture |> annotate() |> retain(:retain)}
     end
   end
 
@@ -148,17 +148,11 @@ defmodule ReqManagedAgents.Evidence.Capture do
       (link.target.namespace != :record or MapSet.member?(ids, link.target.id))
   end
 
-  defp annotate(capture, attrs) do
+  defp annotate(capture) do
     diagnostics =
-      Enum.zip(capture.records, Validation.get(attrs, :records, []))
-      |> Enum.flat_map(fn {record, raw} ->
-        unsupported =
-          record.kind == :native and
-            (not Content.supported?(record.payload) or Content.malformed_metadata?(record.payload))
-
-        malformed_time = Validation.get(raw, :occurred_at) != nil and record.occurred_at == nil
-        if unsupported or malformed_time, do: [diagnostic(:unsupported_record, record)], else: []
-      end)
+      capture.records
+      |> Enum.filter(& &1.validation_issue?)
+      |> Enum.map(&diagnostic(:unsupported_record, &1))
 
     %{capture | diagnostics: capture.diagnostics ++ diagnostics}
   end
