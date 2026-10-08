@@ -110,7 +110,7 @@ defmodule ReqManagedAgents.Evidence.Claude do
     source = new_source(state, :thread, thread)
 
     if exhausted?(state) or
-         state.bytes + source_reservation(source) > state.config.options.max_bytes do
+         state.bytes + source_reservation(source) >= state.config.options.max_bytes do
       mark_pending(state)
     else
       collect_children(rest, collect(state, :thread, thread))
@@ -136,10 +136,27 @@ defmodule ReqManagedAgents.Evidence.Claude do
 
   defp retrieve(%State{} = state, kind, thread_id) do
     source = new_source(state, kind, thread_id)
-    state = %{state | bytes: state.bytes + source_reservation(source)}
-    state = if kind == :threads, do: %{state | enumeration_id: source.id}, else: state
-    {state, source, threads} = pages(state, source, {kind, thread_id}, nil, %{}, [])
-    {%{state | capture: %{state.capture | sources: state.capture.sources ++ [source]}}, threads}
+
+    if exhausted?(state) or
+         state.bytes + source_reservation(source) >= state.config.options.max_bytes do
+      {skip_source(state), []}
+    else
+      state = %{state | bytes: state.bytes + source_reservation(source)}
+      state = if kind == :threads, do: %{state | enumeration_id: source.id}, else: state
+      {state, source, threads} = pages(state, source, {kind, thread_id}, nil, %{}, [])
+      {%{state | capture: %{state.capture | sources: state.capture.sources ++ [source]}}, threads}
+    end
+  end
+
+  defp skip_source(state) do
+    gaps =
+      Enum.map([:bound_exceeded, :capture_gap], fn code ->
+        {:ok, diagnostic} = Diagnostic.new(%{code: code, count: 0})
+        diagnostic
+      end)
+
+    capture = %{state.capture | diagnostics: Enum.uniq(state.capture.diagnostics ++ gaps)}
+    %{state | capture: capture, halted?: true}
   end
 
   defp new_source(state, kind, thread_id) do
