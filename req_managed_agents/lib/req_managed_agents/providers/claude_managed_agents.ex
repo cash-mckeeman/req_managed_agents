@@ -145,7 +145,15 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
           )
         end)
 
-      {:ok, %{client: client, session_id: sid, ref: ref, consumer: task, evidence: evidence}}
+      {:ok,
+       %{
+         client: client,
+         session_id: sid,
+         ref: ref,
+         consumer: task,
+         evidence: evidence,
+         evidence_recorder: if(evidence, do: evidence.recorder)
+       }}
     else
       {:error, reason} = error ->
         Recorder.observe(evidence, :transport_error, error_code: Recorder.code(reason))
@@ -167,7 +175,16 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   # Resume an existing session: don't create or kick off — the Session consolidates via
   # reconnect/3 (list history, dedup, re-drive any unanswered tool call), opening the stream there.
   defp open_resume(client, sid, evidence),
-    do: {:ok, %{client: client, session_id: sid, ref: nil, resume: true, evidence: evidence}}
+    do:
+      {:ok,
+       %{
+         client: client,
+         session_id: sid,
+         ref: nil,
+         resume: true,
+         evidence: evidence,
+         evidence_recorder: if(evidence, do: evidence.recorder)
+       }}
 
   defp create_session(client, body) do
     case Client.create_session(client, body) do
@@ -370,7 +387,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     # recover any tool call left unanswered across the drop (the Session re-runs + resumes those).
     case Client.list_all_events(conn.client, conn.session_id) do
       {:ok, past} ->
-        Enum.each(past, &Recorder.history(evidence, &1))
+        Enum.each(past, &Recorder.history(evidence || Map.get(conn, :evidence_recorder), &1))
         {_fresh, seen} = Consolidate.dedupe(past, seen)
         pending = pending_tool_uses(past)
 
