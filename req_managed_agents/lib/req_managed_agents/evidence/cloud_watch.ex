@@ -76,6 +76,8 @@ defmodule ReqManagedAgents.Evidence.CloudWatch do
   delayed telemetry and provider-internal activity may still be absent. Budgets
   include prior evidence, inspected records, pages and retained bytes; they do not
   bound the HTTP adapter's response buffer. The deadline cancels an active request.
+  If coverage metadata cannot fit alongside bounded prior evidence, returns
+  a `:bound_exceeded` error instead of evicting that evidence.
   """
   alias ReqManagedAgents.Evidence
   alias ReqManagedAgents.Evidence.CloudWatch.Query
@@ -105,7 +107,8 @@ defmodule ReqManagedAgents.Evidence.CloudWatch do
       :deadline,
       :pages,
       :count,
-      :bytes
+      :bytes,
+      :prior_count
     ]
     defstruct [
       :capture,
@@ -117,6 +120,7 @@ defmodule ReqManagedAgents.Evidence.CloudWatch do
       :pages,
       :count,
       :bytes,
+      :prior_count,
       identities: [],
       halted?: false
     ]
@@ -131,6 +135,7 @@ defmodule ReqManagedAgents.Evidence.CloudWatch do
             pages: non_neg_integer(),
             count: non_neg_integer(),
             bytes: non_neg_integer(),
+            prior_count: non_neg_integer(),
             identities: [NativeIdentity.t() | nil],
             halted?: boolean()
           }
@@ -187,6 +192,7 @@ defmodule ReqManagedAgents.Evidence.CloudWatch do
   defp initialize(capture, query, options, client) do
     %State{
       capture: capture,
+      prior_count: length(capture.records),
       query: query,
       options: options,
       client: client,
@@ -557,16 +563,26 @@ defmodule ReqManagedAgents.Evidence.CloudWatch do
     sources =
       if state.source, do: state.capture.sources ++ [state.source], else: state.capture.sources
 
-    Capture.new(
-      %{
-        state.capture
-        | sources: sources,
-          ended_at: max_time(state.capture.ended_at, DateTime.utc_now()),
-          diagnostics:
-            state.capture.diagnostics ++
-              NativeIdentity.diagnostics(Enum.reverse(state.identities))
-      },
-      state.options
-    )
+    result =
+      Capture.new(
+        %{
+          state.capture
+          | sources: sources,
+            ended_at: max_time(state.capture.ended_at, DateTime.utc_now()),
+            diagnostics:
+              state.capture.diagnostics ++
+                NativeIdentity.diagnostics(Enum.reverse(state.identities))
+        },
+        state.options
+      )
+
+    with {:ok, capture} <- result do
+      kept = MapSet.new(capture.records, & &1.id)
+      prior = Enum.take(state.capture.records, state.prior_count)
+
+      if Enum.all?(prior, &MapSet.member?(kept, &1.id)),
+        do: {:ok, capture},
+        else: Error.error(:bound_exceeded)
+    end
   end
 end

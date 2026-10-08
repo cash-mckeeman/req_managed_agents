@@ -234,6 +234,16 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
     refute inspected =~ "synthetic-token"
   end
 
+  test "coverage metadata cannot evict a fitting prior at a tight byte boundary" do
+    prior = prior()
+    limit = byte_size(Jason.encode!(Evidence.to_wire(prior))) + 1
+    {:ok, options} = Options.new(content: :retain, max_bytes: limit)
+    client = client(fn _, _ -> flunk("bounded before transport") end)
+
+    assert {:error, %Evidence.Error{code: :bound_exceeded}} =
+             CloudWatch.enrich(prior, query(), options, client: client)
+  end
+
   defp enrich(prior, client, opts \\ [], query \\ query()) do
     {:ok, options} = Options.new(Keyword.put_new(opts, :content, :retain))
     assert {:ok, capture} = CloudWatch.enrich(prior, query, options, client: client)
