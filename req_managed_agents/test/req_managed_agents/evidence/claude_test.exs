@@ -19,6 +19,75 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
     refute Enum.any?(capture.diagnostics, &(&1.code == :conflicting_duplicate))
   end
 
+  test "enrichment preserves malformed prior inspection charges and references" do
+    owner = self()
+
+    for {raw, limit} <- [{[false], 1}, {[event("kept"), false], 2}] do
+      initial =
+        transport(fn "/v1/sessions/s/events", nil ->
+          send(owner, :initial_inspection)
+          page(raw)
+        end)
+
+      prior = fetch(initial, max_records: limit)
+      assert_received :initial_inspection
+      assert Enum.sum(Enum.map(prior.sources, & &1.records_seen)) == limit
+      assert Enum.map(prior.records, & &1.native_id) == if(limit == 1, do: [], else: ["kept"])
+
+      prior = correlate_first(prior)
+
+      forbidden =
+        transport(fn path, _ ->
+          send(owner, {:forbidden_enrichment, path})
+          page([event("over-budget")])
+        end)
+
+      {:ok, config} =
+        Fetch.new(
+          client: forbidden,
+          prior: prior,
+          options: [content: :retain, max_records: limit]
+        )
+
+      assert {:ok, capture} = Claude.fetch("s", config)
+      refute_received {:forbidden_enrichment, _}
+      assert capture.capture_id == prior.capture_id
+      assert capture.records == prior.records
+      assert capture.correlations == prior.correlations
+      assert capture.sources == prior.sources
+      assert Enum.any?(capture.diagnostics, &(&1.code == :unsupported_record))
+      assert Enum.any?(capture.diagnostics, &(&1.code == :bound_exceeded))
+      assert Enum.any?(capture.diagnostics, &(&1.code == :capture_gap))
+      assert {:ok, restored} = capture |> Evidence.to_wire() |> Evidence.from_wire()
+      assert restored.correlations == prior.correlations
+    end
+  end
+
+  test "fitting valid prior spends only its observed inspection charges" do
+    prior =
+      transport(fn "/v1/sessions/s/events", nil -> page([event("first")]) end)
+      |> fetch(max_records: 1)
+      |> correlate_first()
+
+    owner = self()
+
+    client =
+      transport(fn "/v1/sessions/s/events", nil ->
+        send(owner, :fitting_enrichment)
+        page([event("second")])
+      end)
+
+    {:ok, config} =
+      Fetch.new(client: client, prior: prior, options: [content: :retain, max_records: 2])
+
+    assert {:ok, capture} = Claude.fetch("s", config)
+    assert_received :fitting_enrichment
+    assert Enum.map(capture.records, & &1.native_id) == ["first", "second"]
+    assert hd(capture.records) == hd(prior.records)
+    assert capture.correlations == prior.correlations
+    assert Enum.sum(Enum.map(capture.sources, & &1.records_seen)) == 2
+  end
+
   test "default drop diagnoses fresh same-source conflicts across pages" do
     first = Map.put(event("shared"), "content", "private-first")
 
@@ -603,6 +672,30 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
       assert {:error, %Evidence.Error{code: :bound_exceeded}} = Claude.fetch("s", too_small)
       refute_received {:unexpected_enrichment, _}
     end
+  end
+
+  defp correlate_first(%{records: []} = capture), do: capture
+
+  defp correlate_first(capture) do
+    [record | _] = capture.records
+
+    {:ok, correlated} =
+      Evidence.Capture.new(
+        %{
+          capture
+          | correlations: [
+              %{
+                from_record_id: record.id,
+                relation: :same_session,
+                target: %{namespace: :record, id: record.id},
+                evidence_record_ids: [record.id]
+              }
+            ]
+        },
+        content: :retain
+      )
+
+    correlated
   end
 
   defp fetch(client, options \\ []) do

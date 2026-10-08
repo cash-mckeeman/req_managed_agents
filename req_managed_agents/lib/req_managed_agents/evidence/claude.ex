@@ -104,7 +104,7 @@ defmodule ReqManagedAgents.Evidence.Claude do
       capture: capture,
       deadline: System.monotonic_time(:millisecond) + config.options.timeout_ms,
       pages: Enum.sum(Enum.map(capture.sources, & &1.pages)),
-      count: length(capture.records),
+      count: max(length(capture.records), Enum.sum(Enum.map(capture.sources, & &1.records_seen))),
       bytes: byte_size(Jason.encode!(Evidence.to_wire(capture)))
     }
   end
