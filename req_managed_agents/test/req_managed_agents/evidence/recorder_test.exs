@@ -762,7 +762,10 @@ defmodule ReqManagedAgents.Evidence.RecorderTest do
     end
 
     assert {:ok, result} =
-             Session.run(BedrockAgentCore, opts(invoke, pid) ++ [handler: handler()])
+             Session.run(
+               BedrockAgentCore,
+               opts(invoke, pid) ++ [handler: DeliveryHandler, context: owner]
+             )
 
     assert result.text == "complete"
     assert result.events == [delta("complete"), stop()]
@@ -770,7 +773,20 @@ defmodule ReqManagedAgents.Evidence.RecorderTest do
     assert_received {:invoked, 1}
     assert_received {:invoked, 2}
     refute_received {:invoked, _}
-    result
+
+    deliveries = delivered_events()
+    partial = [delta("partial"), %{"type" => "rma.text_delta", "text" => "partial"}]
+    complete = [delta("complete"), %{"type" => "rma.text_delta", "text" => "complete"}, stop()]
+    assert deliveries == if(live?, do: partial ++ complete, else: complete)
+    {result, deliveries}
+  end
+
+  defp delivered_events do
+    receive do
+      {:handled, event} -> [event | delivered_events()]
+    after
+      0 -> []
+    end
   end
 
   defp opts(invoke, pid),
