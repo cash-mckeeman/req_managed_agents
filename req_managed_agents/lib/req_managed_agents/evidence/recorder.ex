@@ -156,14 +156,26 @@ defmodule ReqManagedAgents.Evidence.Recorder do
   end
 
   @doc false
-  @spec native(Context.t() | nil, map()) :: :ok
+  @spec native(Context.t() | pid() | nil, map()) :: :ok
   def native(nil, _), do: :ok
 
   def native(%Context{} = ctx, payload) do
+    emit(ctx.recorder, native_record(payload, "native", ctx.invocation_id, ctx.attempt_id))
+  end
+
+  def native(pid, payload) when is_pid(pid), do: emit(pid, native_record(payload, "native"))
+
+  @doc false
+  @spec history(Context.t() | pid() | nil, map()) :: :ok
+  def history(nil, _), do: :ok
+  def history(%Context{} = ctx, payload), do: history(ctx.recorder, payload)
+  def history(pid, payload) when is_pid(pid), do: emit(pid, native_record(payload, "history"))
+
+  defp native_record(payload, source, invocation_id \\ nil, attempt_id \\ nil) do
     # Validate and filter only after admission, so a large native frame never enters the mailbox.
-    record = %Record{
+    %Record{
       id: id(),
-      source_id: "native",
+      source_id: source,
       native_id: native_id(payload),
       ordinal: 1,
       observed_at: DateTime.utc_now(),
@@ -171,29 +183,9 @@ defmodule ReqManagedAgents.Evidence.Recorder do
       kind: :native,
       payload: payload,
       content_state: :retained,
-      invocation_id: ctx.invocation_id,
-      attempt_id: ctx.attempt_id
+      invocation_id: invocation_id,
+      attempt_id: attempt_id
     }
-
-    emit(ctx.recorder, record)
-  end
-
-  @doc false
-  @spec history(Context.t() | nil, map()) :: :ok
-  def history(nil, _), do: :ok
-
-  def history(%Context{} = ctx, payload) do
-    emit(ctx.recorder, %Record{
-      id: id(),
-      source_id: "history",
-      native_id: native_id(payload),
-      ordinal: 1,
-      observed_at: DateTime.utc_now(),
-      clock: :none,
-      kind: :native,
-      payload: payload,
-      content_state: :retained
-    })
   end
 
   defp native_id(%{"id" => id}) when is_binary(id), do: id

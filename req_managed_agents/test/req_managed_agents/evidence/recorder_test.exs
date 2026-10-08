@@ -6,6 +6,17 @@ defmodule ReqManagedAgents.Evidence.RecorderTest do
   alias ReqManagedAgents.Providers.BedrockAgentCore
   alias ReqManagedAgents.Session
 
+  defmodule DeliveryHandler do
+    @behaviour ReqManagedAgents.Handler
+    @impl true
+    def handle_tool_call(_, _, _), do: {:ok, "unused"}
+    @impl true
+    def handle_event(event, owner) do
+      send(owner, {:handled, event})
+      :ok
+    end
+  end
+
   test "failed first attempt survives successful retry without changing the canonical result" do
     for live? <- [false, true] do
       baseline = retry_run(nil, live?)
@@ -315,6 +326,7 @@ defmodule ReqManagedAgents.Evidence.RecorderTest do
     assert_receive {:managed_agents_session, %{turns: 1}}
     Session.message(session, "next")
     assert_receive {:managed_agents_session, %{turns: 1}}
+    GenServer.stop(session)
     assert {:ok, capture} = Recorder.snapshot(pid)
     starts = lifecycle(capture, :invocation_started)
     finishes = lifecycle(capture, :invocation_finished)
@@ -322,7 +334,6 @@ defmodule ReqManagedAgents.Evidence.RecorderTest do
     assert Enum.map(starts, & &1.invocation_id) == Enum.map(finishes, & &1.invocation_id)
     assert length(Enum.uniq_by(starts, & &1.invocation_id)) == 2
     refute Enum.any?(capture.diagnostics, &(&1.code == :capture_gap))
-    GenServer.stop(session)
   end
 
   test "a raised pre-open transport retains safe failure evidence and original failure" do
@@ -512,12 +523,86 @@ defmodule ReqManagedAgents.Evidence.RecorderTest do
            ) >= 1_000
   end
 
+  test "idle Claude reconnect cannot reopen a completed invocation or attempt" do
+    baseline = claude_run(nil, idle_drop: true)
+    pid = recorder(content: :retain)
+    assert claude_run(pid, idle_drop: true) == baseline
+    assert {:ok, capture} = Recorder.snapshot(pid)
+    assert [first, second] = lifecycle(capture, :invocation_started)
+    refute first.invocation_id == second.invocation_id
+    assert [first_attempt, second_attempt] = lifecycle(capture, :attempt_started)
+    refute first_attempt.attempt_id == second_attempt.attempt_id
+    assert first_attempt.invocation_id == first.invocation_id
+    assert second_attempt.invocation_id == second.invocation_id
+
+    assert Enum.map(
+             lifecycle(capture, :invocation_finished),
+             &{&1.invocation_id, &1.payload.result}
+           ) ==
+             [{first.invocation_id, :ok}, {second.invocation_id, :ok}]
+
+    assert Enum.map(lifecycle(capture, :attempt_finished), &{&1.attempt_id, &1.payload.result}) ==
+             [{first_attempt.attempt_id, :ok}, {second_attempt.attempt_id, :ok}]
+
+    assert [] == lifecycle(capture, :transport_failed)
+    assert [] == lifecycle(capture, :retry_decided)
+
+    native =
+      Map.new(Enum.filter(capture.records, &(&1.source_id == "native")), &{&1.native_id, &1})
+
+    assert Map.keys(native) |> Enum.sort() == ["done-1", "done-2", "idle-after", "idle-before"]
+
+    for id <- ["idle-before", "idle-after"] do
+      assert %{invocation_id: nil, attempt_id: nil} = Map.fetch!(native, id)
+    end
+
+    assert [%{native_id: "preview", invocation_id: nil, attempt_id: nil}] =
+             Enum.filter(capture.records, &(&1.source_id == "history"))
+
+    assert Map.fetch!(native, "done-1").attempt_id == first_attempt.attempt_id
+    assert Map.fetch!(native, "done-2").attempt_id == second_attempt.attempt_id
+    refute Enum.any?(capture.diagnostics, &(&1.code == :capture_gap))
+  end
+
+  test "repeated stream errors close an active attempt only once" do
+    alias ReqManagedAgents.Providers.ClaudeManagedAgents, as: Claude
+    pid = recorder()
+    invocation = Recorder.begin(pid, Claude)
+    Recorder.context(pid, :managed, "session")
+    attempt = Recorder.attempt(invocation)
+    ref = make_ref()
+
+    state = %ReqManagedAgents.Session.State{
+      provider: Claude,
+      evidence: invocation,
+      conn: %{evidence: attempt},
+      ref: ref,
+      caller: nil
+    }
+
+    event = {:managed_agents, ref, {:error, :closed}}
+    assert {:noreply, state} = Session.handle_info(event, state)
+    assert {:noreply, _state} = Session.handle_info(event, state)
+    assert {:ok, capture} = Recorder.snapshot(pid)
+    assert [%{attempt_id: id, payload: %{result: :error}}] = lifecycle(capture, :attempt_finished)
+    assert id == attempt.attempt_id
+    assert [%{attempt_id: ^id}] = lifecycle(capture, :retry_decided)
+    assert [%{attempt_id: ^id}] = lifecycle(capture, :transport_failed)
+  end
+
   defp claude_run(recorder, opts \\ []) do
     owner = self()
 
     {:ok, transport} =
       Agent.start_link(fn ->
-        %{stream: nil, streams: 0, posts: 0, history: 0, fail_history: opts[:fail_history]}
+        %{
+          stream: nil,
+          streams: 0,
+          posts: 0,
+          history: 0,
+          fail_history: opts[:fail_history],
+          idle_drop: opts[:idle_drop]
+        }
       end)
 
     preview = %{
@@ -546,12 +631,14 @@ defmodule ReqManagedAgents.Evidence.RecorderTest do
         prompt: if(opts[:resume], do: "resume"),
         agent_id: "agent",
         environment_id: "env",
-        handler: handler(),
+        handler: DeliveryHandler,
+        context: owner,
         notify: owner,
         evidence_recorder: recorder
       )
 
     assert_receive {:managed_agents_session, first}, 2000
+    if opts[:idle_drop], do: idle_disconnect(transport)
     Session.message(session, "followup")
     assert_receive {:managed_agents_session, second}, 2000
     counts = Agent.get(transport, &Map.take(&1, [:posts, :streams, :history]))
@@ -594,7 +681,9 @@ defmodule ReqManagedAgents.Evidence.RecorderTest do
             {state.streams + 1, %{state | streams: state.streams + 1, stream: {stream, ref}}}
           end)
 
-        if n == 2, do: send_sse({stream, ref}, claude_stop("done-1"))
+        if n == 2 do
+          send_sse({stream, ref}, reconnect_event(Agent.get(transport, & &1.idle_drop)))
+        end
 
         %Req.Response.Async{
           pid: self(),
@@ -612,11 +701,19 @@ defmodule ReqManagedAgents.Evidence.RecorderTest do
             {{state.posts + 1, state.stream}, %{state | posts: state.posts + 1}}
           end)
 
-        claude_post(n, stream || await_stream(transport, 1000), preview)
+        claude_post(
+          n,
+          stream || await_stream(transport, 1000),
+          preview,
+          Agent.get(transport, & &1.idle_drop)
+        )
 
         %{"data" => []}
     end
   end
+
+  defp reconnect_event(true), do: %{"id" => "idle-after", "type" => "session.status_running"}
+  defp reconnect_event(_), do: claude_stop("done-1")
 
   defp await_stream(transport, remaining) when remaining > 0 do
     case Agent.get(transport, & &1.stream) do
@@ -629,12 +726,22 @@ defmodule ReqManagedAgents.Evidence.RecorderTest do
     end
   end
 
-  defp claude_post(1, {pid, ref} = stream, preview) do
+  defp claude_post(1, stream, _preview, true), do: send_sse(stream, claude_stop("done-1"))
+
+  defp claude_post(1, {pid, ref} = stream, preview, _idle_drop) do
     send_sse(stream, preview)
     send(pid, {ref, {:error, :closed}})
   end
 
-  defp claude_post(_n, stream, _preview), do: send_sse(stream, claude_stop("done-2"))
+  defp claude_post(_n, stream, _preview, _idle_drop), do: send_sse(stream, claude_stop("done-2"))
+
+  defp idle_disconnect(transport) do
+    {pid, ref} = stream = Agent.get(transport, & &1.stream)
+    send_sse(stream, %{"id" => "idle-before", "type" => "session.status_running"})
+    assert_receive {:handled, %{"id" => "idle-before"}}
+    send(pid, {ref, {:error, :closed}})
+    assert_receive {:handled, %{"id" => "idle-after"}}, 2000
+  end
 
   defp claude_stop(id),
     do: %{"id" => id, "type" => "session.status_idle", "stop_reason" => %{"type" => "end_turn"}}

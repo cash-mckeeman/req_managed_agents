@@ -326,7 +326,7 @@ defmodule ReqManagedAgents.Session do
   def handle_info({:managed_agents, ref, :connected}, %{ref: ref} = s), do: {:noreply, s}
 
   def handle_info({:managed_agents, ref, {:event, ev}}, %{ref: ref} = s) do
-    Recorder.native(evidence_attempt(s), ev)
+    Recorder.native(native_evidence(s), ev)
     id = ev["id"]
 
     if is_binary(id) and MapSet.member?(s.seen, id) do
@@ -345,7 +345,7 @@ defmodule ReqManagedAgents.Session do
   # A LIVE streaming session (no synchronous caller) reconnects-with-consolidation on a stream
   # drop; a synchronous run/2 surfaces the error instead.
   def handle_info({:managed_agents, ref, {:error, _reason}}, %{ref: ref, caller: nil} = s) do
-    stream_failed(s)
+    s = stream_failed(s)
     Process.send_after(self(), :reconnect, backoff_ms(s))
     {:noreply, %{s | reconnect_attempts: s.reconnect_attempts + 1}}
   end
@@ -398,6 +398,7 @@ defmodule ReqManagedAgents.Session do
           reply(s, {:error, reason})
         else
           Recorder.observe(evidence_attempt(s), :retry, error_code: Recorder.code(reason))
+          s = retire_attempt(s)
           Process.send_after(self(), :reconnect, backoff_ms(s))
           {:noreply, %{s | reconnect_attempts: s.reconnect_attempts + 1}}
         end
@@ -435,7 +436,7 @@ defmodule ReqManagedAgents.Session do
   def handle_info({:EXIT, _pid, :normal}, s), do: {:noreply, s}
 
   def handle_info({:EXIT, pid, _reason}, %{consumer: pid, caller: nil} = s) do
-    stream_failed(s)
+    s = stream_failed(s)
     Process.send_after(self(), :reconnect, backoff_ms(s))
     {:noreply, %{s | reconnect_attempts: s.reconnect_attempts + 1}}
   end
@@ -541,7 +542,7 @@ defmodule ReqManagedAgents.Session do
       error_code: Recorder.code(reason)
     )
 
-    finish_evidence(s, {:error, reason})
+    s = finish_evidence(s, {:error, reason})
     {:noreply, %{s | turn_events: []}}
   end
 
@@ -821,6 +822,35 @@ defmodule ReqManagedAgents.Session do
     )
 
     Recorder.observe(evidence_attempt(s), :retry, error_code: "transport_error")
+    retire_attempt(s)
+  end
+
+  defp native_evidence(%State{
+         evidence: nil,
+         provider: ReqManagedAgents.Providers.ClaudeManagedAgents,
+         opts: opts
+       }) do
+    if is_pid(opts[:evidence_recorder]), do: opts[:evidence_recorder]
+  end
+
+  defp native_evidence(s), do: evidence_attempt(s)
+
+  defp retire_attempt(%State{evidence: nil} = s), do: s
+
+  defp retire_attempt(s) do
+    conn =
+      s.conn
+      |> Map.put(:evidence, s.evidence)
+      |> Map.delete(:evidence_attempt_started)
+
+    %{s | conn: conn}
+  end
+
+  defp retire_invocation(%State{evidence: nil} = s), do: s
+
+  defp retire_invocation(s) do
+    s = retire_attempt(s)
+    %{s | evidence: nil, conn: Map.put(s.conn, :evidence, nil)}
   end
 
   defp evidence_attempt(%State{evidence: nil}), do: nil
@@ -836,23 +866,24 @@ defmodule ReqManagedAgents.Session do
       end
 
     Recorder.observe(s.evidence, :invocation_end, fields)
+    retire_invocation(s)
   end
 
   # A synchronous run/2 caller gets the result and the GenServer stops; a live session
   # (no caller) stays alive after a non-error terminal to accept follow-up messages.
   defp reply(%{caller: caller} = s, result) when is_pid(caller) do
-    finish_evidence(s, result)
+    s = finish_evidence(s, result)
     send(caller, {:session_result, self(), result})
     {:stop, :normal, s}
   end
 
   defp reply(s, {:error, _} = result) do
-    finish_evidence(s, result)
+    s = finish_evidence(s, result)
     {:stop, :normal, s}
   end
 
   defp reply(s, {:ok, _} = result) do
-    finish_evidence(s, result)
+    s = finish_evidence(s, result)
     {:noreply, s}
   end
 
