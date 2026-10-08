@@ -19,6 +19,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.Agent.Spec
+  alias ReqManagedAgents.Evidence.Recorder
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, Consolidate, Event, Stream}
 
   alias ReqManagedAgents.{
@@ -112,7 +113,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
       case opts[:session_id] do
         nil -> open_fresh(client, opts, budget, subscriber)
-        sid -> open_resume(client, sid)
+        sid -> open_resume(client, sid, opts[:evidence_context])
       end
     end
   end
@@ -127,6 +128,11 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
         budget_body(budget)
       )
 
+    evidence = Recorder.attempt(opts[:evidence_context])
+    observed_open_fresh(client, body, budget, subscriber, opts, evidence)
+  end
+
+  defp observed_open_fresh(client, body, budget, subscriber, opts, evidence) do
     with {:ok, %{"id" => sid} = created} <- create_session(client, body),
          :ok <- confirm_budget(client, sid, budget, created) do
       ref = make_ref()
@@ -139,14 +145,29 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
           )
         end)
 
-      {:ok, %{client: client, session_id: sid, ref: ref, consumer: task}}
+      {:ok, %{client: client, session_id: sid, ref: ref, consumer: task, evidence: evidence}}
+    else
+      {:error, reason} = error ->
+        Recorder.observe(evidence, :transport_error, error_code: Recorder.code(reason))
+
+        Recorder.observe(evidence, :attempt_end,
+          result: :error,
+          error_code: Recorder.code(reason)
+        )
+
+        error
     end
+  catch
+    kind, reason ->
+      Recorder.observe(evidence, :transport_error, error_code: "transport_error")
+      Recorder.observe(evidence, :attempt_end, result: :error, error_code: "transport_error")
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   # Resume an existing session: don't create or kick off — the Session consolidates via
   # reconnect/3 (list history, dedup, re-drive any unanswered tool call), opening the stream there.
-  defp open_resume(client, sid),
-    do: {:ok, %{client: client, session_id: sid, ref: nil, resume: true}}
+  defp open_resume(client, sid, evidence),
+    do: {:ok, %{client: client, session_id: sid, ref: nil, resume: true, evidence: evidence}}
 
   defp create_session(client, body) do
     case Client.create_session(client, body) do
@@ -336,13 +357,21 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def reconnect(conn, subscriber, seen) do
+    {started?, conn} = Map.pop(conn, :evidence_attempt_started, false)
+
+    evidence =
+      if started?, do: Map.get(conn, :evidence), else: Recorder.attempt(Map.get(conn, :evidence))
+
+    reconnect_observed(conn, subscriber, seen, evidence)
+  end
+
+  defp reconnect_observed(conn, subscriber, seen, evidence) do
     # The event stream has no replay: on reconnect, list past events, grow the dedup set, and
     # recover any tool call left unanswered across the drop (the Session re-runs + resumes those).
     case Client.list_all_events(conn.client, conn.session_id) do
       {:ok, past} ->
-        {_fresh, seen} =
-          Consolidate.dedupe(past, seen)
-
+        Enum.each(past, &Recorder.history(evidence, &1))
+        {_fresh, seen} = Consolidate.dedupe(past, seen)
         pending = pending_tool_uses(past)
 
         ref = make_ref()
@@ -352,11 +381,23 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
             Stream.stream(conn.client, conn.session_id, subscriber, ref: ref)
           end)
 
-        {:ok, Map.merge(conn, %{ref: ref, consumer: task}), pending, seen}
+        {:ok, Map.merge(conn, %{ref: ref, consumer: task, evidence: evidence}), pending, seen}
 
       {:error, reason} ->
+        Recorder.observe(evidence, :transport_error, error_code: Recorder.code(reason))
+
+        Recorder.observe(evidence, :attempt_end,
+          result: :error,
+          error_code: Recorder.code(reason)
+        )
+
         {:error, reason}
     end
+  catch
+    kind, reason ->
+      Recorder.observe(evidence, :transport_error, error_code: "transport_error")
+      Recorder.observe(evidence, :attempt_end, result: :error, error_code: "transport_error")
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   @impl true

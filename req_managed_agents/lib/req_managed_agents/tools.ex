@@ -1,5 +1,6 @@
 defmodule ReqManagedAgents.Tools do
   @moduledoc false
+  alias ReqManagedAgents.Evidence.Recorder
   alias ReqManagedAgents.ToolResult
 
   @type handler_fun ::
@@ -14,11 +15,19 @@ defmodule ReqManagedAgents.Tools do
           map(),
           term(),
           ReqManagedAgents.SessionInfo.t(),
-          map()
+          map(),
+          Recorder.Context.t() | nil
         ) :: ToolResult.t()
-  def execute(handler, id, name, input, context, info, meta \\ %{}) do
+  def execute(handler, id, name, input, context, info, meta \\ %{}, evidence \\ nil) do
+    Recorder.observe(evidence, :tool_start, tool_use_id: id)
+
     :telemetry.span([:req_managed_agents, :tool], Map.merge(meta, %{tool: name}), fn ->
       result = do_run(handler, id, name, input, context, info)
+
+      fields =
+        if result.is_error, do: [result: :error, error_code: "tool_error"], else: [result: :ok]
+
+      Recorder.observe(evidence, :tool_end, [tool_use_id: id] ++ fields)
       {result, Map.merge(meta, %{tool: name, is_error: result.is_error})}
     end)
   end

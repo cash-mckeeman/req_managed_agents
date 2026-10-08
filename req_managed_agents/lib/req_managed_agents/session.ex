@@ -21,6 +21,10 @@ defmodule ReqManagedAgents.Session do
       {:ok, pid} = ReqManagedAgents.Session.start_link(provider, handler: MyTools, notify: self(), ...)
       ReqManagedAgents.Session.message(pid, "follow-up")
 
+  `:evidence_recorder` accepts a caller-owned `ReqManagedAgents.Evidence.Recorder` pid
+  for Claude Managed Agents or AgentCore observations. The caller snapshots and stops it;
+  recorder loss does not change the session result or retry policy.
+
   Required opts: `:handler` (a `ReqManagedAgents.Handler` module or a 3-arity fn). Optional:
   `:context`, `:prompt`, `:outcome` (a `%ReqManagedAgents.Outcome{}` or a map with the same keys
   `%{description:, rubric:, max_iterations:}` — kicks off a
@@ -71,6 +75,8 @@ defmodule ReqManagedAgents.Session do
     TurnResult,
     Usage
   }
+
+  alias ReqManagedAgents.Evidence.Recorder
 
   @max_tool_concurrency 8
 
@@ -196,9 +202,13 @@ defmodule ReqManagedAgents.Session do
   # verbatim — state map and {:continue, …} tuple unchanged (plus the new :turn_guard key).
   defp open_session(provider, opts) do
     opts = lift_handles(opts)
+    evidence = Recorder.begin(opts[:evidence_recorder], provider)
+    opts = evidence_opts(opts, evidence)
 
-    case provider.open(opts, self()) do
+    case observed_open(provider, opts, evidence) do
       {:ok, conn} ->
+        evidence_context(evidence, provider, conn)
+
         meta =
           Map.merge(
             opts[:telemetry_metadata] || %{},
@@ -207,6 +217,7 @@ defmodule ReqManagedAgents.Session do
 
         state = %State{
           provider: provider,
+          evidence: evidence,
           delta?: exports_text_delta?(provider),
           mode: provider.mode(),
           conn: conn,
@@ -248,9 +259,30 @@ defmodule ReqManagedAgents.Session do
 
       # Surface the provider's error verbatim (e.g. {:create_session_failed, _}) — no extra wrapping.
       {:error, reason} ->
+        Recorder.observe(evidence, :invocation_end, result: :error, error_code: "open_failed")
         {:stop, reason}
     end
   end
+
+  defp evidence_opts(opts, nil), do: opts
+  defp evidence_opts(opts, evidence), do: Keyword.put(opts, :evidence_context, evidence)
+
+  defp evidence_context(nil, _provider, _conn), do: :ok
+
+  defp evidence_context(evidence, provider, conn),
+    do:
+      Recorder.context(evidence.recorder, evidence_provider(provider), provider.session_id(conn))
+
+  defp observed_open(provider, opts, evidence) do
+    provider.open(opts, self())
+  catch
+    kind, reason ->
+      Recorder.observe(evidence, :invocation_end, result: :error, error_code: "open_failed")
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp evidence_provider(ReqManagedAgents.Providers.BedrockAgentCore), do: :agentcore
+  defp evidence_provider(_), do: :managed
 
   # Only a resume arms pending_user_message — see the state-build comment above (#66).
   defp pending_user_message(provider, conn, opts),
@@ -294,6 +326,7 @@ defmodule ReqManagedAgents.Session do
   def handle_info({:managed_agents, ref, :connected}, %{ref: ref} = s), do: {:noreply, s}
 
   def handle_info({:managed_agents, ref, {:event, ev}}, %{ref: ref} = s) do
+    Recorder.native(evidence_attempt(s), ev)
     id = ev["id"]
 
     if is_binary(id) and MapSet.member?(s.seen, id) do
@@ -312,6 +345,7 @@ defmodule ReqManagedAgents.Session do
   # A LIVE streaming session (no synchronous caller) reconnects-with-consolidation on a stream
   # drop; a synchronous run/2 surfaces the error instead.
   def handle_info({:managed_agents, ref, {:error, _reason}}, %{ref: ref, caller: nil} = s) do
+    stream_failed(s)
     Process.send_after(self(), :reconnect, backoff_ms(s))
     {:noreply, %{s | reconnect_attempts: s.reconnect_attempts + 1}}
   end
@@ -320,6 +354,8 @@ defmodule ReqManagedAgents.Session do
     do: stop_error(s, reason)
 
   def handle_info(:reconnect, s) do
+    s = prepare_reconnect_evidence(s)
+
     case safe_reconnect(s) do
       {:ok, conn, pending, seen} ->
         # reconnect_attempts is NOT reset here — only a real terminal (finish/2) resets it — so a
@@ -348,7 +384,8 @@ defmodule ReqManagedAgents.Session do
           s.pending_user_message ->
             deliver_user_message(
               reset_acc(%{s | turns: 0, pending_user_message: nil}),
-              s.pending_user_message
+              s.pending_user_message,
+              false
             )
 
           true ->
@@ -358,8 +395,9 @@ defmodule ReqManagedAgents.Session do
       # A sync run/2 surfaces a list/reconnect failure; a live session backs off and retries.
       {:error, reason} ->
         if s.caller do
-          stop_error(s, reason)
+          reply(s, {:error, reason})
         else
+          Recorder.observe(evidence_attempt(s), :retry, error_code: Recorder.code(reason))
           Process.send_after(self(), :reconnect, backoff_ms(s))
           {:noreply, %{s | reconnect_attempts: s.reconnect_attempts + 1}}
         end
@@ -397,6 +435,7 @@ defmodule ReqManagedAgents.Session do
   def handle_info({:EXIT, _pid, :normal}, s), do: {:noreply, s}
 
   def handle_info({:EXIT, pid, _reason}, %{consumer: pid, caller: nil} = s) do
+    stream_failed(s)
     Process.send_after(self(), :reconnect, backoff_ms(s))
     {:noreply, %{s | reconnect_attempts: s.reconnect_attempts + 1}}
   end
@@ -448,7 +487,15 @@ defmodule ReqManagedAgents.Session do
   # drive a fresh turn with it. Shared by a live follow-up (handle_cast {:message, …}) and a
   # resume that carries a new :prompt (handle_info(:reconnect, …) — issue #66) — one send path,
   # not two copies.
-  defp deliver_user_message(s, text), do: drive(s, s.provider.user_input(text))
+  defp deliver_user_message(s, text, new_invocation? \\ true) do
+    evidence =
+      if new_invocation?,
+        do: Recorder.begin(s.opts[:evidence_recorder], s.provider),
+        else: s.evidence
+
+    conn = if evidence && new_invocation?, do: Map.put(s.conn, :evidence, evidence), else: s.conn
+    drive(%{s | evidence: evidence, conn: conn}, s.provider.user_input(text))
+  end
 
   # ── acquire a turn (the ONLY mode-specific step) ──────────────────────────────
   defp drive(%{mode: :request_response} = s, input) do
@@ -473,6 +520,8 @@ defmodule ReqManagedAgents.Session do
   end
 
   defp drive(%{mode: :streaming} = s, input) do
+    s = ensure_stream_attempt(s)
+
     case s.provider.push_input(s.conn, input) do
       :ok ->
         {:noreply, %{s | turn_events: []}}
@@ -480,7 +529,31 @@ defmodule ReqManagedAgents.Session do
       # A sync run/2 surfaces a post failure; a live session stays alive (the message is dropped,
       # matching the old fire-and-forget POST) rather than silently dying with no notify.
       {:error, reason} ->
-        if s.caller, do: stop_error(s, reason), else: {:noreply, %{s | turn_events: []}}
+        if s.caller, do: stop_error(s, reason), else: live_push_error(s, reason)
+    end
+  end
+
+  defp live_push_error(s, reason) do
+    Recorder.observe(evidence_attempt(s), :transport_error, error_code: Recorder.code(reason))
+
+    Recorder.observe(evidence_attempt(s), :attempt_end,
+      result: :error,
+      error_code: Recorder.code(reason)
+    )
+
+    finish_evidence(s, {:error, reason})
+    {:noreply, %{s | turn_events: []}}
+  end
+
+  defp ensure_stream_attempt(%State{evidence: nil} = s), do: s
+
+  defp ensure_stream_attempt(s) do
+    case evidence_attempt(s) do
+      %Recorder.Context{attempt_id: nil} = evidence ->
+        %{s | conn: Map.put(s.conn, :evidence, Recorder.attempt(evidence))}
+
+      _ ->
+        s
     end
   end
 
@@ -642,7 +715,7 @@ defmodule ReqManagedAgents.Session do
     custom_tool_uses
     |> Task.async_stream(
       fn %ToolUse{id: id, name: name, input: input} ->
-        Tools.execute(s.handler, id, name, input, s.context, s.info, s.meta)
+        Tools.execute(s.handler, id, name, input, s.context, s.info, s.meta, evidence_attempt(s))
       end,
       max_concurrency: @max_tool_concurrency,
       timeout: :infinity,
@@ -660,6 +733,21 @@ defmodule ReqManagedAgents.Session do
   # #79: reconnect/3 is optional. A provider that resumes (resumed?/1 true) but has no
   # event history to recover (request_response reattach) may omit it — resume proceeds
   # with the conn as-is, nothing pending, seen-set unchanged.
+  defp prepare_reconnect_evidence(%State{evidence: nil} = s), do: s
+
+  defp prepare_reconnect_evidence(
+         %State{provider: ReqManagedAgents.Providers.ClaudeManagedAgents} = s
+       ) do
+    conn =
+      s.conn
+      |> Map.put(:evidence, Recorder.attempt(s.evidence))
+      |> Map.put(:evidence_attempt_started, true)
+
+    %{s | conn: conn}
+  end
+
+  defp prepare_reconnect_evidence(s), do: s
+
   defp safe_reconnect(s) do
     if Code.ensure_loaded?(s.provider) and function_exported?(s.provider, :reconnect, 3) do
       s.provider.reconnect(s.conn, self(), s.seen)
@@ -697,6 +785,8 @@ defmodule ReqManagedAgents.Session do
   end
 
   defp finish(s, %TurnResult{} = tr) do
+    if s.mode == :streaming, do: Recorder.observe(evidence_attempt(s), :attempt_end, result: :ok)
+
     :telemetry.execute(
       [:req_managed_agents, :session, :terminal],
       %{},
@@ -709,17 +799,62 @@ defmodule ReqManagedAgents.Session do
     reply(%{s | reconnect_attempts: 0}, {:ok, result})
   end
 
-  defp stop_error(s, reason), do: reply(s, {:error, reason})
+  defp stop_error(s, reason) do
+    if s.mode == :streaming do
+      Recorder.observe(evidence_attempt(s), :transport_error, error_code: Recorder.code(reason))
+
+      Recorder.observe(evidence_attempt(s), :attempt_end,
+        result: :error,
+        error_code: Recorder.code(reason)
+      )
+    end
+
+    reply(s, {:error, reason})
+  end
+
+  defp stream_failed(s) do
+    Recorder.observe(evidence_attempt(s), :transport_error, error_code: "transport_error")
+
+    Recorder.observe(evidence_attempt(s), :attempt_end,
+      result: :error,
+      error_code: "transport_error"
+    )
+
+    Recorder.observe(evidence_attempt(s), :retry, error_code: "transport_error")
+  end
+
+  defp evidence_attempt(%State{evidence: nil}), do: nil
+
+  defp evidence_attempt(%State{conn: conn, evidence: evidence}),
+    do: Map.get(conn, :evidence, evidence)
+
+  defp finish_evidence(s, result) do
+    fields =
+      case result do
+        {:ok, _} -> [result: :ok]
+        {:error, reason} -> [result: :error, error_code: Recorder.code(reason)]
+      end
+
+    Recorder.observe(s.evidence, :invocation_end, fields)
+  end
 
   # A synchronous run/2 caller gets the result and the GenServer stops; a live session
   # (no caller) stays alive after a non-error terminal to accept follow-up messages.
   defp reply(%{caller: caller} = s, result) when is_pid(caller) do
+    finish_evidence(s, result)
     send(caller, {:session_result, self(), result})
     {:stop, :normal, s}
   end
 
-  defp reply(s, {:error, _}), do: {:stop, :normal, s}
-  defp reply(s, {:ok, _}), do: {:noreply, s}
+  defp reply(s, {:error, _} = result) do
+    finish_evidence(s, result)
+    {:stop, :normal, s}
+  end
+
+  defp reply(s, {:ok, _} = result) do
+    finish_evidence(s, result)
+    {:noreply, s}
+  end
 
   # A Converse-envelope event is a single-key map (%{"messageStop" => …}).
   defp envelope_type(%{} = ev), do: ev |> Map.keys() |> List.first()

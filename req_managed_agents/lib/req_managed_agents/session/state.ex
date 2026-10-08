@@ -5,6 +5,7 @@ defmodule ReqManagedAgents.Session.State do
 
   defstruct [
     :provider,
+    :evidence,
     :mode,
     :conn,
     :info,
@@ -38,6 +39,7 @@ defmodule ReqManagedAgents.Session.State do
 
   @type t :: %__MODULE__{
           provider: module(),
+          evidence: ReqManagedAgents.Evidence.Recorder.Context.t() | nil,
           mode: :streaming | :request_response,
           conn: term(),
           info: SessionInfo.t(),
