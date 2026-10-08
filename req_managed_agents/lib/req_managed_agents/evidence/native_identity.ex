@@ -16,7 +16,7 @@ defmodule ReqManagedAgents.Evidence.NativeIdentity do
   def new(%Record{kind: :native, content_state: :retained, native_id: id} = record, :drop)
       when is_binary(id) do
     digest =
-      {record.payload, record.occurred_at}
+      {canonical_payload(record.payload), record.occurred_at}
       |> :erlang.term_to_binary([:deterministic])
       |> then(&:crypto.hash(:sha256, &1))
 
@@ -29,6 +29,18 @@ defmodule ReqManagedAgents.Evidence.NativeIdentity do
   end
 
   def new(%Record{}, _), do: nil
+
+  defp canonical_payload(value) when is_float(value) do
+    integer = trunc(value)
+    if value == integer, do: integer, else: value
+  end
+
+  defp canonical_payload(value) when is_list(value), do: Enum.map(value, &canonical_payload/1)
+
+  defp canonical_payload(value) when is_map(value),
+    do: Map.new(value, fn {key, nested} -> {key, canonical_payload(nested)} end)
+
+  defp canonical_payload(value), do: value
 
   # Facts belong only to fresh admitted observations, never restored lossy payloads.
   @spec diagnostics([t() | nil]) :: [Diagnostic.t()]
