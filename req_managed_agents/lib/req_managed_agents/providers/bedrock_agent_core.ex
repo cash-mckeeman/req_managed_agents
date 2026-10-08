@@ -20,6 +20,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.Environment
+  alias ReqManagedAgents.Evidence.Recorder
   alias ReqManagedAgents.Providers.BedrockAgentCore.{Client, Converse}
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatus
@@ -840,6 +841,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     {:ok,
      %{
        harness_arn: Keyword.fetch!(opts, :harness_arn),
+       evidence: opts[:evidence_context],
        sid: sid,
        session_id: sid,
        resume: opts[:session_id] != nil,
@@ -900,6 +902,11 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   # One turn with bounded retry on a transport error or a truncated stream (stop_reason == nil).
   # A surfaced AWS exception/error frame is never retried.
   defp invoke(conn, messages, retries_left) do
+    evidence = Recorder.attempt(Map.get(conn, :evidence))
+    conn = Map.put(conn, :evidence, evidence)
+    observation_key = make_ref()
+    forward = live_forward(conn.subscriber)
+
     inv = %{
       harness_arn: conn.harness_arn,
       runtime_session_id: conn.sid,
@@ -910,32 +917,71 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
       timeout_seconds: conn.timeout_seconds,
       max_iterations: conn.max_iterations,
       max_tokens: conn.max_tokens,
-      on_event: live_forward(conn.subscriber)
+      on_event: fn event ->
+        Process.put(observation_key, Process.get(observation_key, 0) + 1)
+        Recorder.native(evidence, event)
+        if forward, do: forward.(event)
+      end
     }
 
-    case conn.invoke_fun.(inv) do
+    result = invoke_observed(conn, inv, evidence, observation_key)
+
+    case result do
       {:ok, events} ->
         case stream_error(events) do
           {type, message} ->
+            failed_attempt(evidence, "harness_stream_error")
             {:error, {:harness_stream_error, type, message}}
 
           nil ->
-            cond do
-              # A real terminal (messageStop carried a stop_reason) — surface the turn.
-              normalize(events).stop_reason != nil -> {:ok, events, conn}
-              # A truncated stream (no terminal) — retry, then surface as early_termination.
-              retries_left > 0 -> invoke(conn, messages, retries_left - 1)
-              true -> {:error, :early_termination}
+            if normalize(events).stop_reason != nil do
+              Recorder.observe(evidence, :attempt_end, result: :ok)
+              {:ok, events, conn}
+            else
+              failed_attempt(evidence, "early_termination")
+              retry_invoke(conn, messages, retries_left, :early_termination)
             end
         end
 
-      {:error, _reason} when retries_left > 0 ->
-        invoke(conn, messages, retries_left - 1)
-
       {:error, reason} ->
-        {:error, reason}
+        failed_attempt(evidence, Recorder.code(reason))
+        retry_invoke(conn, messages, retries_left, reason)
     end
   end
+
+  defp invoke_observed(conn, inv, evidence, key) do
+    result = conn.invoke_fun.(inv)
+
+    case result do
+      {:ok, events} ->
+        # The client callback emits the returned prefix. Injected batch transports may
+        # only return events; retain their suffix without double-recording live frames.
+        Enum.each(Enum.drop(events, Process.get(key, 0)), &Recorder.native(evidence, &1))
+
+      _ ->
+        :ok
+    end
+
+    result
+  catch
+    kind, reason ->
+      failed_attempt(evidence, "transport_error")
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  after
+    Process.delete(key)
+  end
+
+  defp failed_attempt(evidence, code) do
+    Recorder.observe(evidence, :transport_error, error_code: code)
+    Recorder.observe(evidence, :attempt_end, result: :error, error_code: code)
+  end
+
+  defp retry_invoke(conn, messages, retries_left, reason) when retries_left > 0 do
+    Recorder.observe(Map.get(conn, :evidence), :retry, error_code: Recorder.code(reason))
+    invoke(conn, messages, retries_left - 1)
+  end
+
+  defp retry_invoke(_conn, _messages, _retries_left, reason), do: {:error, reason}
 
   @impl true
   def text_delta(%{"contentBlockDelta" => %{"delta" => %{"text" => t}}}) when is_binary(t), do: t

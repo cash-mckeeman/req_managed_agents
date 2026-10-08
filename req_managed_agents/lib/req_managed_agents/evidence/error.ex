@@ -9,11 +9,13 @@ defmodule ReqManagedAgents.Evidence.Error do
           | :invalid_reference
           | :unsupported_version
           | :bound_exceeded
+          | :recorder_unavailable
           | :artifact_write_failed
   @type t :: %__MODULE__{code: code(), message: String.t()}
 
   @messages %{
     invalid_input: "Invalid evidence input.",
+    recorder_unavailable: "Evidence recorder is unavailable.",
     invalid_options: "Invalid capture options.",
     invalid_reference: "Invalid evidence reference.",
     unsupported_version: "Unsupported evidence version.",
