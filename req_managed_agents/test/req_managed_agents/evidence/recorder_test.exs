@@ -6,6 +6,56 @@ defmodule ReqManagedAgents.Evidence.RecorderTest do
   alias ReqManagedAgents.Providers.BedrockAgentCore
   alias ReqManagedAgents.Session
 
+  test "default drop honors raw numeric equality in nested native payloads" do
+    for {value, equivalent, unequal} <- [
+          {1, 1.0, 2.0},
+          {-0.0, 0, 0.25},
+          {%{"values" => [1, %{"inner" => [2.0, -0.0, 1.5]}]},
+           %{"values" => [1.0, %{"inner" => [2, 0, 1.5]}]},
+           %{"values" => [1.0, %{"inner" => [2, 0, 1.6]}]}},
+          {9_007_199_254_740_992, 9_007_199_254_740_992.0, 9_007_199_254_740_994.0},
+          {9_007_199_254_740_993, 9_007_199_254_740_993, 9_007_199_254_740_992.0}
+        ] do
+      assert value == equivalent
+      refute value == unequal
+      pid = recorder()
+      Recorder.context(pid, :managed, "s")
+
+      payload = %{
+        "id" => "numeric",
+        "type" => "agent.message",
+        "content" => value,
+        "private" => "numeric-secret"
+      }
+
+      Recorder.native(pid, payload)
+      Recorder.native(pid, %{payload | "content" => equivalent})
+      assert {:ok, equal} = Recorder.snapshot(pid)
+      assert Enum.map(equal.records, & &1.native_id) == ["numeric", "numeric"]
+      refute Enum.any?(equal.diagnostics, &(&1.code == :conflicting_duplicate))
+
+      Recorder.native(pid, %{payload | "content" => unequal})
+      assert {:ok, conflict} = Recorder.snapshot(pid)
+      assert [_, _, last] = conflict.records
+
+      assert [%{record_id: record_id, source_id: "native"}] =
+               Enum.filter(conflict.diagnostics, &(&1.code == :conflicting_duplicate))
+
+      assert record_id == last.id
+
+      for capture <- [equal, conflict] do
+        assert Enum.all?(capture.records, &(&1.content_state == :dropped))
+
+        assert Enum.uniq(Enum.map(capture.records, & &1.payload)) ==
+                 [%{"id" => "numeric", "type" => "agent.message"}]
+
+        refute Jason.encode!(Evidence.to_wire(capture)) =~ "numeric-secret"
+        assert {:ok, restored} = capture |> Evidence.to_wire() |> Evidence.from_wire()
+        assert restored.diagnostics == capture.diagnostics
+      end
+    end
+  end
+
   test "retained native equality uses the established raw payload comparison" do
     pid = recorder(content: :retain)
     Recorder.context(pid, :managed, "s")

@@ -5,6 +5,55 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
   alias ReqManagedAgents.Evidence
   alias ReqManagedAgents.Evidence.{Claude, Fetch, LocalRecord, Options, Recorder}
 
+  test "default drop honors raw numeric equality in nested retrieved payloads" do
+    for {value, equivalent, unequal} <- [
+          {1, 1.0, 2.0},
+          {-0.0, 0, 0.25},
+          {%{"values" => [1, %{"inner" => [2.0, -0.0, 1.5]}]},
+           %{"values" => [1.0, %{"inner" => [2, 0, 1.5]}]},
+           %{"values" => [1.0, %{"inner" => [2, 0, 1.6]}]}},
+          {9_007_199_254_740_992, 9_007_199_254_740_992.0, 9_007_199_254_740_994.0},
+          {9_007_199_254_740_993, 9_007_199_254_740_993, 9_007_199_254_740_992.0}
+        ] do
+      assert value == equivalent
+      refute value == unequal
+      payload = Map.merge(event("numeric"), %{"content" => value, "private" => "numeric-secret"})
+      same = %{payload | "content" => equivalent}
+
+      for records <- [[payload, same], [payload, same, %{payload | "content" => unequal}]] do
+        client =
+          transport(fn
+            "/v1/sessions/s/events", nil -> page(records)
+            "/v1/sessions/s/threads", nil -> page([])
+          end)
+
+        {:ok, config} = Fetch.new(client: client)
+        assert {:ok, capture} = Claude.fetch("s", config)
+
+        assert Enum.map(capture.records, & &1.native_id) ==
+                 List.duplicate("numeric", length(records))
+
+        conflicts = Enum.filter(capture.diagnostics, &(&1.code == :conflicting_duplicate))
+
+        if length(records) == 2 do
+          assert conflicts == []
+        else
+          assert [%{record_id: record_id, source_id: source_id}] = conflicts
+          assert {record_id, source_id} == {List.last(capture.records).id, hd(capture.sources).id}
+        end
+
+        assert Enum.all?(capture.records, &(&1.content_state == :dropped))
+
+        assert Enum.uniq(Enum.map(capture.records, & &1.payload)) ==
+                 [%{"id" => "numeric", "type" => "agent.message"}]
+
+        refute Jason.encode!(Evidence.to_wire(capture)) =~ "numeric-secret"
+        assert {:ok, restored} = capture |> Evidence.to_wire() |> Evidence.from_wire()
+        assert restored.diagnostics == capture.diagnostics
+      end
+    end
+  end
+
   test "retained collection keeps established raw payload equality" do
     payload = Map.put(event("shared"), "content", 1)
 
