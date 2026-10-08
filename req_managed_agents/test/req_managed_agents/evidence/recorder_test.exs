@@ -6,6 +6,53 @@ defmodule ReqManagedAgents.Evidence.RecorderTest do
   alias ReqManagedAgents.Providers.BedrockAgentCore
   alias ReqManagedAgents.Session
 
+  test "retained native equality uses the established raw payload comparison" do
+    pid = recorder(content: :retain)
+    Recorder.context(pid, :managed, "s")
+    payload = %{"id" => "shared", "type" => "agent.message", "content" => 1}
+    Recorder.native(pid, payload)
+    Recorder.native(pid, %{payload | "content" => 1.0})
+    assert {:ok, capture} = Recorder.snapshot(pid)
+    assert [%{payload: ^payload}] = capture.records
+    refute Enum.any?(capture.diagnostics, &(&1.code == :conflicting_duplicate))
+  end
+
+  test "default drop diagnoses fresh native conflicts without comparing filtered content" do
+    pid = recorder()
+    Recorder.context(pid, :managed, "s")
+    first = %{"id" => "shared", "type" => "agent.message", "content" => "private-first"}
+    other = %{first | "content" => "private-second"}
+    Recorder.native(pid, first)
+    Recorder.native(pid, first)
+    Recorder.native(pid, other)
+    Recorder.history(pid, %{first | "content" => "private-history"})
+
+    assert {:ok, capture} = Recorder.snapshot(pid)
+
+    assert Enum.map(capture.records, &{&1.source_id, &1.native_id}) ==
+             [
+               {"native", "shared"},
+               {"native", "shared"},
+               {"native", "shared"},
+               {"history", "shared"}
+             ]
+
+    [_, _, conflicting, _] = capture.records
+    conflicts = Enum.filter(capture.diagnostics, &(&1.code == :conflicting_duplicate))
+    assert [%{source_id: "native", record_id: id}] = conflicts
+    assert id == conflicting.id
+    assert Enum.all?(capture.records, &(&1.content_state == :dropped))
+
+    assert Enum.uniq(Enum.map(capture.records, & &1.payload)) ==
+             [%{"id" => "shared", "type" => "agent.message"}]
+
+    wire = Evidence.to_wire(capture)
+    refute Jason.encode!(wire) =~ "private-"
+    assert {:ok, restored} = Evidence.from_wire(wire)
+    assert Enum.filter(restored.diagnostics, &(&1.code == :conflicting_duplicate)) == conflicts
+    assert restored.records == capture.records
+  end
+
   defmodule DeliveryHandler do
     @behaviour ReqManagedAgents.Handler
     @impl true

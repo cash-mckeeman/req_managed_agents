@@ -20,7 +20,18 @@ defmodule ReqManagedAgents.Evidence.Recorder do
   byte encoding and malformed frames discarded by the transport decoder are unavailable.
   """
   use GenServer
-  alias ReqManagedAgents.Evidence.{Capture, Diagnostic, Error, LocalRecord, Options, Record}
+
+  alias ReqManagedAgents.Evidence.{
+    Capture,
+    Content,
+    Diagnostic,
+    Error,
+    LocalRecord,
+    NativeIdentity,
+    Options,
+    Record
+  }
+
   alias ReqManagedAgents.Evidence.Record.Payload
   alias ReqManagedAgents.Evidence.Recorder.Context
 
@@ -268,10 +279,12 @@ defmodule ReqManagedAgents.Evidence.Recorder do
   end
 
   defp store_record(state, record, reserved) do
-    bytes = :erlang.external_size(record)
+    identity = NativeIdentity.new(record, state.options.content)
+    record = Content.apply(record, state.options.content)
+    bytes = :erlang.external_size({record, identity})
 
     if bytes <= reserved do
-      :ets.insert(state.table, {{:record, record.ordinal}, record})
+      :ets.insert(state.table, {{:record, record.ordinal}, record, identity})
       :atomics.sub(state.counters, 1, reserved - bytes)
     else
       release(state, reserved)
@@ -308,17 +321,14 @@ defmodule ReqManagedAgents.Evidence.Recorder do
     )
   end
 
-  defp record(%Record{kind: :native} = record, state, ordinal, observed, _ticks) do
-    Record.new(
-      %{
-        record
-        | id: "record-#{ordinal}",
-          source_id: if(record.source_id == "history", do: "history", else: "native"),
-          ordinal: ordinal,
-          observed_at: observed
-      },
-      state.options
-    )
+  defp record(%Record{kind: :native} = record, _state, ordinal, observed, _ticks) do
+    Record.parse(%{
+      record
+      | id: "record-#{ordinal}",
+        source_id: if(record.source_id == "history", do: "history", else: "native"),
+        ordinal: ordinal,
+        observed_at: observed
+    })
   end
 
   defp record(_, _, _, _, _), do: Error.error(:invalid_input)
@@ -332,13 +342,21 @@ defmodule ReqManagedAgents.Evidence.Recorder do
   defp capture(state, barrier) do
     false = :ets.member(state.table, :invalid_context)
     [{:context, provider, session_id}] = :ets.lookup(state.table, :context)
-    records = :ets.select(state.table, [{{{:record, :_}, :"$1"}, [], [:"$1"]}])
+
+    entries =
+      :ets.select(state.table, [{{{:record, :_}, :"$1", :"$2"}, [], [{{:"$1", :"$2"}}]}])
+
+    {records, identities} = Enum.unzip(entries)
     losses = :atomics.get(state.counters, 4)
 
     gap? =
       barrier != :ok or losses > 0 or :atomics.get(state.counters, 3) > 0 or unfinished?(records)
 
-    diagnostics = if gap?, do: [diagnostic(:capture_gap, losses)], else: []
+    diagnostics = NativeIdentity.diagnostics(identities)
+
+    diagnostics =
+      if gap?, do: diagnostics ++ [diagnostic(:capture_gap, losses)], else: diagnostics
+
     status = if gap?, do: :partial, else: :complete
 
     local = %{

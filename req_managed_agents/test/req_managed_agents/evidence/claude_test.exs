@@ -5,6 +5,59 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
   alias ReqManagedAgents.Evidence
   alias ReqManagedAgents.Evidence.{Claude, Fetch, LocalRecord, Options, Recorder}
 
+  test "retained collection keeps established raw payload equality" do
+    payload = Map.put(event("shared"), "content", 1)
+
+    client =
+      transport(fn
+        "/v1/sessions/s/events", nil -> page([payload, %{payload | "content" => 1.0}])
+        "/v1/sessions/s/threads", nil -> page([])
+      end)
+
+    capture = fetch(client)
+    assert [%{payload: ^payload}] = capture.records
+    refute Enum.any?(capture.diagnostics, &(&1.code == :conflicting_duplicate))
+  end
+
+  test "default drop diagnoses fresh same-source conflicts across pages" do
+    first = Map.put(event("shared"), "content", "private-first")
+
+    client =
+      transport(fn
+        "/v1/sessions/s/events", nil ->
+          page([first, first], "next")
+
+        "/v1/sessions/s/events", "next" ->
+          page([%{first | "content" => "private-second"}])
+
+        "/v1/sessions/s/threads", nil ->
+          page([%{"id" => "child"}])
+
+        "/v1/sessions/s/threads/child/events", nil ->
+          page([%{first | "content" => "private-child"}])
+      end)
+
+    {:ok, config} = Fetch.new(client: client)
+    assert {:ok, capture} = Claude.fetch("s", config)
+    assert [one, two, conflicting, child] = events(capture)
+
+    assert Enum.map([one, two, conflicting, child], & &1.native_id) ==
+             ["shared", "shared", "shared", "shared"]
+
+    assert one.source_id == two.source_id
+    assert one.source_id == conflicting.source_id
+    refute child.source_id == one.source_id
+    conflicts = Enum.filter(capture.diagnostics, &(&1.code == :conflicting_duplicate))
+    assert [%{source_id: source_id, record_id: record_id}] = conflicts
+    assert {source_id, record_id} == {conflicting.source_id, conflicting.id}
+    assert Enum.all?(capture.records, &(&1.content_state == :dropped))
+    wire = Evidence.to_wire(capture)
+    refute Jason.encode!(wire) =~ "private-"
+    assert {:ok, restored} = Evidence.from_wire(wire)
+    assert Enum.filter(restored.diagnostics, &(&1.code == :conflicting_duplicate)) == conflicts
+    assert restored.records == capture.records
+  end
+
   test "continues empty intermediate pages on session, enumeration and thread histories" do
     client =
       transport(fn path, page ->
