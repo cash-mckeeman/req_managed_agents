@@ -17,7 +17,18 @@ defmodule ReqManagedAgents.Evidence.Claude do
   """
   alias ReqManagedAgents.Client
   alias ReqManagedAgents.Evidence
-  alias ReqManagedAgents.Evidence.{Capture, Diagnostic, Error, Fetch, Record, Source, Validation}
+
+  alias ReqManagedAgents.Evidence.{
+    Capture,
+    Content,
+    Diagnostic,
+    Error,
+    Fetch,
+    NativeIdentity,
+    Record,
+    Source,
+    Validation
+  }
 
   defmodule State do
     @moduledoc false
@@ -30,6 +41,7 @@ defmodule ReqManagedAgents.Evidence.Claude do
       :count,
       :bytes,
       :enumeration_id,
+      identities: [],
       halted?: false
     ]
 
@@ -41,6 +53,7 @@ defmodule ReqManagedAgents.Evidence.Claude do
             count: non_neg_integer(),
             bytes: non_neg_integer(),
             enumeration_id: String.t() | nil,
+            identities: [NativeIdentity.t() | nil],
             halted?: boolean()
           }
   end
@@ -292,7 +305,7 @@ defmodule ReqManagedAgents.Evidence.Claude do
       payload: payload
     }
 
-    case Record.new(attrs, state.config.options) do
+    case Record.parse(attrs) do
       {:ok, record} ->
         malformed_id? = Map.get(payload, "id") != nil and record.native_id == nil
 
@@ -309,6 +322,9 @@ defmodule ReqManagedAgents.Evidence.Claude do
   defp admit(state, _, _, _), do: {:invalid, %{state | count: state.count + 1}}
 
   defp admit_record(state, record) do
+    identity = NativeIdentity.new(record, state.config.options.content)
+    record = Content.apply(record, state.config.options.content)
+
     bytes =
       record
       |> Map.from_struct()
@@ -317,20 +333,30 @@ defmodule ReqManagedAgents.Evidence.Claude do
       |> Jason.encode!()
       |> byte_size()
 
-    bytes = bytes + record_diagnostics_size(record) + 1
+    bytes =
+      bytes + record_diagnostics_size(record, identity) + :erlang.external_size(identity) + 1
 
     if state.count >= state.config.options.max_records or
          state.bytes + bytes > state.config.options.max_bytes do
       {:bound, state}
     else
       capture = %{state.capture | records: state.capture.records ++ [record]}
-      {:ok, %{state | capture: capture, count: state.count + 1, bytes: state.bytes + bytes}}
+
+      {:ok,
+       %{
+         state
+         | capture: capture,
+           count: state.count + 1,
+           bytes: state.bytes + bytes,
+           identities: [identity | state.identities]
+       }}
     end
   end
 
-  defp record_diagnostics_size(record) do
+  defp record_diagnostics_size(record, identity) do
     codes = if record.validation_issue?, do: [:unsupported_record], else: []
     codes = if record.content_state == :retained, do: codes, else: [:content_unavailable | codes]
+    codes = if identity == nil, do: codes, else: [:conflicting_duplicate | codes]
 
     Enum.sum(
       Enum.map(codes, fn code ->
@@ -463,6 +489,15 @@ defmodule ReqManagedAgents.Evidence.Claude do
   defp id, do: Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
 
   defp finish(%State{} = state) do
-    Capture.new(%{state.capture | ended_at: DateTime.utc_now()}, state.config.options)
+    diagnostics = NativeIdentity.diagnostics(Enum.reverse(state.identities))
+
+    Capture.new(
+      %{
+        state.capture
+        | ended_at: DateTime.utc_now(),
+          diagnostics: state.capture.diagnostics ++ diagnostics
+      },
+      state.config.options
+    )
   end
 end
