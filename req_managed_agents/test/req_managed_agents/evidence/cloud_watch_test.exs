@@ -226,6 +226,14 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
     assert byte_size(Jason.encode!(Evidence.to_wire(capture))) <= 1_500
   end
 
+  test "client inspection omits signing credentials" do
+    client = client(fn _, _ -> page([]) end)
+    inspected = inspect(client)
+    refute inspected =~ "synthetic-key"
+    refute inspected =~ "synthetic-secret"
+    refute inspected =~ "synthetic-token"
+  end
+
   defp enrich(prior, client, opts \\ [], query \\ query()) do
     {:ok, options} = Options.new(Keyword.put_new(opts, :content, :retain))
     assert {:ok, capture} = CloudWatch.enrich(prior, query, options, client: client)

@@ -7,6 +7,7 @@ defmodule ReqManagedAgents.Evidence.CloudWatchClient do
   alias ReqManagedAgents.AWS.SigV4
   alias ReqManagedAgents.Evidence.{Error, Validation}
 
+  @derive {Inspect, except: [:credentials, :transport]}
   @enforce_keys [:region]
   defstruct [:region, :credentials, :transport, timeout_ms: 30_000]
   @typedoc "Caller-supplied credential map at the AWS signing boundary."
