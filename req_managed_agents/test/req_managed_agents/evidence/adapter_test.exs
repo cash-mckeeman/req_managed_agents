@@ -192,6 +192,35 @@ defmodule ReqManagedAgents.Evidence.AdapterTest do
     assert {:error, _} = Capture.new(attrs)
   end
 
+  test "CloudWatch log envelopes preserve safe metadata under source-selected drop" do
+    payload = %{
+      "eventId" => "event",
+      "logStreamName" => "stream",
+      "timestamp" => 123,
+      "ingestionTime" => 124,
+      "message" => "private OTLP content"
+    }
+
+    safe = Map.drop(payload, ["message"])
+
+    assert %NativeObservation{supported?: true, safe_payload: ^safe} =
+             ReqManagedAgents.CloudWatch.Evidence.interpret(payload)
+
+    assert {:ok, capture} =
+             Capture.new(%{
+               capture_id: "cloudwatch",
+               provider: :agentcore,
+               session_id: "session",
+               started_at: @time,
+               ended_at: @time,
+               sources: [%{id: "source", kind: :cloudwatch, scope: "session", status: :complete}],
+               records: [record(payload)]
+             })
+
+    assert hd(capture.records).payload == safe
+    refute hd(capture.records).validation_issue?
+  end
+
   defp record(payload) do
     %{
       id: "record",

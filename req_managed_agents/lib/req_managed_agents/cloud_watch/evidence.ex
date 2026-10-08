@@ -1,18 +1,36 @@
 defmodule ReqManagedAgents.CloudWatch.Evidence do
-  @moduledoc "Safe interpretation of legacy trace metadata collected from CloudWatch."
+  @moduledoc "Safe interpretation of CloudWatch log envelopes and legacy trace metadata."
   @behaviour ReqManagedAgents.Evidence.Adapter
   alias ReqManagedAgents.Evidence.{NativeObservation, Validation}
 
   @strings ~w(traceId spanId parentSpanId name)
   @times ~w(startTimeUnixNano endTimeUnixNano)
 
-  @doc "Projects trace identity and numeric bounds without attributes or content."
+  @doc "Projects log and trace metadata without messages, attributes or content."
   @impl true
   @spec interpret(map()) :: NativeObservation.t()
   def interpret(payload) when is_map(payload) do
     if Validation.json?(payload),
       do: interpret_json(payload),
       else: %NativeObservation{supported?: false, malformed_metadata?: true, safe_payload: %{}}
+  end
+
+  defp interpret_json(
+         %{"eventId" => id, "logStreamName" => stream, "timestamp" => time} = payload
+       ) do
+    %NativeObservation{
+      supported?: is_binary(id) and is_binary(stream) and is_integer(time) and time >= 0,
+      malformed_metadata?: false,
+      safe_payload:
+        Map.merge(
+          payload
+          |> Map.take(~w(eventId logStreamName))
+          |> Map.filter(fn {_, v} -> is_binary(v) end),
+          payload
+          |> Map.take(~w(timestamp ingestionTime))
+          |> Map.filter(fn {_, v} -> nonnegative?(v) end)
+        )
+    }
   end
 
   defp interpret_json(%{"traceId" => trace, "spanId" => span} = payload) do
