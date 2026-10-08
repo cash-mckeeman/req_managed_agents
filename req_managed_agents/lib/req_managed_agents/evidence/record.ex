@@ -105,7 +105,8 @@ defmodule ReqManagedAgents.Evidence.Record do
     :monotonic_ticks,
     :kind,
     :payload,
-    :content_state
+    :content_state,
+    validation_issue?: false
   ]
 
   @type t :: %__MODULE__{
@@ -122,13 +123,17 @@ defmodule ReqManagedAgents.Evidence.Record do
           monotonic_ticks: integer() | nil,
           kind: :native | :local,
           payload: map() | Payload.t(),
-          content_state: :retained | :dropped | :redacted
+          content_state: :retained | :dropped | :redacted,
+          validation_issue?: boolean()
         }
   @clocks %{"wall" => :wall, "monotonic" => :monotonic, "none" => :none}
   @kinds %{"native" => :native, "local" => :local}
   @states %{"retained" => :retained, "dropped" => :dropped, "redacted" => :redacted}
 
-  @doc "Validates record metadata and applies content policy; malformed native time becomes nil."
+  @doc """
+  Validates record metadata and applies content policy; malformed native time becomes nil.
+  Safe validation findings remain on typed records for Capture diagnostics.
+  """
   @spec new(map(), keyword() | Options.t()) :: {:ok, t()} | {:error, Error.t()}
   def new(attrs, opts \\ []) do
     with {:ok, options} <- Options.new(opts), {:ok, record} <- parse(attrs) do
@@ -155,7 +160,8 @@ defmodule ReqManagedAgents.Evidence.Record do
           &{&1, fn v -> Validation.optional(v, fn x -> Validation.id(x) end) end, nil}
         )
 
-    with {:ok, fields} <- Validation.fields(attrs, specs),
+    with {:ok, previous_issue?} <- previous_issue(attrs),
+         {:ok, fields} <- Validation.fields(attrs, specs),
          true <- valid_clock?(fields),
          {:ok, payload} <- payload(fields.kind, Validation.get(attrs, :payload)),
          true <- consistent_local?(fields, payload) do
@@ -165,13 +171,33 @@ defmodule ReqManagedAgents.Evidence.Record do
           _ -> nil
         end
 
-      {:ok, struct!(__MODULE__, Map.merge(fields, %{payload: payload, occurred_at: occurred_at}))}
+      malformed_time? = Validation.get(attrs, :occurred_at) != nil and occurred_at == nil
+
+      unsupported? =
+        fields.kind == :native and
+          (not Content.supported?(payload) or Content.malformed_metadata?(payload))
+
+      {:ok,
+       struct!(
+         __MODULE__,
+         Map.merge(fields, %{
+           payload: payload,
+           occurred_at: occurred_at,
+           validation_issue?: previous_issue? or malformed_time? or unsupported?
+         })
+       )}
     else
       _ -> Error.error(:invalid_input)
     end
   end
 
   def parse(_), do: Error.error(:invalid_input)
+
+  defp previous_issue(%__MODULE__{validation_issue?: value}) when is_boolean(value),
+    do: {:ok, value}
+
+  defp previous_issue(%__MODULE__{}), do: Error.error(:invalid_input)
+  defp previous_issue(_), do: {:ok, false}
 
   defp payload(:local, value), do: Payload.new(value)
 

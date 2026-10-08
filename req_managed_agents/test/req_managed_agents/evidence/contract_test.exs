@@ -577,4 +577,64 @@ defmodule ReqManagedAgents.Evidence.ContractTest do
       refute inspect(built.diagnostics) =~ "rejected-secret"
     end
   end
+
+  test "typed records preserve optional-field diagnostics without preserving rejected input" do
+    fixtures = [
+      {:managed, :claude_session, %{occurred_at: "rejected-secret"}},
+      {:managed, :claude_session,
+       %{payload: %{"type" => "span.model_request_end", "processed_at" => "rejected-secret"}}},
+      {:managed, :claude_session,
+       %{
+         payload: %{
+           "type" => "span.model_request_end",
+           "model_usage" => %{"input_tokens" => "rejected-secret", "output_tokens" => 4}
+         }
+       }},
+      {:agentcore, :agentcore_stream,
+       %{
+         payload: %{
+           "metadata" => %{"usage" => %{"inputTokens" => "rejected-secret", "outputTokens" => 4}}
+         }
+       }}
+    ]
+
+    for {provider, kind, overrides} <- fixtures, policy <- [:drop, :retain] do
+      raw_record = record(overrides)
+      assert {:ok, typed_record} = Record.new(raw_record, content: policy)
+      assert typed_record.occurred_at == nil
+      if policy == :drop, do: refute(inspect(typed_record) =~ "rejected-secret")
+      assert {:ok, typed_record} = Record.new(typed_record, content: policy)
+
+      assert {:ok, built} =
+               Capture.new(
+                 capture(%{
+                   provider: provider,
+                   sources: [%{source() | kind: kind}],
+                   records: [typed_record]
+                 }),
+                 content: policy
+               )
+
+      assert Enum.count(
+               built.diagnostics,
+               &(&1.code == :unsupported_record and &1.record_id == "record-1")
+             ) == 1
+
+      refute inspect(built.diagnostics) =~ "rejected-secret"
+      wire = Evidence.to_wire(built)
+
+      assert Enum.sort(Map.keys(hd(wire["records"]))) ==
+               ~w(attempt_id clock clock_id content_state id invocation_id kind monotonic_ticks native_id observed_at occurred_at ordinal payload source_id)
+
+      assert {:ok, restored} = wire |> Jason.encode!() |> Jason.decode!() |> Evidence.from_wire()
+
+      assert Enum.count(
+               restored.diagnostics,
+               &(&1.code == :unsupported_record and &1.record_id == "record-1")
+             ) == 1
+
+      if policy == :drop,
+        do: refute(Jason.encode!(Evidence.to_wire(restored)) =~ "rejected-secret")
+    end
+  end
 end
