@@ -494,6 +494,64 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
            )
   end
 
+  test "fitting prior survives when another source cannot be admitted" do
+    initial_client =
+      transport(fn
+        "/v1/sessions/s/events", nil -> page([event("first")])
+        "/v1/sessions/s/threads", nil -> page([])
+      end)
+
+    prior = fetch(initial_client)
+    [record] = prior.records
+
+    {:ok, correlated} =
+      Evidence.Capture.new(
+        %{
+          prior
+          | correlations: [
+              %{
+                from_record_id: record.id,
+                relation: :same_session,
+                target: %{namespace: :record, id: record.id},
+                evidence_record_ids: [record.id]
+              }
+            ]
+        },
+        content: :retain
+      )
+
+    owner = self()
+
+    client =
+      transport(fn path, _ ->
+        send(owner, {:unexpected_enrichment, path})
+        page([])
+      end)
+
+    for prior <- [prior, correlated] do
+      assert byte_size(Jason.encode!(Evidence.to_wire(prior))) < 1_500
+
+      {:ok, config} =
+        Fetch.new(client: client, prior: prior, options: [content: :retain, max_bytes: 1_500])
+
+      assert {:ok, capture} = Claude.fetch("s", config)
+      assert capture.capture_id == prior.capture_id
+      assert capture.records == prior.records
+      assert capture.correlations == prior.correlations
+      assert capture.sources == prior.sources
+      assert Enum.any?(capture.diagnostics, &(&1.code == :bound_exceeded and &1.source_id == nil))
+      assert Enum.any?(capture.diagnostics, &(&1.code == :capture_gap and &1.source_id == nil))
+      assert byte_size(Jason.encode!(Evidence.to_wire(capture))) <= 1_500
+      assert {:ok, _} = capture |> Evidence.to_wire() |> Evidence.from_wire()
+
+      {:ok, too_small} =
+        Fetch.new(client: client, prior: prior, options: [content: :retain, max_bytes: 200])
+
+      assert {:error, %Evidence.Error{code: :bound_exceeded}} = Claude.fetch("s", too_small)
+      refute_received {:unexpected_enrichment, _}
+    end
+  end
+
   defp fetch(client, options \\ []) do
     {:ok, config} =
       Fetch.new(client: client, options: Keyword.put_new(options, :content, :retain))
