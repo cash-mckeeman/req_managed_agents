@@ -524,4 +524,57 @@ defmodule ReqManagedAgents.Evidence.ContractTest do
                max_bytes: 1500
              )
   end
+
+  test "malformed AgentCore metadata is diagnosed under both content policies" do
+    fixtures = [
+      {:agentcore_stream,
+       %{"metadata" => %{"usage" => %{"inputTokens" => "rejected-secret", "outputTokens" => 4}}},
+       %{"metadata" => %{"usage" => %{"outputTokens" => 4}}}},
+      {:agentcore_stream, %{"messageStart" => %{"role" => %{"value" => "rejected-secret"}}},
+       %{"messageStart" => %{}}},
+      {:agentcore_stream, %{"messageStop" => %{"stopReason" => ["rejected-secret"]}},
+       %{"messageStop" => %{}}},
+      {:agentcore_stream,
+       %{
+         "contentBlockStart" => %{
+           "contentBlockIndex" => "rejected-secret",
+           "start" => %{"toolUse" => %{"toolUseId" => "tool-1", "name" => ["rejected-secret"]}}
+         }
+       }, %{"contentBlockStart" => %{"start" => %{"toolUse" => %{"toolUseId" => "tool-1"}}}}},
+      {:agentcore_stream, %{"contentBlockDelta" => %{"contentBlockIndex" => "rejected-secret"}},
+       %{"contentBlockDelta" => %{}}},
+      {:agentcore_stream, %{"contentBlockStop" => %{"contentBlockIndex" => -1}},
+       %{"contentBlockStop" => %{}}},
+      {:cloudwatch,
+       %{
+         "traceId" => "trace-1",
+         "spanId" => "span-1",
+         "startTimeUnixNano" => "rejected-secret",
+         "endTimeUnixNano" => -1,
+         "parentSpanId" => ["rejected-secret"]
+       }, %{"traceId" => "trace-1", "spanId" => "span-1"}}
+    ]
+
+    for {kind, payload, dropped_payload} <- fixtures, policy <- [:drop, :retain] do
+      attrs =
+        capture(%{
+          provider: :agentcore,
+          sources: [%{source() | kind: kind}],
+          records: [record(%{payload: payload})]
+        })
+
+      assert {:ok, built} = Capture.new(attrs, content: policy)
+
+      assert Enum.any?(
+               built.diagnostics,
+               &(&1.code == :unsupported_record and &1.record_id == "record-1")
+             ),
+             "missing diagnostic for #{inspect(kind)} #{inspect(payload)} under #{policy}"
+
+      assert hd(built.records).payload ==
+               if(policy == :retain, do: payload, else: dropped_payload)
+
+      refute inspect(built.diagnostics) =~ "rejected-secret"
+    end
+  end
 end
