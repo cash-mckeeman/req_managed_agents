@@ -459,8 +459,8 @@ defmodule ReqManagedAgents.Evidence.CloudWatch do
 
   defp session_ids(attributes) when is_list(attributes) do
     Enum.reduce_while(attributes, {:ok, []}, fn
-      %{"key" => "session.id", "value" => %{"stringValue" => id}}, {:ok, ids}
-      when is_binary(id) ->
+      %{"key" => "session.id", "value" => %{"stringValue" => id} = value}, {:ok, ids}
+      when is_binary(id) and map_size(value) == 1 ->
         {:cont, {:ok, ids ++ [id]}}
 
       %{"key" => "session.id"}, _ ->

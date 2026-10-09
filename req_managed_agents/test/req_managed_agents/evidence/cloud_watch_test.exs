@@ -295,6 +295,38 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
     assert List.last(capture.sources).status == :unavailable
   end
 
+  test "multi-variant session attributes remain raw and cannot authorize correlation" do
+    invalid = [%{"key" => "session.id", "value" => %{"stringValue" => "s", "intValue" => "42"}}]
+    span_bad = event("span-bad", span(%{"attributes" => invalid}))
+    span_bad = Map.put(span_bad, "private", "private-anyvalue")
+    resource_bad = resource_event("resource-bad", invalid)
+    valid_span = event("span-good")
+    valid_resource = resource_event("resource-good", session("s"))
+    events = [span_bad, resource_bad, valid_span, valid_resource]
+
+    for content <- [:retain, :drop] do
+      capture = enrich(prior(), client(fn _, _ -> page(events) end), content: content)
+      linked_ids = MapSet.new(capture.correlations, & &1.from_record_id)
+      linked = Enum.filter(capture.records, &MapSet.member?(linked_ids, &1.id))
+      assert Enum.map(linked, & &1.native_id) == ["span-good", "resource-good"]
+      assert List.last(capture.sources).status == :partial
+
+      for record <- Enum.filter(capture.records, &(&1.native_id in ["span-bad", "resource-bad"])) do
+        assert Enum.any?(
+                 capture.diagnostics,
+                 &(&1.record_id == record.id and &1.code == :unsupported_record)
+               )
+      end
+
+      if content == :retain do
+        assert Enum.map(tl(capture.records), & &1.payload) == events
+      else
+        refute Jason.encode!(Evidence.to_wire(capture)) =~ "private-anyvalue"
+        refute Jason.encode!(Evidence.to_wire(capture)) =~ "intValue"
+      end
+    end
+  end
+
   defp enrich(prior, client, opts \\ [], query \\ query()) do
     {:ok, options} = Options.new(Keyword.put_new(opts, :content, :retain))
     assert {:ok, capture} = CloudWatch.enrich(prior, query, options, client: client)
@@ -401,6 +433,16 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
         },
         overrides
       )
+
+  defp resource_event(id, attributes) do
+    event = event(id, span(%{"attributes" => []}))
+    message = Jason.decode!(event["message"])
+
+    message =
+      put_in(message, ["resourceSpans", Access.at(0), "resource"], %{"attributes" => attributes})
+
+    %{event | "message" => Jason.encode!(message)}
+  end
 
   defp event(id, span \\ span()),
     do: %{
