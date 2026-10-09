@@ -89,11 +89,18 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
     end
 
     {:ok, options} = Options.new([])
+    owner = self()
 
     assert {:error, _} =
              CloudWatch.enrich(%{prior() | session_id: "other"}, query(), options,
-               client: client(fn _, _ -> flunk("called") end)
+               client:
+                 client(fn _, _ ->
+                   send(owner, {:unexpected_transport, :invalid_query})
+                   {403, %{}}
+                 end)
              )
+
+    refute_received {:unexpected_transport, :invalid_query}
   end
 
   test "schema-gated session membership never invents parentage or native durations" do
@@ -191,12 +198,21 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
   end
 
   test "missing explicit credentials becomes unavailable without environment resolution" do
+    owner = self()
+
     {:ok, bare} =
-      CloudWatchClient.new(region: "us-east-1", transport: fn _ -> flunk("called") end)
+      CloudWatchClient.new(
+        region: "us-east-1",
+        transport: fn conn ->
+          send(owner, {:unexpected_transport, :missing_credentials})
+          aws_response(conn, 403, "{}")
+        end
+      )
 
     capture = enrich(prior(), bare)
     assert capture.records == prior().records
     assert List.last(capture.sources).status == :unavailable
+    refute_received {:unexpected_transport, :missing_credentials}
   end
 
   test "malformed OTLP containers stay raw without aborting valid sibling records" do
@@ -217,8 +233,16 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
   end
 
   test "a fitting prior remains intact when source metadata cannot fit" do
-    capture =
-      enrich(prior(), client(fn _, _ -> flunk("source should not open") end), max_bytes: 1_500)
+    owner = self()
+
+    transport =
+      client(fn _, _ ->
+        send(owner, {:unexpected_transport, :source_budget})
+        {403, %{}}
+      end)
+
+    capture = enrich(prior(), transport, max_bytes: 1_500)
+    refute_received {:unexpected_transport, :source_budget}
 
     assert capture.records == prior().records
     assert capture.sources == prior().sources
@@ -238,10 +262,18 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
     prior = prior()
     limit = byte_size(Jason.encode!(Evidence.to_wire(prior))) + 1
     {:ok, options} = Options.new(content: :retain, max_bytes: limit)
-    client = client(fn _, _ -> flunk("bounded before transport") end)
+    owner = self()
+
+    client =
+      client(fn _, _ ->
+        send(owner, {:unexpected_transport, :byte_budget})
+        {403, %{}}
+      end)
 
     assert {:error, %Evidence.Error{code: :bound_exceeded}} =
              CloudWatch.enrich(prior, query(), options, client: client)
+
+    refute_received {:unexpected_transport, :byte_budget}
   end
 
   test "malformed AWS JSON responses preserve prior evidence without exposing response bodies" do
