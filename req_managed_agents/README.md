@@ -297,8 +297,8 @@ timeout outside it, so leave margin rather than sizing to the millisecond.
 - `ReqManagedAgents.SSE` / `.Stream` — the Claude event stream.
 - `ReqManagedAgents.Providers.BedrockAgentCore.Client` / `.Converse` / `ReqManagedAgents.Provisioner` — Bedrock
   AgentCore wire client, Converse decoding, and Harness provisioning.
-- `ReqManagedAgents.Event` / `.Consolidate` — pure builders, classification, reconnect helpers.
-- `ReqManagedAgents.ToolSchema` — custom-tool schema construction.
+- `ReqManagedAgents.Providers.ClaudeManagedAgents.Event` / `.Consolidate` — pure builders, classification, reconnect helpers.
+- `ReqManagedAgents.ToolSchema` — neutral tool input schemas; `ReqManagedAgents.Providers.ClaudeManagedAgents.ToolSchema` — custom-tool definitions.
 - `ReqManagedAgents.Artifacts` / `.Artifact` / `.SessionInfo` — name-keyed session-artifact verbs over provider-native stores + the runtime identity handed to handlers.
 - `ReqManagedAgents.SessionResult` / `.TurnResult` / `.Usage` / `.ToolUse` / `.ToolResult` — the
   canonical result vocabulary shared by every provider.
@@ -520,7 +520,7 @@ id are given.
 
 The core is Jido-free. To use Jido Actions as tools, implement `handle_tool_call/3` by delegating
 to `Jido.Action.Tool.execute_action/3`, and derive the tool definitions with
-`Jido.Action.Tool.to_tool/1` (or `ReqManagedAgents.ToolSchema.to_custom_tool/3`). A dedicated
+`Jido.Action.Tool.to_tool/1` (or `ReqManagedAgents.Providers.ClaudeManagedAgents.ToolSchema.to_custom_tool/3`). A dedicated
 adapter package is planned.
 
 ## License

@@ -1,16 +1,13 @@
 defmodule ReqManagedAgents.Tools do
   @moduledoc false
-  # Shared local-tool execution for Session and run_to_completion. Always returns
-  # a `user.custom_tool_result` event; any failure becomes an `is_error` result so
-  # the session never hangs.
-  alias ReqManagedAgents.Event
+  alias ReqManagedAgents.ToolResult
 
   @type handler_fun ::
           (String.t(), map(), term() -> {:ok, String.t()} | {:error, String.t()})
           | (String.t(), map(), term(), ReqManagedAgents.SessionInfo.t() ->
                {:ok, String.t()} | {:error, String.t()})
 
-  @spec run(
+  @spec execute(
           module() | handler_fun(),
           String.t(),
           String.t(),
@@ -18,11 +15,11 @@ defmodule ReqManagedAgents.Tools do
           term(),
           ReqManagedAgents.SessionInfo.t(),
           map()
-        ) :: map()
-  def run(handler, id, name, input, context, info, meta \\ %{}) do
+        ) :: ToolResult.t()
+  def execute(handler, id, name, input, context, info, meta \\ %{}) do
     :telemetry.span([:req_managed_agents, :tool], Map.merge(meta, %{tool: name}), fn ->
-      event = do_run(handler, id, name, input, context, info)
-      {event, Map.merge(meta, %{tool: name, is_error: event["is_error"] == true})}
+      result = do_run(handler, id, name, input, context, info)
+      {result, Map.merge(meta, %{tool: name, is_error: result.is_error})}
     end)
   end
 
@@ -43,12 +40,12 @@ defmodule ReqManagedAgents.Tools do
       end
 
     case result do
-      {:ok, text} -> Event.custom_tool_result(id, to_string(text))
-      {:error, text} -> Event.custom_tool_result(id, to_string(text), is_error: true)
+      {:ok, text} -> %ToolResult{tool_use_id: id, text: to_string(text)}
+      {:error, text} -> %ToolResult{tool_use_id: id, text: to_string(text), is_error: true}
     end
   catch
     kind, reason ->
-      Event.custom_tool_result(id, "tool #{kind}: #{inspect(reason)}", is_error: true)
+      %ToolResult{tool_use_id: id, text: "tool #{kind}: #{inspect(reason)}", is_error: true}
   end
 
   # ensure_loaded first: a handler that exports ONLY the 4-arity form may not be

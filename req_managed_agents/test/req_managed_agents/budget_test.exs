@@ -2,6 +2,7 @@ defmodule ReqManagedAgents.BudgetTest do
   use ExUnit.Case, async: true
 
   alias ReqManagedAgents.Budget
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Budget, as: WireBudget
 
   describe "new/1" do
     test "stores only the cap; the type and currency the provider fixes are not fields" do
@@ -31,7 +32,7 @@ defmodule ReqManagedAgents.BudgetTest do
   test "to_wire/1 renders the amount as a whole-cent string" do
     {:ok, budget} = Budget.new(%{max_list_cost_cents: 5})
 
-    assert Budget.to_wire(budget) ==
+    assert WireBudget.to_wire(budget) ==
              %{type: "limit", max_list_cost: %{amount: "5", currency: "USD"}}
   end
 
@@ -48,7 +49,7 @@ defmodule ReqManagedAgents.BudgetTest do
         "extra" => 1
       }
 
-      assert Budget.confirmed?(budget, echo)
+      assert WireBudget.confirmed?(budget, echo)
     end
 
     test "false for nil, a different amount or a different currency", %{budget: budget} do
@@ -56,11 +57,11 @@ defmodule ReqManagedAgents.BudgetTest do
         %{"type" => "limit", "max_list_cost" => %{"amount" => amount, "currency" => currency}}
       end
 
-      refute Budget.confirmed?(budget, nil)
-      refute Budget.confirmed?(budget, limit.("124", "USD"))
-      refute Budget.confirmed?(budget, limit.("125", "EUR"))
-      refute Budget.confirmed?(budget, Map.put(limit.("125", "USD"), "type", "other"))
-      refute Budget.confirmed?(budget, limit.(125, "USD"))
+      refute WireBudget.confirmed?(budget, nil)
+      refute WireBudget.confirmed?(budget, limit.("124", "USD"))
+      refute WireBudget.confirmed?(budget, limit.("125", "EUR"))
+      refute WireBudget.confirmed?(budget, Map.put(limit.("125", "USD"), "type", "other"))
+      refute WireBudget.confirmed?(budget, limit.(125, "USD"))
     end
   end
 end

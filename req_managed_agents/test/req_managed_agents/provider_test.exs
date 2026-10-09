@@ -20,7 +20,7 @@ defmodule ReqManagedAgents.ProviderTest do
     end
   end
 
-  test "result_of/2 extracts a %ToolResult{} from a Tools.run wire event" do
+  test "result_of/2 extracts a %ToolResult{} from a legacy tool-result wire event" do
     wire = %{
       "type" => "user.custom_tool_result",
       "custom_tool_use_id" => "tu_1",

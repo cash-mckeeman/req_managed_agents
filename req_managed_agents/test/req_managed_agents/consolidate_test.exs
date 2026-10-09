@@ -1,6 +1,6 @@
 defmodule ReqManagedAgents.ConsolidateTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Consolidate
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Consolidate
 
   test "dedupe/2 returns only unseen events and updates the seen set" do
     seen = MapSet.new(["e1"])

@@ -1,6 +1,6 @@
 defmodule ReqManagedAgents.EventTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Event
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Event
 
   test "user_message/1 builds a text user.message" do
     assert Event.user_message("hi") == %{

@@ -153,7 +153,7 @@ defmodule ReqManagedAgents.Provider do
   names don't always land in the same batch). When that happens, `Session` calls
   this callback instead of driving an empty resume — implement it the same way
   `reconnect/3` recovers unanswered tool calls across a stream drop (e.g. via
-  `ReqManagedAgents.Consolidate.unanswered_tool_uses/1`). Return `[]` when nothing
+  `ReqManagedAgents.Providers.ClaudeManagedAgents.Consolidate.unanswered_tool_uses/1`). Return `[]` when nothing
   is recoverable; `Session` then surfaces a loud protocol-state error rather than
   ever POSTing an empty events list.
 
@@ -176,7 +176,7 @@ defmodule ReqManagedAgents.Provider do
                       pending_tool_uses: 1
 
   @doc """
-  Extract a canonical `%ToolResult{}` from a `Tools.run/7` wire event
+  Legacy wire adapter: extract a canonical `%ToolResult{}` from a Claude Managed Agents tool-result event
   (`user.custom_tool_result` shape), given the tool-use id it answers.
   """
   @spec result_of(String.t(), event()) :: ReqManagedAgents.ToolResult.t()
