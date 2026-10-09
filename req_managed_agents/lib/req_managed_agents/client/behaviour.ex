@@ -36,4 +36,6 @@ defmodule ReqManagedAgents.Client.Behaviour do
   @callback attach_file_to_session(Client.t(), String.t(), map()) :: result()
   @callback list_files(Client.t(), keyword()) :: result()
   @callback delete_file(Client.t(), String.t()) :: result()
+
+  @optional_callbacks list_threads: 3, list_thread_events: 4
 end
