@@ -1,6 +1,6 @@
 defmodule ReqManagedAgents.ProfileTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Profile
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Profile
 
   describe ":anthropic (identity)" do
     test "tool_use name/input read from top-level fields" do

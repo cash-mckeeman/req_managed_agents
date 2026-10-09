@@ -19,12 +19,11 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.Agent.Spec
-  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, Stream}
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, Consolidate, Event, Stream}
 
   alias ReqManagedAgents.{
     Budget,
     Environment,
-    Event,
     Outcome,
     ToolUse,
     TurnResult,
@@ -179,7 +178,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   end
 
   defp budget_body(nil), do: %{}
-  defp budget_body(%Budget{} = budget), do: %{budget: Budget.to_wire(budget)}
+
+  defp budget_body(%Budget{} = budget),
+    do: %{budget: ReqManagedAgents.Providers.ClaudeManagedAgents.Budget.to_wire(budget)}
 
   # Fail closed: a requested budget the provider did not echo back means the session is
   # uncapped, so it is archived (best effort, as provision/2 rolls back an orphaned agent)
@@ -190,7 +191,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   defp confirm_budget(client, sid, %Budget{} = budget, created) do
     echoed = Map.get(created, "budget")
 
-    if Budget.confirmed?(budget, echoed) do
+    if ReqManagedAgents.Providers.ClaudeManagedAgents.Budget.confirmed?(budget, echoed) do
       :ok
     else
       archived = archive_once(client, sid)
@@ -339,7 +340,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     # recover any tool call left unanswered across the drop (the Session re-runs + resumes those).
     case Client.list_all_events(conn.client, conn.session_id) do
       {:ok, past} ->
-        {_fresh, seen} = ReqManagedAgents.Consolidate.dedupe(past, seen)
+        {_fresh, seen} =
+          Consolidate.dedupe(past, seen)
+
         pending = pending_tool_uses(past)
 
         ref = make_ref()
@@ -364,7 +367,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   # re-run + resume them instead of ever driving an empty resume (issue #61).
   def pending_tool_uses(events) do
     events
-    |> ReqManagedAgents.Consolidate.unanswered_tool_uses()
+    |> Consolidate.unanswered_tool_uses()
     |> Enum.map(fn e -> %ToolUse{id: e["id"], name: e["name"], input: e["input"]} end)
   end
 

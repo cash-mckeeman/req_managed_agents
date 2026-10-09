@@ -59,31 +59,12 @@ defmodule ReqManagedAgents.Budget do
 
   def new(_other), do: {:error, :invalid_budget}
 
-  @doc """
-  Render the budget as the provider's create-session `budget` field.
-
-  The amount is a whole-cent string, which is the provider's wire form.
-  """
+  @doc "Render the Claude Managed Agents budget field."
   @spec to_wire(t()) :: map()
-  def to_wire(%__MODULE__{max_list_cost_cents: cents}) do
-    %{
-      type: "limit",
-      max_list_cost: %{amount: Integer.to_string(cents), currency: "USD"}
-    }
-  end
+  defdelegate to_wire(budget), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Budget
 
-  @doc """
-  Whether a decoded provider `budget` field carries exactly this budget.
-
-  Fields beyond the three the budget defines are ignored; a missing, `nil` or differing
-  value is not confirmation.
-  """
+  @doc "Check the Claude Managed Agents create-response budget echo."
   @spec confirmed?(t(), term()) :: boolean()
-  def confirmed?(%__MODULE__{max_list_cost_cents: cents}, %{
-        "type" => "limit",
-        "max_list_cost" => %{"amount" => amount, "currency" => "USD"}
-      }),
-      do: amount == Integer.to_string(cents)
-
-  def confirmed?(%__MODULE__{}, _echoed), do: false
+  defdelegate confirmed?(budget, echoed),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Budget
 end

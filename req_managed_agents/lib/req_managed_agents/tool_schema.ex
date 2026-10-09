@@ -1,8 +1,14 @@
 defmodule ReqManagedAgents.ToolSchema do
-  @moduledoc "Jido.Action NimbleOptions schema → Anthropic custom-tool definition."
+  @moduledoc "JSON Schema construction from NimbleOptions tool input schemas."
 
+  @doc "Compatibility entry point for the Claude Managed Agents custom-tool wrapper."
   @spec to_custom_tool(String.t(), String.t(), keyword()) :: map()
-  def to_custom_tool(name, description, jido_schema) do
+  defdelegate to_custom_tool(name, description, schema),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.ToolSchema
+
+  @doc "Build an object input schema, preserving required fields and property descriptions."
+  @spec input_schema(keyword()) :: map()
+  def input_schema(jido_schema) do
     props = Map.new(jido_schema, fn {key, spec} -> {to_string(key), property(spec)} end)
 
     required =
@@ -10,12 +16,7 @@ defmodule ReqManagedAgents.ToolSchema do
       |> Enum.filter(fn {_k, spec} -> Keyword.get(spec, :required, false) end)
       |> Enum.map(fn {k, _} -> to_string(k) end)
 
-    %{
-      "type" => "custom",
-      "name" => name,
-      "description" => description,
-      "input_schema" => %{"type" => "object", "properties" => props, "required" => required}
-    }
+    %{"type" => "object", "properties" => props, "required" => required}
   end
 
   defp property(spec) do

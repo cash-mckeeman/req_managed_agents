@@ -63,7 +63,6 @@ defmodule ReqManagedAgents.Session do
 
   alias ReqManagedAgents.{
     Outcome,
-    Provider,
     Session.State,
     SessionInfo,
     SessionResult,
@@ -643,8 +642,7 @@ defmodule ReqManagedAgents.Session do
     custom_tool_uses
     |> Task.async_stream(
       fn %ToolUse{id: id, name: name, input: input} ->
-        wire = Tools.run(s.handler, id, name, input, s.context, s.info, s.meta)
-        Provider.result_of(id, wire)
+        Tools.execute(s.handler, id, name, input, s.context, s.info, s.meta)
       end,
       max_concurrency: @max_tool_concurrency,
       timeout: :infinity,

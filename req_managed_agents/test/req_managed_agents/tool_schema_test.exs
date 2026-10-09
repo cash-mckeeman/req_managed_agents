@@ -1,6 +1,29 @@
 defmodule ReqManagedAgents.ToolSchemaTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.ToolSchema
+  alias ReqManagedAgents.Providers.BedrockAgentCore.Converse
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.ToolSchema
+
+  test "neutral schema is shared by both wire wrappers" do
+    schema = [count: [type: :integer, required: true], flag: [type: :boolean]]
+
+    expected = %{
+      "type" => "object",
+      "properties" => %{"count" => %{"type" => "integer"}, "flag" => %{"type" => "boolean"}},
+      "required" => ["count"]
+    }
+
+    assert ReqManagedAgents.ToolSchema.input_schema(schema) == expected
+    assert ToolSchema.to_custom_tool("x", "desc", schema)["input_schema"] == expected
+
+    assert ReqManagedAgents.ToolSchema.to_custom_tool("x", "desc", schema)["input_schema"] ==
+             expected
+
+    assert Converse.inline_function(
+             "x",
+             "desc",
+             schema
+           )["config"]["inlineFunction"]["inputSchema"] == expected
+  end
 
   test "converts a {name, jido_schema} pair to an Anthropic custom-tool def" do
     jido_schema = [

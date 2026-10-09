@@ -17,15 +17,13 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.Converse do
 
   @spec inline_function(String.t(), String.t(), keyword()) :: map()
   def inline_function(name, description, jido_schema) do
-    custom = ToolSchema.to_custom_tool(name, description, jido_schema)
-
     %{
       "type" => "inline_function",
       "name" => name,
       "config" => %{
         "inlineFunction" => %{
           "description" => description,
-          "inputSchema" => custom["input_schema"]
+          "inputSchema" => ToolSchema.input_schema(jido_schema)
         }
       }
     }
