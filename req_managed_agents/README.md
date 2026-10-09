@@ -294,7 +294,7 @@ timeout outside it, so leave margin rather than sizing to the millisecond.
 - `ReqManagedAgents.Provider` — the behaviour every backend implements (invocation + `normalize/1`).
 - `ReqManagedAgents.Session` — the unified, supervised, reconnecting loop driven by your `Handler`.
 - `ReqManagedAgents.Providers.ClaudeManagedAgents.Client` — Claude control-plane HTTP (agents, sessions, events, files).
-- `ReqManagedAgents.SSE` / `.Stream` — the Claude event stream.
+- `ReqManagedAgents.SSE` / `ReqManagedAgents.Providers.ClaudeManagedAgents.Stream` — the Claude event stream.
 - `ReqManagedAgents.Providers.BedrockAgentCore.Client` / `.Converse` / `ReqManagedAgents.Provisioner` — Bedrock
   AgentCore wire client, Converse decoding, and Harness provisioning.
 - `ReqManagedAgents.Providers.ClaudeManagedAgents.Event` / `.Consolidate` — pure builders, classification, reconnect helpers.
