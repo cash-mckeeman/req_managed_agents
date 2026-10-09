@@ -468,6 +468,48 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.HistoryTest do
     assert {:error, _} = Request.new(client: client, prior: %{prior | provider: :agentcore})
   end
 
+  test "published constructor clients preserve every field through history request conversion" do
+    owner = self()
+
+    plug = fn conn ->
+      send(
+        owner,
+        {:history_request, conn.request_path, Plug.Conn.get_req_header(conn, "x-api-key")}
+      )
+
+      Req.Test.json(conn, %{"data" => [], "next_page" => nil})
+    end
+
+    options = [
+      api_key: "legacy-key",
+      base_url: "https://history.invalid",
+      beta: "history-beta",
+      files_beta: "files-beta",
+      anthropic_version: "version",
+      receive_timeout: 4321,
+      req_options: [plug: plug, retry: false],
+      profile: :jido
+    ]
+
+    legacy = ReqManagedAgents.new(options)
+    assert %ReqManagedAgents.Client{} = legacy
+    canonical = Client.new(options)
+
+    for input <- [legacy, canonical] do
+      assert {:ok, request} = Request.new(client: input)
+      assert %Client{} = request.client
+      assert Map.from_struct(request.client) == Map.from_struct(input)
+      assert {:ok, capture} = History.fetch("session", request)
+      assert capture.session_id == "session"
+      assert_receive {:history_request, "/v1/sessions/session/events", ["legacy-key"]}
+      assert_receive {:history_request, "/v1/sessions/session/threads", ["legacy-key"]}
+    end
+
+    for input <- [%{legacy | api_key: ""}, Map.from_struct(legacy), %URI{}] do
+      assert {:error, %Evidence.Error{code: :invalid_options}} = Request.new(client: input)
+    end
+  end
+
   test "configuration rejects malformed clients, options and prior captures" do
     for opts <- [
           [],

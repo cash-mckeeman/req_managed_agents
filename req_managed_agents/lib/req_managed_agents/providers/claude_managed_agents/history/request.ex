@@ -8,7 +8,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request do
   @type t :: %__MODULE__{client: Client.t(), options: Options.t(), prior: Capture.t() | nil}
 
   @doc """
-  Accepts an explicit `:client`, `:options` (an Options struct or keyword list),
+  Accepts a canonical or legacy Claude `:client`, `:options` (an Options struct or keyword list),
   and optional `:prior` capture. Prior evidence must belong to Claude; fetch
   additionally requires its session identity to match. Content defaults to drop
   for both prior and newly retrieved records.
@@ -25,7 +25,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request do
     with true <- Keyword.keyword?(opts),
          true <- Enum.all?(Keyword.keys(opts), &(&1 in [:client, :options, :prior])),
          true <- length(opts) == length(Enum.uniq(Keyword.keys(opts))),
-         %Client{} = client <- Keyword.get(opts, :client),
+         %Client{} = client <- canonical_client(Keyword.get(opts, :client)),
          true <- valid_client?(client),
          {:ok, options} <- Options.new(Keyword.get(opts, :options, [])),
          {:ok, prior} <- prior(Keyword.get(opts, :prior)) do
@@ -36,6 +36,13 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request do
   end
 
   def new(_), do: Error.error(:invalid_options)
+
+  defp canonical_client(%Client{} = client), do: client
+
+  defp canonical_client(%ReqManagedAgents.Client{} = client),
+    do: struct!(Client, Map.from_struct(client))
+
+  defp canonical_client(_), do: nil
 
   defp valid_client?(%Client{} = client) do
     is_binary(client.api_key) and client.api_key != "" and is_binary(client.base_url) and
