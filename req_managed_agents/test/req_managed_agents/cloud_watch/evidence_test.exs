@@ -287,17 +287,18 @@ defmodule ReqManagedAgents.CloudWatch.EvidenceTest do
     end
   end
 
-  test "caller cancellation terminates blocked credential and transport workers" do
-    owner = self()
+  for stage <- [:credentials, :transport] do
+    @stage stage
+    test "caller cancellation terminates blocked #{@stage} worker before deadline" do
+      owner = self()
 
-    for stage <- [:credentials, :transport] do
       block = fn ->
         send(owner, {:blocked_worker, self()})
         receive do: (:finish -> {:error, :synthetic})
       end
 
       client =
-        case stage do
+        case @stage do
           :credentials ->
             {:ok, client} = Client.new(region: "us-east-1", credentials: block)
             client
@@ -306,13 +307,13 @@ defmodule ReqManagedAgents.CloudWatch.EvidenceTest do
             client(fn _, _ -> block.() end)
         end
 
-      caller = spawn(fn -> enrich(prior(), client, timeout_ms: 100) end)
+      caller = spawn(fn -> enrich(prior(), client, timeout_ms: 5_000) end)
       on_exit(fn -> Process.exit(caller, :kill) end)
       assert_receive {:blocked_worker, worker}, 1_000
       on_exit(fn -> Process.exit(worker, :kill) end)
       monitor = Process.monitor(worker)
       Process.exit(caller, :kill)
-      assert_receive {:DOWN, ^monitor, :process, ^worker, _}, 500
+      assert_receive {:DOWN, ^monitor, :process, ^worker, _}, 1_000
       refute Process.alive?(worker)
     end
   end
