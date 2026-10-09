@@ -1,4 +1,4 @@
-defmodule ReqManagedAgents.Evidence.Claude do
+defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.History do
   @moduledoc """
   Bounded, GET-only retrieval of persisted Claude session and thread evidence.
 
@@ -15,15 +15,15 @@ defmodule ReqManagedAgents.Evidence.Claude do
   Unvisited child histories leave enumeration coverage partial. Historical events
   have no inferred local invocation or retry-attempt identity.
   """
-  alias ReqManagedAgents.Client
   alias ReqManagedAgents.Evidence
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request
 
   alias ReqManagedAgents.Evidence.{
     Capture,
     Content,
     Diagnostic,
     Error,
-    Fetch,
     NativeIdentity,
     Record,
     Source,
@@ -46,7 +46,7 @@ defmodule ReqManagedAgents.Evidence.Claude do
     ]
 
     @type t :: %__MODULE__{
-            config: Fetch.t(),
+            config: Request.t(),
             capture: Capture.t(),
             deadline: integer(),
             pages: non_neg_integer(),
@@ -59,10 +59,10 @@ defmodule ReqManagedAgents.Evidence.Claude do
   end
 
   @doc "Collects one session, preserving a matching prior capture's identities and references."
-  @spec fetch(String.t(), Fetch.t()) :: {:ok, Capture.t()} | {:error, Error.t()}
-  def fetch(session_id, %Fetch{} = input) do
+  @spec fetch(String.t(), Request.t()) :: {:ok, Capture.t()} | {:error, Error.t()}
+  def fetch(session_id, %Request{} = input) do
     with {:ok, session_id} <- Validation.id(session_id),
-         {:ok, config} <- Fetch.new(input),
+         {:ok, config} <- Request.new(input),
          true <- config.prior == nil or config.prior.session_id == session_id,
          {:ok, config} <- prepare_prior(config) do
       config
@@ -78,15 +78,15 @@ defmodule ReqManagedAgents.Evidence.Claude do
 
   def fetch(_, _), do: Error.error(:invalid_input)
 
-  defp prepare_prior(%Fetch{prior: nil} = config), do: {:ok, config}
+  defp prepare_prior(%Request{prior: nil} = config), do: {:ok, config}
 
-  defp prepare_prior(%Fetch{} = config) do
+  defp prepare_prior(%Request{} = config) do
     with {:ok, capture} <- Capture.new(config.prior, config.options) do
       {:ok, %{config | prior: capture}}
     end
   end
 
-  defp initialize(%Fetch{} = config, session_id) do
+  defp initialize(%Request{} = config, session_id) do
     now = DateTime.utc_now()
 
     capture =
@@ -368,7 +368,12 @@ defmodule ReqManagedAgents.Evidence.Claude do
     )
   end
 
-  defp encoded_size(value), do: value |> Validation.wire() |> Jason.encode!() |> byte_size()
+  defp encoded_size(value) do
+    value
+    |> Validation.wire()
+    |> Jason.encode!()
+    |> byte_size()
+  end
 
   defp native_id(payload) do
     case Validation.id(Map.get(payload, "id")) do

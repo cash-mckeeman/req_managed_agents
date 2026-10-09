@@ -1,7 +1,7 @@
-defmodule ReqManagedAgents.Evidence.Fetch do
+defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request do
   @moduledoc "Validated inputs for bounded Claude history retrieval."
-  alias ReqManagedAgents.Client
   alias ReqManagedAgents.Evidence.{Capture, Error, Options}
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
   @enforce_keys [:client, :options]
   defstruct [:client, :options, :prior]
@@ -14,7 +14,12 @@ defmodule ReqManagedAgents.Evidence.Fetch do
   for both prior and newly retrieved records.
   """
   @spec new(keyword() | t()) :: {:ok, t()} | {:error, Error.t()}
-  def new(%__MODULE__{} = input), do: input |> Map.from_struct() |> Map.to_list() |> new()
+  def new(%__MODULE__{} = input) do
+    input
+    |> Map.from_struct()
+    |> Map.to_list()
+    |> new()
+  end
 
   def new(opts) when is_list(opts) do
     with true <- Keyword.keyword?(opts),
