@@ -3,7 +3,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   `ReqManagedAgents.Provider` for the Bedrock AgentCore backend — `:request_response` mode.
   Each turn is one `InvokeHarness` call; resume re-sends the assistant `toolUse` + user
   `toolResult` delta (the harness does not persist the uncommitted tool-use turn). Composes
-  the existing `AgentCore.{Client, Converse}` modules. Decoded events are additionally
+  the provider's `Client` and `Converse` modules. Decoded events are additionally
   delivered live to the session as `{:provider_event, ev}` messages while a turn streams.
   `provision/2`'s `opts[:environment]` carries an `Environment.Spec` (or a map coerced via
   `Environment.Spec.new/1`, or `nil`). Its opaque `config` is handed to CreateHarness's
@@ -19,8 +19,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   require Logger
 
   alias ReqManagedAgents.Agent.Spec
-  alias ReqManagedAgents.AgentCore.{Client, Converse}
   alias ReqManagedAgents.Environment
+  alias ReqManagedAgents.Providers.BedrockAgentCore.{Client, Converse}
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatus
   alias ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget

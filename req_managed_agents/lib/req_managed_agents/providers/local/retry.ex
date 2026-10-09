@@ -1,4 +1,4 @@
-defmodule ReqManagedAgents.Local.Retry do
+defmodule ReqManagedAgents.Providers.Local.Retry do
   @moduledoc false
   # Transient-error retry for the chat_fun (HTTP 408/≥500 + transport; exponential
   # backoff). Relocated from an internal agent runner's Core.Runner.Retry.

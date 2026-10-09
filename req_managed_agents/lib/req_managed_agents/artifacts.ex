@@ -8,7 +8,7 @@ defmodule ReqManagedAgents.Artifacts do
   constructor:
 
     * `ReqManagedAgents.Artifacts.ClaudeFiles.store/2` — Anthropic Files API
-    * `ReqManagedAgents.Artifacts.AgentCoreSessionStorage.store/4` — AgentCore
+    * `ReqManagedAgents.Providers.BedrockAgentCore.Artifacts.store/4` — AgentCore
       `sessionStorage` mount, command-backed (report-scale artifacts)
 
   Error normalization across impls: a missing name is `{:error, :not_found}`;

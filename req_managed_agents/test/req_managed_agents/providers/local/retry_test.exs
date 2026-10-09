@@ -1,6 +1,6 @@
-defmodule ReqManagedAgents.Local.RetryTest do
+defmodule ReqManagedAgents.Providers.Local.RetryTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Local.Retry
+  alias ReqManagedAgents.Providers.Local.Retry
 
   defp flaky(fails, reason, agent) do
     fn _request ->

@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.Providers.LocalGuardsTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Local.Directives
   alias ReqManagedAgents.Providers.Local
+  alias ReqManagedAgents.Providers.Local.Directives
   alias ReqManagedAgents.{ToolResult, ToolUse, TurnResult}
 
   @spec_map %{

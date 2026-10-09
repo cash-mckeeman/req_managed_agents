@@ -1,6 +1,6 @@
-defmodule ReqManagedAgents.AgentCore.ClientStreamTest do
+defmodule ReqManagedAgents.Providers.BedrockAgentCore.ClientStreamTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.AgentCore.Client
+  alias ReqManagedAgents.Providers.BedrockAgentCore.Client
   import ReqManagedAgents.EventStreamFrames, only: [frame: 1]
 
   @creds %{

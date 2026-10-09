@@ -1,4 +1,4 @@
-defmodule ReqManagedAgents.Local.Deps do
+defmodule ReqManagedAgents.Providers.Local.Deps do
   @moduledoc false
 
   # req_llm is `optional: true` in mix.exs so consumers that inject their own

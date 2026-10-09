@@ -88,7 +88,7 @@ list of keys read anywhere in the library:
 | AWS region | `:aws_region` | `:aws_region` | `AWS_REGION`, then `AWS_DEFAULT_REGION` | `"us-east-1"` |
 | AWS session token | `:aws_session_token` | `:aws_session_token` | `AWS_SESSION_TOKEN` | `nil` |
 
-`Providers.ClaudeManagedAgents.Client.new/1` resolves the Anthropic keys; `AgentCore.SigV4.from_env/1`
+`Providers.ClaudeManagedAgents.Client.new/1` resolves the Anthropic keys; `AWS.SigV4.from_env/1`
 resolves the AWS keys (it still works called with no args — `opts` just gives
 you an override point without touching the environment).
 
@@ -295,7 +295,7 @@ timeout outside it, so leave margin rather than sizing to the millisecond.
 - `ReqManagedAgents.Session` — the unified, supervised, reconnecting loop driven by your `Handler`.
 - `ReqManagedAgents.Providers.ClaudeManagedAgents.Client` — Claude control-plane HTTP (agents, sessions, events, files).
 - `ReqManagedAgents.SSE` / `.Stream` — the Claude event stream.
-- `ReqManagedAgents.AgentCore.Client` / `.Converse` / `ReqManagedAgents.Provisioner` — Bedrock
+- `ReqManagedAgents.Providers.BedrockAgentCore.Client` / `.Converse` / `ReqManagedAgents.Provisioner` — Bedrock
   AgentCore wire client, Converse decoding, and Harness provisioning.
 - `ReqManagedAgents.Event` / `.Consolidate` — pure builders, classification, reconnect helpers.
 - `ReqManagedAgents.ToolSchema` — custom-tool schema construction.
@@ -351,7 +351,7 @@ session-scoped:
 
 ```elixir
 alias ReqManagedAgents.Artifacts
-alias ReqManagedAgents.Artifacts.AgentCoreSessionStorage
+alias ReqManagedAgents.Providers.BedrockAgentCore.Artifacts, as: AgentCoreSessionStorage
 alias ReqManagedAgents.Providers.ClaudeManagedAgents.Artifacts, as: ClaudeFiles
 
 # Claude Managed Agents — the Files API, scoped to one session
@@ -373,7 +373,7 @@ OWN session and fetch what the agent just wrote.
 The parity story, honestly: Anthropic offers a provider-hosted blob store (zero infra;
 bytes on Anthropic); AWS mounts **your** storage into the microVM (`sessionStorage`
 needs nothing; EFS/S3 mounts need VPC mode) plus direct shell access
-(`AgentCore.Client.invoke_agent_runtime_command/2` — no model loop, no token cost).
+(`Providers.BedrockAgentCore.Client.invoke_agent_runtime_command/2` — no model loop, no token cost).
 The `sessionStorage` store handles report-scale artifacts (bytes transit the command
 stream as Base64); an S3-mount store (host side = plain S3) is designed for 0.4.
 Declare mounts via the `:environment` provisioning option (an `Environment.Spec`; its

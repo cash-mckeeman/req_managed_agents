@@ -40,8 +40,9 @@ defmodule Mix.Tasks.Rma.Capture do
   """
   use Mix.Task
 
-  alias ReqManagedAgents.AgentCore.{Client, SigV4}
+  alias ReqManagedAgents.AWS.SigV4
   alias ReqManagedAgents.Conformance.Redaction
+  alias ReqManagedAgents.Providers.BedrockAgentCore.Client
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client, as: CMAClient
 
   @impl Mix.Task

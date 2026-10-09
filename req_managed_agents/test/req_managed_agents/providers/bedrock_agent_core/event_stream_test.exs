@@ -1,6 +1,6 @@
-defmodule ReqManagedAgents.AgentCore.EventStreamTest do
+defmodule ReqManagedAgents.Providers.BedrockAgentCore.EventStreamTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.AgentCore.EventStream
+  alias ReqManagedAgents.Providers.BedrockAgentCore.EventStream
 
   # Build one well-formed vnd.amazon.eventstream frame carrying a JSON payload.
   defp frame(payload_json) do
