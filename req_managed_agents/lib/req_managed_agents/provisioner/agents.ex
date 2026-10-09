@@ -10,7 +10,7 @@ defmodule ReqManagedAgents.Provisioner.Agents do
   """
   require Logger
   alias ReqManagedAgents.Agent.{Handle, Spec}
-  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Provisioning
   alias ReqManagedAgents.Provisioner
   alias ReqManagedAgents.Provisioner.Name
   alias ReqManagedAgents.Provisioner.Name.Policy
@@ -71,12 +71,12 @@ defmodule ReqManagedAgents.Provisioner.Agents do
     create_fun =
       opts[:create_fun] ||
         fn body ->
-          Client.create_agent(client, body)
+          Provisioning.create_agent(client, body)
         end
 
     list_fun =
       opts[:list_fun] ||
-        fn -> Client.list_agents(client, %{}) end
+        fn -> Provisioning.list_agents(client) end
 
     with {:ok, stored} <- store_get(smod, sopts, key),
          {:ok, handle} <- normalize_or_miss(stored) do
@@ -96,7 +96,7 @@ defmodule ReqManagedAgents.Provisioner.Agents do
   end
 
   defp build(create_fun, list_fun, %Spec{} = spec, name, digest) do
-    body = %{name: name, model: spec.model_config, system: spec.system_prompt, tools: spec.tools}
+    body = Provisioning.agent_body(spec, name)
 
     case create_fun.(body) do
       {:ok, %{"id" => id}} -> {:ok, Handle.new(%{agent_id: id, name: name, digest: digest})}
@@ -207,12 +207,12 @@ defmodule ReqManagedAgents.Provisioner.Agents do
 
     list_fun =
       opts[:list_fun] ||
-        fn -> Client.list_agents(client, %{}) end
+        fn -> Provisioning.list_agents(client) end
 
     archive_fun =
       opts[:archive_fun] ||
         fn id ->
-          Client.archive_agent(client, id)
+          Provisioning.archive_agent(client, id)
         end
 
     tagged =

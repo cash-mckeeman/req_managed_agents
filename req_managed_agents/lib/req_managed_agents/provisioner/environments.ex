@@ -10,7 +10,7 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   """
   require Logger
   alias ReqManagedAgents.Environment
-  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Provisioning
   alias ReqManagedAgents.Provisioner
   alias ReqManagedAgents.Provisioner.Environment.Handle
   alias ReqManagedAgents.Provisioner.Runtimes
@@ -79,13 +79,13 @@ defmodule ReqManagedAgents.Provisioner.Environments do
     create_fun =
       opts[:create_fun] ||
         fn body ->
-          Client.create_environment(client, body)
+          Provisioning.create_environment(client, body)
         end
 
     list_fun =
       opts[:list_fun] ||
         fn ->
-          Client.list_environments(client, %{})
+          Provisioning.list_environments(client)
         end
 
     with {:ok, stored} <- store_get(smod, sopts, key),
@@ -183,13 +183,13 @@ defmodule ReqManagedAgents.Provisioner.Environments do
     list_fun =
       opts[:list_fun] ||
         fn ->
-          Client.list_environments(client, %{})
+          Provisioning.list_environments(client)
         end
 
     archive_fun =
       opts[:archive_fun] ||
         fn id ->
-          Client.archive_environment(client, id)
+          Provisioning.archive_environment(client, id)
         end
 
     tagged =
@@ -269,7 +269,7 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   defp to_digest(d) when is_binary(d), do: d
 
   defp build(create_fun, list_fun, %Environment.Spec{} = env, name, digest) do
-    body = %{name: name, config: wire_config(env)}
+    body = %{name: name, config: Provisioning.environment_config(env)}
 
     case create_fun.(body) do
       {:ok, %{"id" => id}} ->
@@ -294,40 +294,6 @@ defmodule ReqManagedAgents.Provisioner.Environments do
         true -> {:error, {:environment_name_conflict, name}}
       end
     end
-  end
-
-  # `config` is provider-verbatim and opaque beyond hashing — `runtimes` lives
-  # on the struct, never inside `config`, so it can never leak to the wire
-  # (library vocabulary — realized client-side via the bootstrap, already
-  # covered by the digest; providers must not receive keys they can't know).
-  # When runtimes are declared with `:limited`/`"limited"` networking, required
-  # runtime hosts are merged into `config.networking.allowed_hosts` (deduped,
-  # order preserved).
-  defp wire_config(%Environment.Spec{runtimes: runtimes, config: config}) do
-    networking = config[:networking]
-
-    if runtimes != [] and limited_networking?(networking) do
-      merge_runtime_hosts(config, runtimes, networking)
-    else
-      config
-    end
-  end
-
-  defp limited_networking?(%{type: type}) when type in [:limited, "limited"], do: true
-  defp limited_networking?(%{"type" => type}) when type in [:limited, "limited"], do: true
-  defp limited_networking?(_), do: false
-
-  defp merge_runtime_hosts(config, runtimes, networking) do
-    required = Runtimes.required_hosts(runtimes)
-
-    existing =
-      Map.get(networking, :allowed_hosts) || Map.get(networking, "allowed_hosts") || []
-
-    merged = Enum.uniq(existing ++ required)
-
-    # Write back under the key form the networking map already uses.
-    hosts_key = if Map.has_key?(networking, "type"), do: "allowed_hosts", else: :allowed_hosts
-    Map.put(config, :networking, Map.put(networking, hosts_key, merged))
   end
 
   # Store.File round-trips handles through JSON (string keys) — Handle.new/1
