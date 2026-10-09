@@ -24,7 +24,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Stream do
   `:finch` (Finch pool name; default `ReqManagedAgents.StreamFinch`),
   `:receive_timeout` (staleness guard; default 30 minutes).
   """
-  @spec stream(Client.t(), String.t(), pid(), keyword()) :: :ok
+  @spec stream(Client.t() | ReqManagedAgents.Client.t(), String.t(), pid(), keyword()) :: :ok
   def stream(client, session_id, subscriber, opts \\ [])
 
   def stream(%ReqManagedAgents.Client{} = client, session_id, subscriber, opts),
