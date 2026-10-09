@@ -225,7 +225,7 @@ defmodule ReqManagedAgents.Evidence.CloudWatch do
           }
       }
     else
-      pages(%{state | bytes: state.bytes + reservation}, nil, MapSet.new())
+      pages(%{state | bytes: state.bytes + reservation}, nil, %{})
     end
   end
 
@@ -272,8 +272,8 @@ defmodule ReqManagedAgents.Evidence.CloudWatch do
   defp continue(state, cursor, seen) when is_binary(cursor) do
     cond do
       String.trim(cursor) == "" -> gap(state, :incomplete_retrieval)
-      MapSet.member?(seen, cursor) -> gap(state, :cursor_cycle)
-      true -> pages(state, cursor, MapSet.put(seen, cursor))
+      Map.has_key?(seen, cursor) -> gap(state, :cursor_cycle)
+      true -> pages(state, cursor, Map.put(seen, cursor, true))
     end
   end
 
