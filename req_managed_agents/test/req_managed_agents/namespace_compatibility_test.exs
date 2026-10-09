@@ -5,6 +5,32 @@ defmodule ReqManagedAgents.NamespaceCompatibilityTest do
   alias ReqManagedAgents.Providers.ClaudeManagedAgents
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Artifacts, Client, Stream}
 
+  @old_callbacks [
+    create_agent: 2,
+    get_agent: 2,
+    update_agent: 3,
+    list_agents: 2,
+    create_environment: 2,
+    get_environment: 2,
+    list_environments: 2,
+    archive_agent: 2,
+    archive_environment: 2,
+    archive_session: 2,
+    create_session: 2,
+    get_session: 2,
+    list_sessions: 2,
+    delete_session: 2,
+    send_events: 3,
+    send_event: 3,
+    list_events: 3,
+    list_all_events: 3,
+    upload_file: 2,
+    download_file: 2,
+    attach_file_to_session: 3,
+    list_files: 2,
+    delete_file: 2
+  ]
+
   defmodule OldBehaviourClient do
     @behaviour ReqManagedAgents.Client.Behaviour
     for {name, arity} <- ReqManagedAgents.Client.Behaviour.behaviour_info(:callbacks) do
@@ -17,6 +43,34 @@ defmodule ReqManagedAgents.NamespaceCompatibilityTest do
         {:error, :injected_failure}
       end
     end
+  end
+
+  test "published pre-thread client implementations compile without callback warnings" do
+    diagnostics =
+      compile_old_client(__MODULE__.LegacyCompiledClient, ReqManagedAgents.Client.Behaviour)
+
+    assert diagnostics == []
+  end
+
+  test "legacy required omissions and canonical thread omissions still produce compiler warnings" do
+    legacy =
+      compile_old_client(
+        __MODULE__.MissingRequiredClient,
+        ReqManagedAgents.Client.Behaviour,
+        :get_agent
+      )
+
+    assert length(legacy) == 1
+    assert hd(legacy).severity == :warning
+    assert hd(legacy).message =~ "get_agent/2"
+
+    canonical =
+      compile_old_client(__MODULE__.CanonicalCompiledClient, Client.Behaviour)
+
+    assert length(canonical) == 2
+    assert Enum.all?(canonical, &(&1.severity == :warning))
+    assert Enum.any?(canonical, &(&1.message =~ "list_threads/3"))
+    assert Enum.any?(canonical, &(&1.message =~ "list_thread_events/4"))
   end
 
   test "canonical and legacy clients retain transport options and redact secrets" do
@@ -93,5 +147,30 @@ defmodule ReqManagedAgents.NamespaceCompatibilityTest do
                [client: client, session_id: "s1"],
                self()
              )
+  end
+
+  defp compile_old_client(module, behaviour, omit \\ nil) do
+    definitions =
+      for {name, arity} <- @old_callbacks, name != omit do
+        args = Macro.generate_arguments(arity, __MODULE__)
+
+        quote do
+          @impl true
+          def unquote(name)(unquote_splicing(args)), do: {:error, :injected_failure}
+        end
+      end
+
+    quoted =
+      quote do
+        defmodule unquote(module) do
+          @behaviour unquote(behaviour)
+          unquote_splicing(definitions)
+        end
+      end
+
+    {_compiled, diagnostics} =
+      Code.with_diagnostics([log: false], fn -> Code.compile_quoted(quoted) end)
+
+    diagnostics
   end
 end
