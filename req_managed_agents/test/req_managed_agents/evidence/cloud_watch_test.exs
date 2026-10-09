@@ -253,6 +253,48 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
     end
   end
 
+  test "caller cancellation terminates blocked credential and transport workers" do
+    owner = self()
+
+    for stage <- [:credentials, :transport] do
+      block = fn ->
+        send(owner, {:blocked_worker, self()})
+        receive do: (:finish -> {:error, :synthetic})
+      end
+
+      client =
+        case stage do
+          :credentials ->
+            {:ok, client} = CloudWatchClient.new(region: "us-east-1", credentials: block)
+            client
+
+          :transport ->
+            client(fn _, _ -> block.() end)
+        end
+
+      caller = spawn(fn -> enrich(prior(), client, timeout_ms: 100) end)
+      on_exit(fn -> Process.exit(caller, :kill) end)
+      assert_receive {:blocked_worker, worker}, 1_000
+      on_exit(fn -> Process.exit(worker, :kill) end)
+      monitor = Process.monitor(worker)
+      Process.exit(caller, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^worker, _}, 500
+      refute Process.alive?(worker)
+    end
+  end
+
+  test "an abruptly exiting request worker cannot crash its surviving caller" do
+    {:ok, client} =
+      CloudWatchClient.new(
+        region: "us-east-1",
+        credentials: fn -> Process.exit(self(), :kill) end
+      )
+
+    capture = enrich(prior(), client)
+    assert capture.records == prior().records
+    assert List.last(capture.sources).status == :unavailable
+  end
+
   defp enrich(prior, client, opts \\ [], query \\ query()) do
     {:ok, options} = Options.new(Keyword.put_new(opts, :content, :retain))
     assert {:ok, capture} = CloudWatch.enrich(prior, query, options, client: client)

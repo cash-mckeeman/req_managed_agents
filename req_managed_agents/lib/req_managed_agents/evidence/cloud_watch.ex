@@ -535,14 +535,9 @@ defmodule ReqManagedAgents.Evidence.CloudWatch do
 
     {pid, monitor} =
       spawn_monitor(fn ->
-        Process.put(:"$callers", callers)
-        send(owner, {token, CloudWatchClient.filter_log_events(client, request)})
+        guard_request(owner, token, client, request, state.deadline, callers)
       end)
 
-    await(pid, monitor, token, max(0, remaining(state)))
-  end
-
-  defp await(pid, monitor, token, timeout) do
     receive do
       {^token, result} ->
         Process.demonitor(monitor, [:flush])
@@ -550,13 +545,51 @@ defmodule ReqManagedAgents.Evidence.CloudWatch do
 
       {:DOWN, ^monitor, :process, ^pid, _} ->
         {:error, :unavailable}
+    end
+  end
+
+  # The guard owns cancellation even after the collecting caller has exited.
+  defp guard_request(owner, token, client, request, deadline, callers) do
+    Process.flag(:trap_exit, true)
+    owner_monitor = Process.monitor(owner)
+    guard = self()
+
+    {worker, monitor} =
+      :erlang.spawn_opt(
+        fn ->
+          Process.put(:"$callers", callers)
+          send(guard, {token, CloudWatchClient.filter_log_events(client, request)})
+        end,
+        [:link, :monitor]
+      )
+
+    result = await_owned(worker, monitor, owner_monitor, token, deadline)
+    Process.demonitor(owner_monitor, [:flush])
+    if result != :owner_down, do: send(owner, {token, result})
+  end
+
+  defp await_owned(worker, monitor, owner_monitor, token, deadline) do
+    receive do
+      {^token, result} ->
+        stop_worker(worker, monitor)
+        result
+
+      {:DOWN, ^owner_monitor, :process, _, _} ->
+        stop_worker(worker, monitor)
+        :owner_down
+
+      {:DOWN, ^monitor, :process, ^worker, _} ->
+        {:error, :unavailable}
     after
-      timeout ->
-        Process.exit(pid, :kill)
-        receive do: ({:DOWN, ^monitor, :process, ^pid, _} -> :ok)
-        receive do: ({^token, _} -> :ok), after: (0 -> :ok)
+      max(0, deadline - System.monotonic_time(:millisecond)) ->
+        stop_worker(worker, monitor)
         {:error, :deadline}
     end
+  end
+
+  defp stop_worker(worker, monitor) do
+    Process.exit(worker, :kill)
+    receive do: ({:DOWN, ^monitor, :process, ^worker, _} -> :ok)
   end
 
   defp finish(state) do
