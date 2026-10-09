@@ -5,7 +5,7 @@ defmodule ReqManagedAgents.AgentCore do
   The per-turn invoke/resume loop now lives in the unified `ReqManagedAgents.Session` driving
   the `ReqManagedAgents.Providers.BedrockAgentCore` provider (`:request_response` mode); this is
   a thin compatibility shim. The SigV4-signed control-plane / data-plane wire client is
-  `ReqManagedAgents.AgentCore.Client`.
+  `ReqManagedAgents.Providers.BedrockAgentCore.Client`.
   """
 
   @doc """
