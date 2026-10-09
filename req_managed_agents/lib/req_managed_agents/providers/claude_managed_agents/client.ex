@@ -165,13 +165,15 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
     do: get(c, "/v1/sessions/#{segment(session_id)}/events", params)
 
   @doc "Lists session threads using the API's `page` / `next_page` pagination."
-  @spec list_threads(t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  @spec list_threads(t() | ReqManagedAgents.Client.t(), String.t(), map()) ::
+          {:ok, map()} | {:error, term()}
   @impl true
   def list_threads(c, session_id, params \\ %{}),
     do: get(c, "/v1/sessions/#{segment(session_id)}/threads", params)
 
   @doc "Lists persisted events for one thread using `page` / `next_page` pagination."
-  @spec list_thread_events(t(), String.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  @spec list_thread_events(t() | ReqManagedAgents.Client.t(), String.t(), String.t(), map()) ::
+          {:ok, map()} | {:error, term()}
   @impl true
   def list_thread_events(c, session_id, thread_id, params \\ %{}),
     do: get(c, "/v1/sessions/#{segment(session_id)}/threads/#{segment(thread_id)}/events", params)
