@@ -51,6 +51,7 @@ defmodule ReqManagedAgents.Client do
         Map.from_struct(CanonicalClient.new(opts))
       )
 
+  @doc false
   defdelegate headers(client), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
   @impl true
   defdelegate create_agent(client, arg1),
@@ -62,6 +63,7 @@ defmodule ReqManagedAgents.Client do
   defdelegate update_agent(client, arg1, arg2),
     to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
+  @doc false
   defdelegate list_agents(client), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
   @impl true
   defdelegate list_agents(client, arg1), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
@@ -77,6 +79,7 @@ defmodule ReqManagedAgents.Client do
   defdelegate get_environment(client, arg1),
     to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
+  @doc false
   defdelegate list_environments(client), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
   @impl true
   defdelegate list_environments(client, arg1),
@@ -92,6 +95,7 @@ defmodule ReqManagedAgents.Client do
 
   @impl true
   defdelegate get_session(client, arg1), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  @doc false
   defdelegate list_sessions(client), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
   @impl true
   defdelegate list_sessions(client, arg1),
@@ -113,6 +117,7 @@ defmodule ReqManagedAgents.Client do
   defdelegate send_event(client, arg1, arg2),
     to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
+  @doc false
   defdelegate list_events(client, arg1), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
   @impl true
   defdelegate list_events(client, arg1, arg2),
@@ -135,6 +140,7 @@ defmodule ReqManagedAgents.Client do
   defdelegate attach_file_to_session(client, arg1, arg2),
     to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
+  @doc false
   defdelegate list_files(client), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
   @impl true
   defdelegate list_files(client, arg1), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
