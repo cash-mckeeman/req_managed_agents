@@ -88,7 +88,7 @@ list of keys read anywhere in the library:
 | AWS region | `:aws_region` | `:aws_region` | `AWS_REGION`, then `AWS_DEFAULT_REGION` | `"us-east-1"` |
 | AWS session token | `:aws_session_token` | `:aws_session_token` | `AWS_SESSION_TOKEN` | `nil` |
 
-`Client.new/1` resolves the Anthropic keys; `AgentCore.SigV4.from_env/1`
+`Providers.ClaudeManagedAgents.Client.new/1` resolves the Anthropic keys; `AgentCore.SigV4.from_env/1`
 resolves the AWS keys (it still works called with no args — `opts` just gives
 you an override point without touching the environment).
 
@@ -293,7 +293,7 @@ timeout outside it, so leave margin rather than sizing to the millisecond.
 
 - `ReqManagedAgents.Provider` — the behaviour every backend implements (invocation + `normalize/1`).
 - `ReqManagedAgents.Session` — the unified, supervised, reconnecting loop driven by your `Handler`.
-- `ReqManagedAgents.Client` — Claude control-plane HTTP (agents, sessions, events, files).
+- `ReqManagedAgents.Providers.ClaudeManagedAgents.Client` — Claude control-plane HTTP (agents, sessions, events, files).
 - `ReqManagedAgents.SSE` / `.Stream` — the Claude event stream.
 - `ReqManagedAgents.AgentCore.Client` / `.Converse` / `ReqManagedAgents.Provisioner` — Bedrock
   AgentCore wire client, Converse decoding, and Harness provisioning.
@@ -335,9 +335,9 @@ take precedence. `ReqManagedAgents.OpenTelemetry` bridges these to OTel GenAI sp
 ## Files (Claude)
 
 ```elixir
-{:ok, %{"id" => file_id}} = ReqManagedAgents.Client.upload_file(client, %{purpose: "agent", file: "report.csv"})
-{:ok, _} = ReqManagedAgents.Client.attach_file_to_session(client, session_id, %{file_id: file_id, mount_path: "/data/report.csv"})
-{:ok, bytes} = ReqManagedAgents.Client.download_file(client, file_id)
+{:ok, %{"id" => file_id}} = ReqManagedAgents.Providers.ClaudeManagedAgents.Client.upload_file(client, %{purpose: "agent", file: "report.csv"})
+{:ok, _} = ReqManagedAgents.Providers.ClaudeManagedAgents.Client.attach_file_to_session(client, session_id, %{file_id: file_id, mount_path: "/data/report.csv"})
+{:ok, bytes} = ReqManagedAgents.Providers.ClaudeManagedAgents.Client.download_file(client, file_id)
 ```
 
 The Files API uses its own beta header (`files-api-2025-04-14`); `download_file/2` returns raw bytes.
@@ -351,7 +351,8 @@ session-scoped:
 
 ```elixir
 alias ReqManagedAgents.Artifacts
-alias ReqManagedAgents.Artifacts.{ClaudeFiles, AgentCoreSessionStorage}
+alias ReqManagedAgents.Artifacts.AgentCoreSessionStorage
+alias ReqManagedAgents.Providers.ClaudeManagedAgents.Artifacts, as: ClaudeFiles
 
 # Claude Managed Agents — the Files API, scoped to one session
 store = {ClaudeFiles, ClaudeFiles.store(client, session_id)}

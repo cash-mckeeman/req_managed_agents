@@ -10,6 +10,7 @@ defmodule ReqManagedAgents.Provisioner.Agents do
   """
   require Logger
   alias ReqManagedAgents.Agent.{Handle, Spec}
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client
   alias ReqManagedAgents.Provisioner
   alias ReqManagedAgents.Provisioner.Name
   alias ReqManagedAgents.Provisioner.Name.Policy
@@ -21,7 +22,7 @@ defmodule ReqManagedAgents.Provisioner.Agents do
   Build-if-absent for an agent. Returns `{:ok, %Handle{}}`.
 
   Opts: `:name` (base, default the spec's `name`), `:store` (`{module, store_opts}`),
-  `:create_fun` / `:list_fun` (test seams; default to `ReqManagedAgents.Client`
+  `:create_fun` / `:list_fun` (test seams; default to `ReqManagedAgents.Providers.ClaudeManagedAgents.Client`
   calls on the given client).
 
   Returns `{:error, {:agent_base_too_long, base}}` when the base is long enough
@@ -68,10 +69,14 @@ defmodule ReqManagedAgents.Provisioner.Agents do
     digest_key = "digest:agent:" <> base <> ":" <> digest
 
     create_fun =
-      opts[:create_fun] || fn body -> ReqManagedAgents.Client.create_agent(client, body) end
+      opts[:create_fun] ||
+        fn body ->
+          Client.create_agent(client, body)
+        end
 
     list_fun =
-      opts[:list_fun] || fn -> ReqManagedAgents.Client.list_agents(client, %{}) end
+      opts[:list_fun] ||
+        fn -> Client.list_agents(client, %{}) end
 
     with {:ok, stored} <- store_get(smod, sopts, key),
          {:ok, handle} <- normalize_or_miss(stored) do
@@ -199,10 +204,16 @@ defmodule ReqManagedAgents.Provisioner.Agents do
 
   defp do_prune(client, base, keep, opts) do
     {smod, sopts} = opts[:store] || @default_store
-    list_fun = opts[:list_fun] || fn -> ReqManagedAgents.Client.list_agents(client, %{}) end
+
+    list_fun =
+      opts[:list_fun] ||
+        fn -> Client.list_agents(client, %{}) end
 
     archive_fun =
-      opts[:archive_fun] || fn id -> ReqManagedAgents.Client.archive_agent(client, id) end
+      opts[:archive_fun] ||
+        fn id ->
+          Client.archive_agent(client, id)
+        end
 
     tagged =
       case store_get(smod, sopts, "tags:agent:" <> base) do

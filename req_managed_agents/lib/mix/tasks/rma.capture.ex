@@ -41,8 +41,8 @@ defmodule Mix.Tasks.Rma.Capture do
   use Mix.Task
 
   alias ReqManagedAgents.AgentCore.{Client, SigV4}
-  alias ReqManagedAgents.Client, as: CMAClient
   alias ReqManagedAgents.Conformance.Redaction
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client, as: CMAClient
 
   @impl Mix.Task
   def run(_argv) do

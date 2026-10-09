@@ -1,6 +1,6 @@
 defmodule ReqManagedAgents.ClientTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Client
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
   setup do
     # Inject a Req.Test stub via req_options so no real network is used.
@@ -178,6 +178,49 @@ defmodule ReqManagedAgents.ClientTest do
              ReqManagedAgents.Client.upload_file(client, %{
                purpose: "agent",
                file: {"d.txt", "hello"}
+             })
+  end
+
+  test "upload infers MIME types case-insensitively and honors explicit content type", %{
+    client: client
+  } do
+    cases = [
+      {"txt", "text/plain"},
+      {"csv", "text/csv"},
+      {"json", "application/json"},
+      {"md", "text/markdown"},
+      {"pdf", "application/pdf"},
+      {"png", "image/png"},
+      {"jpg", "image/jpeg"},
+      {"jpeg", "image/jpeg"},
+      {"unknown", "application/octet-stream"}
+    ]
+
+    for {extension, expected} <- cases do
+      Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        assert body =~ "content-type: #{expected}"
+        Req.Test.json(conn, %{id: "file_1"})
+      end)
+
+      assert {:ok, _} =
+               Client.upload_file(client, %{
+                 purpose: "agent",
+                 file: {"file.#{String.upcase(extension)}", "contents"}
+               })
+    end
+
+    Req.Test.stub(ReqManagedAgents.ClientTest, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      assert body =~ "content-type: application/x-custom"
+      Req.Test.json(conn, %{id: "file_1"})
+    end)
+
+    assert {:ok, _} =
+             Client.upload_file(client, %{
+               purpose: "agent",
+               file: {"file.txt", "contents"},
+               content_type: "application/x-custom"
              })
   end
 

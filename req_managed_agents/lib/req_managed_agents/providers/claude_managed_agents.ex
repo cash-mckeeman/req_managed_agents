@@ -19,14 +19,13 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.Agent.Spec
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, Stream}
 
   alias ReqManagedAgents.{
     Budget,
-    Client,
     Environment,
     Event,
     Outcome,
-    Stream,
     ToolUse,
     TurnResult,
     Usage
@@ -208,6 +207,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   # provider limit.
   @archive_deadline_ms 5_000
   @worker_grace_ms 250
+
+  defp archive_once(%ReqManagedAgents.Client{} = client, sid),
+    do: archive_once(struct!(Client, Map.from_struct(client)), sid)
 
   defp archive_once(%Client{} = client, sid) do
     deadline = min(client.receive_timeout, @archive_deadline_ms)

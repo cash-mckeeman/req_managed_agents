@@ -24,7 +24,7 @@ defmodule ReqManagedAgents.Budget do
 
   Client retries apply to the create-session request, so one open can create more than one
   budgeted session if a response is lost after the provider committed it. For one create per
-  open, pass a `:client` built with `ReqManagedAgents.Client.new(req_options: [retry: false])`.
+  open, pass a `:client` built with `ReqManagedAgents.Providers.ClaudeManagedAgents.Client.new(req_options: [retry: false])`.
 
   A budget can only be set when the session is created. Passing `:budget` together with
   `:session_id` is an error. When a budget is requested, the session is opened only if the

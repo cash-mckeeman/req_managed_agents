@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.Artifacts.ClaudeFilesTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.{Artifact, Artifacts}
-  alias ReqManagedAgents.Artifacts.ClaudeFiles
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Artifacts, as: ClaudeFiles
 
   # Stub of the Client.Behaviour surface ClaudeFiles touches. Sends every call
   # to the test pid so interactions are assertable.
