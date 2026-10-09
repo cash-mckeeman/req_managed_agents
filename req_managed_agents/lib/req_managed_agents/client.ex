@@ -1,6 +1,6 @@
 defmodule ReqManagedAgents.Client do
   @moduledoc """
-  Low-level control-plane HTTP client for Claude Managed Agents (agents, sessions,
+  Compatibility control-plane HTTP client for Claude Managed Agents (agents, sessions,
   events) over `Req`. The long-lived SSE event stream lives in
   `ReqManagedAgents.Stream`.
 
@@ -9,7 +9,7 @@ defmodule ReqManagedAgents.Client do
   """
   @behaviour ReqManagedAgents.Client.Behaviour
 
-  alias ReqManagedAgents.Config
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client, as: CanonicalClient
 
   @base_url "https://api.anthropic.com"
   @beta "managed-agents-2026-04-01"
@@ -42,247 +42,102 @@ defmodule ReqManagedAgents.Client do
           profile: atom()
         }
 
-  @doc """
-  Build a client. Resolves `:api_key` from the option, then
-  `Application.get_env(:req_managed_agents, :api_key)`, then `ANTHROPIC_API_KEY`.
-  Other keys fall back to the same application env, then defaults.
-  """
+  @doc "Build a legacy client. See `ReqManagedAgents.Providers.ClaudeManagedAgents.Client.new/1`."
   @spec new(keyword()) :: t()
-  def new(opts \\ []) do
-    %__MODULE__{
-      api_key: Config.resolve!(opts, :api_key, "ANTHROPIC_API_KEY"),
-      base_url: Config.resolve(opts, :base_url, nil, @base_url),
-      beta: Config.resolve(opts, :beta, nil, @beta),
-      anthropic_version: Config.resolve(opts, :anthropic_version, nil, @anthropic_version),
-      files_beta: Config.resolve(opts, :files_beta, nil, @files_beta),
-      receive_timeout: Config.resolve(opts, :receive_timeout, nil, 60_000),
-      req_options: opts[:req_options] || [],
-      profile: Config.resolve(opts, :profile, nil, :anthropic)
-    }
-  end
-
-  @doc false
-  def headers(%__MODULE__{} = c) do
-    [
-      {"x-api-key", c.api_key},
-      {"anthropic-version", c.anthropic_version},
-      {"anthropic-beta", c.beta},
-      {"content-type", "application/json"}
-    ]
-  end
-
-  # Files endpoints use their own beta header (no JSON content-type — multipart sets its own).
-  defp file_headers(c, beta) do
-    [
-      {"x-api-key", c.api_key},
-      {"anthropic-version", c.anthropic_version},
-      {"anthropic-beta", beta}
-    ]
-  end
-
-  defp file_req(c, path, headers, extra) do
-    ([base_url: c.base_url, url: path, headers: headers, receive_timeout: c.receive_timeout] ++
-       extra)
-    |> Req.new()
-    |> Req.merge(c.req_options)
-  end
-
-  defp file_part(path, content_type) when is_binary(path) do
-    {File.stream!(path),
-     filename: Path.basename(path), content_type: content_type || mime_for(path)}
-  end
-
-  defp file_part({filename, content}, content_type) when is_binary(content) do
-    {content, filename: filename, content_type: content_type || mime_for(filename)}
-  end
-
-  defp mime_for(name) do
-    case name |> Path.extname() |> String.downcase() do
-      ".txt" -> "text/plain"
-      ".csv" -> "text/csv"
-      ".json" -> "application/json"
-      ".md" -> "text/markdown"
-      ".pdf" -> "application/pdf"
-      ".png" -> "image/png"
-      ".jpg" -> "image/jpeg"
-      ".jpeg" -> "image/jpeg"
-      _ -> "application/octet-stream"
-    end
-  end
-
-  # ---- Agents ----------------------------------------------------------------
-  @impl true
-  def create_agent(c, body), do: post(c, "/v1/agents", body)
-  @impl true
-  def get_agent(c, id), do: get(c, "/v1/agents/#{id}")
-  @impl true
-  def update_agent(c, id, body), do: post(c, "/v1/agents/#{id}", body)
-  @impl true
-  def list_agents(c, params \\ %{}), do: get(c, "/v1/agents", params)
-  @impl true
-  def archive_agent(c, id), do: post(c, "/v1/agents/#{id}/archive", %{})
-
-  # ---- Environments ----------------------------------------------------------
-  @impl true
-  def create_environment(c, body), do: post(c, "/v1/environments", body)
-  @impl true
-  def get_environment(c, id), do: get(c, "/v1/environments/#{id}")
-  @impl true
-  def list_environments(c, params \\ %{}), do: get(c, "/v1/environments", params)
-  @impl true
-  def archive_environment(c, id), do: post(c, "/v1/environments/#{id}/archive", %{})
-
-  # ---- Sessions --------------------------------------------------------------
-  @impl true
-  def create_session(c, body), do: post(c, "/v1/sessions", body)
-  @impl true
-  def get_session(c, id), do: get(c, "/v1/sessions/#{id}")
-  @impl true
-  def list_sessions(c, params \\ %{}), do: get(c, "/v1/sessions", params)
-  @impl true
-  def delete_session(c, id), do: delete(c, "/v1/sessions/#{id}")
-  @impl true
-  def archive_session(c, id), do: post(c, "/v1/sessions/#{id}/archive", %{})
-
-  # ---- Events ----------------------------------------------------------------
-  @impl true
-  def send_events(c, session_id, events) when is_list(events),
-    do: post(c, "/v1/sessions/#{session_id}/events", %{events: events})
-
-  @doc "Convenience for a single event."
-  @impl true
-  def send_event(c, session_id, event) when is_map(event),
-    do: send_events(c, session_id, [event])
-
-  @impl true
-  def list_events(c, session_id, params \\ %{}),
-    do: get(c, "/v1/sessions/#{session_id}/events", params)
-
-  @page_limit 100
-
-  @doc """
-  Fetch ALL events for a session, paging via the API's opaque `next_page` cursor
-  (limit #{@page_limit}/page). Passes the cursor back as the `page` query param;
-  stops when `next_page` is absent/blank, or if a cursor repeats (a guard against
-  a pathological server). Returns the flat event list.
-  """
-  @impl true
-  def list_all_events(c, session_id, params \\ %{}) do
-    do_list_all(c, session_id, Map.put(params, :limit, @page_limit), [], nil)
-  end
-
-  defp do_list_all(c, session_id, params, acc, last_cursor) do
-    case list_events(c, session_id, params) do
-      {:ok, %{"data" => page} = body} when is_list(page) ->
-        acc = acc ++ page
-
-        case body["next_page"] do
-          cursor when is_binary(cursor) and cursor != "" and cursor != last_cursor ->
-            do_list_all(c, session_id, Map.put(params, :page, cursor), acc, cursor)
-
-          _ ->
-            {:ok, acc}
-        end
-
-      {:ok, _other} ->
-        {:ok, acc}
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  # ---- Files (separate beta) -------------------------------------------------
-  @impl true
-  def upload_file(c, %{purpose: purpose, file: file} = params) do
-    span(:post, "/v1/files", fn ->
-      c
-      |> file_req("/v1/files", file_headers(c, c.files_beta), [])
-      |> Req.post(
-        form_multipart: [purpose: purpose, file: file_part(file, params[:content_type])]
-      )
-    end)
-  end
-
-  @impl true
-  def download_file(c, file_id) do
-    combined = "#{c.files_beta},#{c.beta}"
-
-    span(:get, "/v1/files/#{file_id}/content", fn ->
-      c
-      |> file_req("/v1/files/#{file_id}/content", file_headers(c, combined), decode_body: false)
-      |> Req.get()
-    end)
-  end
-
-  @impl true
-  def attach_file_to_session(c, session_id, %{file_id: file_id, mount_path: mount_path}),
+  def new(opts \\ []),
     do:
-      post(c, "/v1/sessions/#{session_id}/resources", %{
-        type: "file",
-        file_id: file_id,
-        mount_path: mount_path
-      })
+      struct!(
+        __MODULE__,
+        Map.from_struct(CanonicalClient.new(opts))
+      )
+
+  defdelegate headers(client), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  @impl true
+  defdelegate create_agent(client, arg1),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
   @impl true
-  def list_files(c, opts \\ []) do
-    # Session-scoped listing (scope_id) requires BOTH betas — same combination
-    # download_file/2 sends; harmless when unscoped.
-    combined = "#{c.files_beta},#{c.beta}"
+  defdelegate get_agent(client, arg1), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  @impl true
+  defdelegate update_agent(client, arg1, arg2),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
-    span(:get, "/v1/files", fn ->
-      c
-      |> file_req("/v1/files", file_headers(c, combined), [])
-      |> Req.get(params: opts[:params] || %{})
-    end)
-  end
+  defdelegate list_agents(client), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  @impl true
+  defdelegate list_agents(client, arg1), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  @impl true
+  defdelegate archive_agent(client, arg1),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
   @impl true
-  def delete_file(c, file_id) do
-    combined = "#{c.files_beta},#{c.beta}"
+  defdelegate create_environment(client, arg1),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
-    span(:delete, "/v1/files/#{file_id}", fn ->
-      c
-      |> file_req("/v1/files/#{file_id}", file_headers(c, combined), [])
-      |> Req.delete()
-    end)
-  end
+  @impl true
+  defdelegate get_environment(client, arg1),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
-  # ---- HTTP primitives -------------------------------------------------------
+  defdelegate list_environments(client), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  @impl true
+  defdelegate list_environments(client, arg1),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
-  defp post(c, path, body),
-    do: span(:post, path, fn -> c |> req(path) |> Req.post(json: body) end)
+  @impl true
+  defdelegate archive_environment(client, arg1),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
-  defp get(c, path, params \\ %{}),
-    do: span(:get, path, fn -> c |> req(path) |> Req.get(params: params) end)
+  @impl true
+  defdelegate create_session(client, arg1),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
-  defp delete(c, path), do: span(:delete, path, fn -> c |> req(path) |> Req.delete() end)
+  @impl true
+  defdelegate get_session(client, arg1), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  defdelegate list_sessions(client), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  @impl true
+  defdelegate list_sessions(client, arg1),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
-  defp span(method, path, fun) do
-    :telemetry.span([:req_managed_agents, :request], %{method: method, path: path}, fn ->
-      result = handle(fun.())
-      {result, %{method: method, path: path, status: status_for(result)}}
-    end)
-  end
+  @impl true
+  defdelegate delete_session(client, arg1),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
-  defp status_for({:ok, _}), do: 200
-  defp status_for({:error, {:http_error, s, _}}), do: s
-  defp status_for(_), do: nil
+  @impl true
+  defdelegate archive_session(client, arg1),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
-  defp req(c, path) do
-    [
-      base_url: c.base_url,
-      url: path,
-      headers: headers(c),
-      receive_timeout: c.receive_timeout,
-      retry: :transient,
-      max_retries: 3
-    ]
-    |> Req.new()
-    |> Req.merge(c.req_options)
-  end
+  @impl true
+  defdelegate send_events(client, arg1, arg2),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 
-  defp handle({:ok, %{status: s, body: body}}) when s in 200..299, do: {:ok, body}
-  defp handle({:ok, %{status: s, body: body}}), do: {:error, {:http_error, s, body}}
-  defp handle({:error, reason}), do: {:error, reason}
+  @impl true
+  defdelegate send_event(client, arg1, arg2),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+
+  defdelegate list_events(client, arg1), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  @impl true
+  defdelegate list_events(client, arg1, arg2),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+
+  defdelegate list_all_events(client, arg1),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+
+  @impl true
+  defdelegate list_all_events(client, arg1, arg2),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+
+  @impl true
+  defdelegate upload_file(client, arg1), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  @impl true
+  defdelegate download_file(client, arg1),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+
+  @impl true
+  defdelegate attach_file_to_session(client, arg1, arg2),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+
+  defdelegate list_files(client), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  @impl true
+  defdelegate list_files(client, arg1), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  @impl true
+  defdelegate delete_file(client, arg1), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Client
 end

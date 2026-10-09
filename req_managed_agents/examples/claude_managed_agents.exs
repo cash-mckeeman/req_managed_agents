@@ -57,7 +57,7 @@ alias ReqManagedAgents.Agent.Spec
 alias ReqManagedAgents.Providers.ClaudeManagedAgents
 
 # The control-plane client. Reads ANTHROPIC_API_KEY from the environment by
-# default; see `ReqManagedAgents.Client.new/1` for explicit options.
+# default; see `ReqManagedAgents.Providers.ClaudeManagedAgents.Client.new/1` for explicit options.
 client = ReqManagedAgents.new()
 
 # ── 1. Provision the agent + environment (idempotent; cached per {provider, spec}) ──

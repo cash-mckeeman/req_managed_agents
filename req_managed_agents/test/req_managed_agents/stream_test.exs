@@ -1,6 +1,6 @@
 defmodule ReqManagedAgents.StreamTest do
   use ExUnit.Case
-  alias ReqManagedAgents.{Client, Stream}
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, Stream}
   import ReqManagedAgents.SSEFixtures
 
   setup do

@@ -1,115 +1,25 @@
 defmodule ReqManagedAgents.Artifacts.ClaudeFiles do
-  @moduledoc """
-  `ReqManagedAgents.Artifacts` store over the Anthropic Files API, scoped to one
-  session. `list` uses the session-scoped file listing (the only way to discover
-  server-minted file ids for files the agent wrote); `fetch`/`delete` act on the
-  newest record when a name appears more than once (re-runs accumulate);
-  `put` uploads and attaches at `opts[:mount_path]` (default `"/data/<name>"`).
-
-  The default mount path is built as `"/data/" <> name` with no sanitization —
-  callers passing untrusted names must validate them (path traversal, e.g.
-  `"../x"`, is forwarded verbatim).
-
-  **The outputs-dir convention:** only files the agent writes under
-  `/mnt/session/outputs/` become session artifacts (session-scoped and
-  downloadable — what `list`/`fetch` see). Direct the agent's deliverables
-  there in its system prompt; files written elsewhere in the sandbox are not
-  retrievable.
-  """
+  @moduledoc "Compatibility entry point for `ReqManagedAgents.Providers.ClaudeManagedAgents.Artifacts`."
   @behaviour ReqManagedAgents.Artifacts
+  defdelegate outputs_dir(), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Artifacts
+  defdelegate output_path(name), to: ReqManagedAgents.Providers.ClaudeManagedAgents.Artifacts
 
-  alias ReqManagedAgents.Artifact
-
-  # The load-bearing sandbox convention (established live, 2026-07-03): only
-  # this directory's files become session artifacts. Keep it in ONE place.
-  @outputs_dir "/mnt/session/outputs"
-
-  @doc """
-  The sandbox directory whose files become session artifacts (session-scoped,
-  downloadable — what `list/2` and `fetch/3` see). Interpolate this into the
-  agent's system prompt rather than copying the string — files written
-  anywhere else in the sandbox are not retrievable:
-
-      system: "Write all output files under #{@outputs_dir}/."
-  """
-  def outputs_dir, do: @outputs_dir
-
-  @doc "Absolute sandbox path for a named deliverable: `\"#{@outputs_dir}/\" <> name`."
-  def output_path(name) when is_binary(name), do: @outputs_dir <> "/" <> name
-
-  @doc "Build a store term. `client_mod` is injectable for tests (defaults to the live client)."
-  def store(client, session_id, opts \\ []) do
-    %{
-      client: client,
-      session_id: session_id,
-      client_mod: opts[:client_mod] || ReqManagedAgents.Client
-    }
-  end
+  defdelegate store(client, session_id, opts \\ []),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Artifacts
 
   @impl true
-  def list(store, _opts \\ []) do
-    case store.client_mod.list_files(store.client, params: %{scope_id: store.session_id}) do
-      {:ok, %{"data" => files}} -> {:ok, Enum.map(files, &to_artifact/1)}
-      {:ok, other} -> {:error, {:unexpected_response, other}}
-      {:error, reason} -> {:error, reason}
-    end
-  end
+  defdelegate list(store, opts \\ []),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Artifacts
 
   @impl true
-  def fetch(store, name, opts \\ []) do
-    with {:ok, %{"id" => id}} <- newest(store, name, opts) do
-      store.client_mod.download_file(store.client, id)
-    end
-  end
+  defdelegate fetch(store, name, opts \\ []),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Artifacts
 
   @impl true
-  def put(store, name, contents, opts \\ []) do
-    mount_path = opts[:mount_path] || "/data/" <> name
-
-    with {:ok, %{"id" => file_id}} <-
-           store.client_mod.upload_file(store.client, %{purpose: "agent", file: {name, contents}}),
-         {:ok, _} <-
-           store.client_mod.attach_file_to_session(store.client, store.session_id, %{
-             file_id: file_id,
-             mount_path: mount_path
-           }) do
-      :ok
-    end
-  end
+  defdelegate put(store, name, contents, opts \\ []),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Artifacts
 
   @impl true
-  def delete(store, name, opts \\ []) do
-    with {:ok, %{"id" => id}} <- newest(store, name, opts),
-         {:ok, _} <- store.client_mod.delete_file(store.client, id) do
-      :ok
-    end
-  end
-
-  defp newest(store, name, _opts) do
-    case store.client_mod.list_files(store.client, params: %{scope_id: store.session_id}) do
-      {:ok, %{"data" => files}} ->
-        files
-        |> Enum.filter(&(&1["filename"] == name))
-        |> Enum.sort_by(& &1["created_at"], :desc)
-        |> case do
-          [newest | _] -> {:ok, newest}
-          [] -> {:error, :not_found}
-        end
-
-      {:ok, other} ->
-        {:error, {:unexpected_response, other}}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp to_artifact(file) do
-    %Artifact{
-      name: file["filename"],
-      size: file["size_bytes"],
-      ref: file["id"],
-      raw: file
-    }
-  end
+  defdelegate delete(store, name, opts \\ []),
+    to: ReqManagedAgents.Providers.ClaudeManagedAgents.Artifacts
 end

@@ -21,7 +21,7 @@ defmodule ReqManagedAgents do
   Whichever backend, `ReqManagedAgents.Session.run/2` returns the same
   `ReqManagedAgents.SessionResult` — terminal, text, tool uses, token usage.
 
-  See `ReqManagedAgents.Client` for the Anthropic control plane,
+  See `ReqManagedAgents.Providers.ClaudeManagedAgents.Client` for the Anthropic control plane,
   `ReqManagedAgents.Session` for the batteries-included loop, and the README
   and `examples/` for runnable, commented walkthroughs.
   """

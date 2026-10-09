@@ -10,6 +10,7 @@ defmodule ReqManagedAgents.Provisioner.Environments do
   """
   require Logger
   alias ReqManagedAgents.Environment
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client
   alias ReqManagedAgents.Provisioner
   alias ReqManagedAgents.Provisioner.Environment.Handle
   alias ReqManagedAgents.Provisioner.Runtimes
@@ -30,7 +31,7 @@ defmodule ReqManagedAgents.Provisioner.Environments do
 
   Opts: `:name` (repository base, default `"env"`), `:store`
   (`{module, store_opts}`), `:create_fun` / `:list_fun` (test seams; default
-  to `ReqManagedAgents.Client` calls on the given client).
+  to `ReqManagedAgents.Providers.ClaudeManagedAgents.Client` calls on the given client).
 
   A literal `nil` spec is rejected with
   `{:error, {:invalid_environment_spec, nil}}` — `Environment.Spec.new/1` maps
@@ -77,10 +78,15 @@ defmodule ReqManagedAgents.Provisioner.Environments do
 
     create_fun =
       opts[:create_fun] ||
-        fn body -> ReqManagedAgents.Client.create_environment(client, body) end
+        fn body ->
+          Client.create_environment(client, body)
+        end
 
     list_fun =
-      opts[:list_fun] || fn -> ReqManagedAgents.Client.list_environments(client, %{}) end
+      opts[:list_fun] ||
+        fn ->
+          Client.list_environments(client, %{})
+        end
 
     with {:ok, stored} <- store_get(smod, sopts, key),
          {:ok, handle} <- normalize_or_miss(stored) do
@@ -175,10 +181,16 @@ defmodule ReqManagedAgents.Provisioner.Environments do
     {smod, sopts} = opts[:store] || @default_store
 
     list_fun =
-      opts[:list_fun] || fn -> ReqManagedAgents.Client.list_environments(client, %{}) end
+      opts[:list_fun] ||
+        fn ->
+          Client.list_environments(client, %{})
+        end
 
     archive_fun =
-      opts[:archive_fun] || fn id -> ReqManagedAgents.Client.archive_environment(client, id) end
+      opts[:archive_fun] ||
+        fn id ->
+          Client.archive_environment(client, id)
+        end
 
     tagged =
       case store_get(smod, sopts, "tags:" <> base) do
