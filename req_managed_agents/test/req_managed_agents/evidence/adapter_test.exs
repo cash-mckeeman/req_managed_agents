@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.Evidence.AdapterTest do
   use ExUnit.Case, async: true
 
-  alias ReqManagedAgents.Evidence.{Capture, NativeObservation, Record}
+  alias ReqManagedAgents.Evidence.{Adapter, Capture, NativeObservation, Record}
   alias ReqManagedAgents.Providers.BedrockAgentCore.Evidence, as: Bedrock
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence, as: Claude
 
@@ -192,33 +192,89 @@ defmodule ReqManagedAgents.Evidence.AdapterTest do
     assert {:error, _} = Capture.new(attrs)
   end
 
-  test "CloudWatch log envelopes preserve safe metadata under source-selected drop" do
+  test "standalone CloudWatch envelopes survive default drop and declared capture composition" do
     payload = %{
       "eventId" => "event",
       "logStreamName" => "stream",
-      "timestamp" => 123,
-      "ingestionTime" => 124,
-      "message" => "private OTLP content"
+      "timestamp" => 1_791_460_800_000,
+      "ingestionTime" => 1_791_460_801_000,
+      "message" => "private",
+      "unknown" => "private"
     }
 
-    safe = Map.drop(payload, ["message"])
+    assert {:ok, %Record{validation_issue?: false, payload: ^payload, content_state: :retained}} =
+             Record.new(record(payload), content: :retain)
 
-    assert %NativeObservation{supported?: true, safe_payload: ^safe} =
-             ReqManagedAgents.CloudWatch.Evidence.interpret(payload)
+    assert {:ok, %Record{validation_issue?: false, content_state: :dropped} = typed} =
+             Record.new(record(payload))
+
+    assert typed.payload == %{
+             "eventId" => "event",
+             "logStreamName" => "stream",
+             "timestamp" => 1_791_460_800_000,
+             "ingestionTime" => 1_791_460_801_000
+           }
 
     assert {:ok, capture} =
              Capture.new(%{
-               capture_id: "cloudwatch",
+               capture_id: "capture",
                provider: :agentcore,
                session_id: "session",
                started_at: @time,
                ended_at: @time,
                sources: [%{id: "source", kind: :cloudwatch, scope: "session", status: :complete}],
-               records: [record(payload)]
+               records: [typed]
              })
 
-    assert hd(capture.records).payload == safe
-    refute hd(capture.records).validation_issue?
+    assert {:ok, with_type} = Record.new(record(Map.put(payload, "type", "future")))
+    assert with_type.payload == typed.payload
+    refute with_type.validation_issue?
+
+    assert hd(capture.records).payload == typed.payload
+    refute Enum.any?(capture.diagnostics, &(&1.code == :unsupported_record))
+
+    wire =
+      capture
+      |> ReqManagedAgents.Evidence.to_wire()
+      |> Jason.encode!()
+      |> Jason.decode!()
+
+    assert {:ok, restored} = ReqManagedAgents.Evidence.from_wire(wire)
+    assert hd(restored.records).payload == typed.payload
+    refute hd(restored.records).validation_issue?
+    refute Enum.any?(restored.diagnostics, &(&1.code == :unsupported_record))
+
+    for selector <- [:managed, :claude_session, :agentcore, :agentcore_stream] do
+      refute Adapter.interpret(payload, selector).supported?
+      assert Adapter.interpret(payload, selector).safe_payload == %{}
+    end
+
+    malformed = Map.put(payload, "timestamp", "broken")
+    assert {:ok, %Record{validation_issue?: true, payload: safe}} = Record.new(record(malformed))
+    refute Map.has_key?(safe, "timestamp")
+    refute Map.has_key?(safe, "message")
+  end
+
+  test "standalone dispatch preserves provider precedence and drops arbitrary maps" do
+    envelope = %{"eventId" => "event", "timestamp" => 10, "message" => "private"}
+
+    claude = Map.merge(envelope, %{"type" => "agent.message", "id" => "claude"})
+
+    assert Adapter.interpret(claude).safe_payload == %{
+             "type" => "agent.message",
+             "id" => "claude"
+           }
+
+    bedrock = Map.put(envelope, "messageStop", %{"stopReason" => "end_turn"})
+
+    assert Adapter.interpret(bedrock).safe_payload == %{
+             "messageStop" => %{"stopReason" => "end_turn"}
+           }
+
+    for payload <- [%{"private" => "secret"}, %{"type" => "future", "message" => "secret"}] do
+      assert %NativeObservation{supported?: false, safe_payload: %{}} = Adapter.interpret(payload)
+      assert {:ok, %Record{validation_issue?: true, payload: %{}}} = Record.new(record(payload))
+    end
   end
 
   defp record(payload) do
