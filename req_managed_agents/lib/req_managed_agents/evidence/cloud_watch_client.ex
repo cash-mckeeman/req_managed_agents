@@ -99,6 +99,7 @@ defmodule ReqManagedAgents.Evidence.CloudWatchClient do
       headers: headers,
       retry: false,
       redirect: false,
+      decode_body: false,
       receive_timeout: client.timeout_ms
     ]
 
@@ -106,10 +107,19 @@ defmodule ReqManagedAgents.Evidence.CloudWatchClient do
       if client.transport, do: Keyword.put(options, :plug, client.transport), else: options
 
     case Req.post(options) do
-      {:ok, %Req.Response{status: 200, body: body}} when is_map(body) -> {:ok, body}
+      {:ok, %Req.Response{status: 200, body: body}} -> decode_page(body)
       _ -> {:error, :unavailable}
     end
   end
+
+  defp decode_page(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, page} when is_map(page) -> {:ok, page}
+      _ -> {:error, :unavailable}
+    end
+  end
+
+  defp decode_page(_), do: {:error, :unavailable}
 
   defp resolve(resolver) when is_function(resolver, 0) do
     case resolver.() do

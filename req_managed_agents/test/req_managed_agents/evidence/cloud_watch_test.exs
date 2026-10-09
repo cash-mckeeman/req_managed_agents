@@ -244,6 +244,15 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
              CloudWatch.enrich(prior, query(), options, client: client)
   end
 
+  test "malformed AWS JSON responses preserve prior evidence without exposing response bodies" do
+    for body <- ["private-invalid-json", "[]", "null", "42", "true"] do
+      capture = enrich(prior(), client(fn _, _ -> {:raw, 200, body} end))
+      assert capture.records == prior().records
+      assert List.last(capture.sources).status == :unavailable
+      refute Jason.encode!(Evidence.to_wire(capture)) =~ "private-invalid-json"
+    end
+  end
+
   defp enrich(prior, client, opts \\ [], query \\ query()) do
     {:ok, options} = Options.new(Keyword.put_new(opts, :content, :retain))
     assert {:ok, capture} = CloudWatch.enrich(prior, query, options, client: client)
@@ -255,8 +264,9 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
       {:ok, body, conn} = Plug.Conn.read_body(conn)
 
       case fun.(conn, Jason.decode!(body)) do
-        {status, response} -> conn |> Plug.Conn.put_status(status) |> Req.Test.json(response)
-        response -> Req.Test.json(conn, response)
+        {:raw, status, body} -> aws_response(conn, status, body)
+        {status, response} -> aws_response(conn, status, Jason.encode!(response))
+        response -> aws_response(conn, 200, Jason.encode!(response))
       end
     end
 
@@ -272,6 +282,12 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
       )
 
     client
+  end
+
+  defp aws_response(conn, status, body) do
+    conn
+    |> Plug.Conn.put_resp_content_type("application/x-amz-json-1.1")
+    |> Plug.Conn.send_resp(status, body)
   end
 
   defp prior do
