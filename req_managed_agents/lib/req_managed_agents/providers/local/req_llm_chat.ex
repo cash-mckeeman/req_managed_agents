@@ -1,10 +1,10 @@
-defmodule ReqManagedAgents.Local.ReqLLMChat do
+defmodule ReqManagedAgents.Providers.Local.ReqLLMChat do
   @moduledoc false
   # The DEFAULT chat_fun for Providers.Local: adapts the neutral OpenAI-shaped wire
   # contract to ReqLLM.generate_text/3. Only this module touches ReqLLM — injected
   # chat_funs never need req_llm present (Local.Deps gates construction).
 
-  alias ReqManagedAgents.Local.Deps
+  alias ReqManagedAgents.Providers.Local.Deps
 
   # ReqLLM.Response.finish_reason/1's atom vocabulary; a reason outside it is
   # inferred from tool_calls instead (see finish_reason/2).

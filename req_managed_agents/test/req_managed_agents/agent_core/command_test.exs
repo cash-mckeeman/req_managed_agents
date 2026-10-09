@@ -1,6 +1,8 @@
 defmodule ReqManagedAgents.AgentCore.CommandTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.AgentCore.{Client, CommandResult}
+  alias ReqManagedAgents.Providers.BedrockAgentCore.Client, as: CanonicalClient
+  alias ReqManagedAgents.Providers.BedrockAgentCore.CommandResult, as: CanonicalResult
   import ReqManagedAgents.EventStreamFrames, only: [frame: 1]
 
   @creds %{
@@ -35,6 +37,32 @@ defmodule ReqManagedAgents.AgentCore.CommandTest do
         {:error, :closed} -> conn
       end
     end)
+  end
+
+  test "canonical command accepts both client structs and returns canonical result", %{
+    bypass: bypass,
+    client: old_client
+  } do
+    for client <- [
+          old_client,
+          CanonicalClient.new(credentials: @creds, base_url: old_client.base_url)
+        ] do
+      Bypass.expect_once(bypass, fn conn ->
+        chunked(conn, [
+          frame(~s({"contentDelta":{"stdout":"out","stderr":"warn"}})),
+          frame(~s({"contentStop":{"exitCode":4}}))
+        ])
+      end)
+
+      assert {:ok, %CanonicalResult{stdout: "out", stderr: "warn", exit_code: 4}} =
+               CanonicalClient.invoke_agent_runtime_command(
+                 client,
+                 inv(on_output: fn label, chunk -> send(self(), {:output, label, chunk}) end)
+               )
+
+      assert_receive {:output, :stdout, "out"}
+      assert_receive {:output, :stderr, "warn"}
+    end
   end
 
   test "collects stdout/stderr/exitCode from chunk-wrapped events; ARN rides the path; session header set",

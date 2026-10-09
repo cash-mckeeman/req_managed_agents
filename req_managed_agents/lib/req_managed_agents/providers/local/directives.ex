@@ -1,4 +1,4 @@
-defmodule ReqManagedAgents.Local.Directives do
+defmodule ReqManagedAgents.Providers.Local.Directives do
   @moduledoc false
   # Loop directives injected into the conversation for weak-instruction-following
   # local models. Wording relocated verbatim from an internal agent runner's

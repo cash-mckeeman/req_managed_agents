@@ -1,6 +1,6 @@
-defmodule ReqManagedAgents.AgentCore.ConverseTest do
+defmodule ReqManagedAgents.Providers.BedrockAgentCore.ConverseTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.AgentCore.Converse
+  alias ReqManagedAgents.Providers.BedrockAgentCore.Converse
 
   describe "inline_function tool specs" do
     test "Jido schema → HarnessTool shape (GA contract)" do

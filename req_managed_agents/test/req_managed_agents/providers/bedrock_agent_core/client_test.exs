@@ -1,6 +1,6 @@
-defmodule ReqManagedAgents.AgentCore.ClientTest do
+defmodule ReqManagedAgents.Providers.BedrockAgentCore.ClientTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.AgentCore.Client
+  alias ReqManagedAgents.Providers.BedrockAgentCore.Client
 
   @creds %{
     access_key_id: "AKID",

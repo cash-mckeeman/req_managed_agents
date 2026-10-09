@@ -1,10 +1,5 @@
-defmodule ReqManagedAgents.AgentCore.Deps do
+defmodule ReqManagedAgents.Providers.BedrockAgentCore.Deps do
   @moduledoc false
-
-  # The AWS deps are `optional: true` in mix.exs so Anthropic-only consumers
-  # don't pull them. Every AgentCore code path funnels through SigV4 signing
-  # and/or EventStream decoding, so those two modules call `ensure!/0` and
-  # raise this actionable error instead of an UndefinedFunctionError.
 
   @required [{AWSAuth, :ex_aws_auth, "~> 1.4"}, {AWSEventStream, :aws_event_stream, "~> 0.1"}]
 

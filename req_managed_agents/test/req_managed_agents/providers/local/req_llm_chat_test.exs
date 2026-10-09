@@ -1,6 +1,6 @@
-defmodule ReqManagedAgents.Local.ReqLLMChatTest do
+defmodule ReqManagedAgents.Providers.Local.ReqLLMChatTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Local.ReqLLMChat
+  alias ReqManagedAgents.Providers.Local.ReqLLMChat
 
   @request %{
     model: "openai:gpt-test",

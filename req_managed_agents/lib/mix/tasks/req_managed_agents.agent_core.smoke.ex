@@ -43,7 +43,8 @@ defmodule Mix.Tasks.ReqManagedAgents.AgentCore.Smoke do
   use Mix.Task
 
   alias ReqManagedAgents.AgentCore
-  alias ReqManagedAgents.AgentCore.{Client, Converse, EventStream, SigV4}
+  alias ReqManagedAgents.AWS.SigV4
+  alias ReqManagedAgents.Providers.BedrockAgentCore.{Client, Converse, EventStream}
 
   @impl Mix.Task
   def run(_args) do
@@ -135,7 +136,8 @@ defmodule Mix.Tasks.ReqManagedAgents.AgentCore.Smoke do
     url = "https://bedrock-agentcore.us-east-1.amazonaws.com/harnesses/test/invocations"
     body = ~s({"runtimeSessionId":"s1","messages":[]})
 
-    headers = SigV4.sign_request(:post, url, body, credentials: creds)
+    headers =
+      SigV4.sign_request(:post, url, body, service: "bedrock-agentcore", credentials: creds)
 
     has_auth =
       Enum.any?(headers, fn {k, v} ->

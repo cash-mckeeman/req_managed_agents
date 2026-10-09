@@ -32,7 +32,7 @@ defmodule ReqManagedAgents.Providers.Local do
   """
   @behaviour ReqManagedAgents.Provider
 
-  alias ReqManagedAgents.Local.{Deps, Directives, ReqLLMChat, Retry}
+  alias ReqManagedAgents.Providers.Local.{Deps, Directives, ReqLLMChat, Retry}
   alias ReqManagedAgents.{ToolResult, ToolUse, TurnResult, Usage}
 
   # The conn is a struct, not a bag of keys: one place to see everything a turn needs.
