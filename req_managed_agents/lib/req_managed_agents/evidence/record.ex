@@ -88,7 +88,7 @@ end
 
 defmodule ReqManagedAgents.Evidence.Record do
   @moduledoc "Source-local observations; native payload maps are provider-verbatim JSON at the raw edge."
-  alias ReqManagedAgents.Evidence.{Content, Error, Options, Validation}
+  alias ReqManagedAgents.Evidence.{Adapter, Content, Error, Options, Validation}
   alias ReqManagedAgents.Evidence.Record.Payload
   @enforce_keys [:id, :source_id, :ordinal, :observed_at, :clock, :kind, :payload, :content_state]
   defstruct [
@@ -142,8 +142,10 @@ defmodule ReqManagedAgents.Evidence.Record do
   end
 
   @doc false
-  @spec parse(map()) :: {:ok, t()} | {:error, Error.t()}
-  def parse(attrs) when is_map(attrs) do
+  @spec parse(map(), atom()) :: {:ok, t()} | {:error, Error.t()}
+  def parse(attrs, selector \\ :standalone)
+
+  def parse(attrs, selector) when is_map(attrs) do
     specs =
       [
         {:id, &Validation.id/1, nil},
@@ -173,9 +175,7 @@ defmodule ReqManagedAgents.Evidence.Record do
 
       malformed_time? = Validation.get(attrs, :occurred_at) != nil and occurred_at == nil
 
-      unsupported? =
-        fields.kind == :native and
-          (not Content.supported?(payload) or Content.malformed_metadata?(payload))
+      unsupported? = fields.kind == :native and invalid_native?(payload, selector)
 
       {:ok,
        struct!(
@@ -191,7 +191,12 @@ defmodule ReqManagedAgents.Evidence.Record do
     end
   end
 
-  def parse(_), do: Error.error(:invalid_input)
+  def parse(_, _), do: Error.error(:invalid_input)
+
+  defp invalid_native?(payload, selector) do
+    observation = Adapter.interpret(payload, selector)
+    not observation.supported? or observation.malformed_metadata?
+  end
 
   defp previous_issue(%__MODULE__{validation_issue?: value}) when is_boolean(value),
     do: {:ok, value}

@@ -22,6 +22,7 @@ defmodule ReqManagedAgents.Evidence.Recorder do
   use GenServer
 
   alias ReqManagedAgents.Evidence.{
+    Adapter,
     Capture,
     Content,
     Diagnostic,
@@ -187,7 +188,6 @@ defmodule ReqManagedAgents.Evidence.Recorder do
     %Record{
       id: id(),
       source_id: source,
-      native_id: native_id(payload),
       ordinal: 1,
       observed_at: DateTime.utc_now(),
       clock: :none,
@@ -198,9 +198,6 @@ defmodule ReqManagedAgents.Evidence.Recorder do
       attempt_id: attempt_id
     }
   end
-
-  defp native_id(%{"id" => id}) when is_binary(id), do: id
-  defp native_id(_), do: nil
 
   @doc false
   @spec code(term()) :: String.t()
@@ -280,7 +277,7 @@ defmodule ReqManagedAgents.Evidence.Recorder do
 
   defp store_record(state, record, reserved) do
     identity = NativeIdentity.new(record, state.options.content)
-    record = Content.apply(record, state.options.content)
+    record = Content.apply(record, state.options.content, provider(state))
     bytes = :erlang.external_size({record, identity})
 
     if bytes <= reserved do
@@ -321,17 +318,31 @@ defmodule ReqManagedAgents.Evidence.Recorder do
     )
   end
 
-  defp record(%Record{kind: :native} = record, _state, ordinal, observed, _ticks) do
-    Record.parse(%{
-      record
-      | id: "record-#{ordinal}",
-        source_id: if(record.source_id == "history", do: "history", else: "native"),
-        ordinal: ordinal,
-        observed_at: observed
-    })
+  defp record(%Record{kind: :native} = record, state, ordinal, observed, _ticks) do
+    observation = Adapter.interpret(record.payload, provider(state))
+
+    Record.parse(
+      %{
+        record
+        | native_id: observation.native_id,
+          occurred_at: observation.occurred_at,
+          id: "record-#{ordinal}",
+          source_id: if(record.source_id == "history", do: "history", else: "native"),
+          ordinal: ordinal,
+          observed_at: observed
+      },
+      provider(state)
+    )
   end
 
   defp record(_, _, _, _, _), do: Error.error(:invalid_input)
+
+  defp provider(state) do
+    case :ets.lookup(state.table, :context) do
+      [{:context, provider, _}] -> provider
+      _ -> :unknown
+    end
+  end
 
   defp barrier(pid, timeout) do
     GenServer.call(pid, :barrier, timeout)
