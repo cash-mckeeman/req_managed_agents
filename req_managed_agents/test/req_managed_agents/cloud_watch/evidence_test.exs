@@ -1,9 +1,11 @@
-defmodule ReqManagedAgents.Evidence.CloudWatchTest do
+defmodule ReqManagedAgents.CloudWatch.EvidenceTest do
   use ExUnit.Case, async: true
 
+  alias ReqManagedAgents.CloudWatch.Client
+  alias ReqManagedAgents.CloudWatch.Evidence, as: CloudWatch
+  alias ReqManagedAgents.CloudWatch.Query
   alias ReqManagedAgents.Evidence
-  alias ReqManagedAgents.Evidence.{Capture, CloudWatch, CloudWatchClient, Options}
-  alias ReqManagedAgents.Evidence.CloudWatch.Query
+  alias ReqManagedAgents.Evidence.{Capture, Options}
 
   test "signed JSON requests continue an empty intermediate page and preserve invocation evidence" do
     original = prior()
@@ -201,7 +203,7 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
     owner = self()
 
     {:ok, bare} =
-      CloudWatchClient.new(
+      Client.new(
         region: "us-east-1",
         transport: fn conn ->
           send(owner, {:unexpected_transport, :missing_credentials})
@@ -297,7 +299,7 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
       client =
         case stage do
           :credentials ->
-            {:ok, client} = CloudWatchClient.new(region: "us-east-1", credentials: block)
+            {:ok, client} = Client.new(region: "us-east-1", credentials: block)
             client
 
           :transport ->
@@ -317,7 +319,7 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
 
   test "an abruptly exiting request worker cannot crash its surviving caller" do
     {:ok, client} =
-      CloudWatchClient.new(
+      Client.new(
         region: "us-east-1",
         credentials: fn -> Process.exit(self(), :kill) end
       )
@@ -441,7 +443,7 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
     end
 
     {:ok, client} =
-      CloudWatchClient.new(
+      Client.new(
         region: "us-east-1",
         credentials: %{
           access_key_id: "synthetic-key",

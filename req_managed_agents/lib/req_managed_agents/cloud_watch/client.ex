@@ -1,4 +1,4 @@
-defmodule ReqManagedAgents.Evidence.CloudWatchClient do
+defmodule ReqManagedAgents.CloudWatch.Client do
   @moduledoc """
   Read-only CloudWatch Logs JSON transport using the optional `:ex_aws_auth` signer.
   Credentials or a zero-argument credential resolver must be supplied explicitly;
