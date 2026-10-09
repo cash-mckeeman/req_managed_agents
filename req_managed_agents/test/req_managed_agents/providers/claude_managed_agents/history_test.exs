@@ -1,9 +1,11 @@
-defmodule ReqManagedAgents.Evidence.ClaudeTest do
+defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.HistoryTest do
   use ExUnit.Case, async: true
 
-  alias ReqManagedAgents.Client
   alias ReqManagedAgents.Evidence
-  alias ReqManagedAgents.Evidence.{Claude, Fetch, LocalRecord, Options, Recorder}
+  alias ReqManagedAgents.Evidence.{LocalRecord, Options, Recorder}
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.History
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request
 
   test "default drop honors raw numeric equality in nested retrieved payloads" do
     for {value, equivalent, unequal} <- [
@@ -27,8 +29,8 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
             "/v1/sessions/s/threads", nil -> page([])
           end)
 
-        {:ok, config} = Fetch.new(client: client)
-        assert {:ok, capture} = Claude.fetch("s", config)
+        {:ok, config} = Request.new(client: client)
+        assert {:ok, capture} = History.fetch("s", config)
 
         assert Enum.map(capture.records, & &1.native_id) ==
                  List.duplicate("numeric", length(records))
@@ -92,13 +94,13 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
         end)
 
       {:ok, config} =
-        Fetch.new(
+        Request.new(
           client: forbidden,
           prior: prior,
           options: [content: :retain, max_records: limit]
         )
 
-      assert {:ok, capture} = Claude.fetch("s", config)
+      assert {:ok, capture} = History.fetch("s", config)
       refute_received {:forbidden_enrichment, _}
       assert capture.capture_id == prior.capture_id
       assert capture.records == prior.records
@@ -127,9 +129,9 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
       end)
 
     {:ok, config} =
-      Fetch.new(client: client, prior: prior, options: [content: :retain, max_records: 2])
+      Request.new(client: client, prior: prior, options: [content: :retain, max_records: 2])
 
-    assert {:ok, capture} = Claude.fetch("s", config)
+    assert {:ok, capture} = History.fetch("s", config)
     assert_received :fitting_enrichment
     assert Enum.map(capture.records, & &1.native_id) == ["first", "second"]
     assert hd(capture.records) == hd(prior.records)
@@ -155,8 +157,8 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
           page([%{first | "content" => "private-child"}])
       end)
 
-    {:ok, config} = Fetch.new(client: client)
-    assert {:ok, capture} = Claude.fetch("s", config)
+    {:ok, config} = Request.new(client: client)
+    assert {:ok, capture} = History.fetch("s", config)
     assert [one, two, conflicting, child] = events(capture)
 
     assert Enum.map([one, two, conflicting, child], & &1.native_id) ==
@@ -431,16 +433,16 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
         "/v1/sessions/s/threads", nil -> page([])
       end)
 
-    {:ok, config} = Fetch.new(client: client, prior: prior, options: [content: :retain])
-    assert {:ok, capture} = Claude.fetch("s", config)
+    {:ok, config} = Request.new(client: client, prior: prior, options: [content: :retain])
+    assert {:ok, capture} = History.fetch("s", config)
     assert Enum.take(capture.records, length(prior.records)) == prior.records
     assert capture.correlations == prior.correlations
     assert capture.capture_id == prior.capture_id
-    {:ok, config} = Fetch.new(client: client, prior: prior)
-    assert {:ok, dropped} = Claude.fetch("s", config)
+    {:ok, config} = Request.new(client: client, prior: prior)
+    assert {:ok, dropped} = History.fetch("s", config)
     refute Jason.encode!(Evidence.to_wire(dropped)) =~ "local-secret"
-    assert {:error, _} = Claude.fetch("different", config)
-    assert {:error, _} = Fetch.new(client: client, prior: %{prior | provider: :agentcore})
+    assert {:error, _} = History.fetch("different", config)
+    assert {:error, _} = Request.new(client: client, prior: %{prior | provider: :agentcore})
   end
 
   test "configuration rejects malformed clients, options and prior captures" do
@@ -451,12 +453,14 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
           [client: nil],
           [unexpected: true]
         ] do
-      assert {:error, %Evidence.Error{}} = Fetch.new(opts)
+      assert {:error, %Evidence.Error{}} = Request.new(opts)
     end
 
-    {:ok, config} = Fetch.new(client: transport(fn _, _ -> flunk("invalid input requested") end))
-    assert {:error, _} = Claude.fetch("", config)
-    assert {:error, _} = Claude.fetch(nil, config)
+    {:ok, config} =
+      Request.new(client: transport(fn _, _ -> flunk("invalid input requested") end))
+
+    assert {:error, _} = History.fetch("", config)
+    assert {:error, _} = History.fetch(nil, config)
   end
 
   test "enumeration retains descriptors and retrieves valid siblings of malformed IDs" do
@@ -549,8 +553,8 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
         "/v1/sessions/s/threads", nil -> page([])
       end)
 
-    {:ok, config} = Fetch.new(client: next, prior: prior, options: [max_bytes: 5_000])
-    assert {:ok, capture} = Claude.fetch("s", config)
+    {:ok, config} = Request.new(client: next, prior: prior, options: [max_bytes: 5_000])
+    assert {:ok, capture} = History.fetch("s", config)
     assert Enum.map(events(capture), & &1.native_id) == ["live", "later"]
     assert byte_size(Jason.encode!(Evidence.to_wire(capture))) <= 5_000
   end
@@ -589,8 +593,8 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
         "/v1/sessions/s/threads", nil -> page([])
       end)
 
-    {:ok, config} = Fetch.new(client: client)
-    assert {:ok, capture} = Claude.fetch("s", config)
+    {:ok, config} = Request.new(client: client)
+    assert {:ok, capture} = History.fetch("s", config)
 
     assert Enum.map(capture.records, & &1.payload) == [
              %{"id" => "mcp-call", "type" => "agent.mcp_tool_use", "name" => "search"},
@@ -703,9 +707,9 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
       assert byte_size(Jason.encode!(Evidence.to_wire(prior))) < 1_500
 
       {:ok, config} =
-        Fetch.new(client: client, prior: prior, options: [content: :retain, max_bytes: 1_500])
+        Request.new(client: client, prior: prior, options: [content: :retain, max_bytes: 1_500])
 
-      assert {:ok, capture} = Claude.fetch("s", config)
+      assert {:ok, capture} = History.fetch("s", config)
       assert capture.capture_id == prior.capture_id
       assert capture.records == prior.records
       assert capture.correlations == prior.correlations
@@ -716,9 +720,9 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
       assert {:ok, _} = capture |> Evidence.to_wire() |> Evidence.from_wire()
 
       {:ok, too_small} =
-        Fetch.new(client: client, prior: prior, options: [content: :retain, max_bytes: 200])
+        Request.new(client: client, prior: prior, options: [content: :retain, max_bytes: 200])
 
-      assert {:error, %Evidence.Error{code: :bound_exceeded}} = Claude.fetch("s", too_small)
+      assert {:error, %Evidence.Error{code: :bound_exceeded}} = History.fetch("s", too_small)
       refute_received {:unexpected_enrichment, _}
     end
   end
@@ -749,9 +753,9 @@ defmodule ReqManagedAgents.Evidence.ClaudeTest do
 
   defp fetch(client, options \\ []) do
     {:ok, config} =
-      Fetch.new(client: client, options: Keyword.put_new(options, :content, :retain))
+      Request.new(client: client, options: Keyword.put_new(options, :content, :retain))
 
-    assert {:ok, capture} = Claude.fetch("s", config)
+    assert {:ok, capture} = History.fetch("s", config)
     capture
   end
 
