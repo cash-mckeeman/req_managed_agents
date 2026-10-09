@@ -291,6 +291,29 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.HistoryTest do
     assert Enum.any?(capture.diagnostics, &(&1.code == :bound_exceeded))
   end
 
+  test "caller death terminates an in-flight history request before its deadline" do
+    owner = self()
+
+    client =
+      transport(fn _, _ ->
+        send(owner, {:blocked_worker, self()})
+        Process.sleep(:infinity)
+      end)
+
+    caller = spawn(fn -> fetch(client, timeout_ms: 5_000) end)
+    assert_receive {:blocked_worker, worker}, 1_000
+    monitor = Process.monitor(worker)
+
+    try do
+      Process.exit(caller, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^worker, _}, 1_000
+    after
+      Process.exit(caller, :kill)
+      if Process.alive?(worker), do: Process.exit(worker, :kill)
+      Process.demonitor(monitor, [:flush])
+    end
+  end
+
   test "deadline terminates an in-flight request and preserves preceding pages" do
     owner = self()
 

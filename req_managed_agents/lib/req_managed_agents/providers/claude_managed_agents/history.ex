@@ -25,6 +25,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.History do
     Diagnostic,
     Error,
     NativeIdentity,
+    OwnedRequest,
     Record,
     Source,
     Validation
@@ -439,17 +440,13 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.History do
           )
     }
 
-    owner = self()
-    token = make_ref()
-    callers = [owner | Process.get(:"$callers", [])]
-
-    {pid, monitor} =
-      spawn_monitor(fn ->
-        Process.put(:"$callers", callers)
-        send(owner, {token, safe_request(client, state.capture.session_id, endpoint, params)})
-      end)
-
-    await(pid, monitor, token, max(0, remaining(state)))
+    case OwnedRequest.run(
+           fn -> safe_request(client, state.capture.session_id, endpoint, params) end,
+           state.deadline
+         ) do
+      {:ok, result} -> result
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp safe_request(client, session, endpoint, params) do
@@ -462,32 +459,6 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.History do
     _ -> {:error, :request_failed}
   catch
     _, _ -> {:error, :request_failed}
-  end
-
-  defp await(pid, monitor, token, timeout) do
-    receive do
-      {^token, result} ->
-        Process.demonitor(monitor, [:flush])
-        result
-
-      {:DOWN, ^monitor, :process, ^pid, _} ->
-        {:error, :request_failed}
-    after
-      timeout ->
-        Process.exit(pid, :kill)
-
-        receive do
-          {:DOWN, ^monitor, :process, ^pid, _} -> :ok
-        end
-
-        receive do
-          {^token, _} -> :ok
-        after
-          0 -> :ok
-        end
-
-        {:error, :deadline}
-    end
   end
 
   defp remaining(state), do: state.deadline - System.monotonic_time(:millisecond)
