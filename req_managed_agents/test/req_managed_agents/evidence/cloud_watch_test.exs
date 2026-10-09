@@ -359,6 +359,70 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
     end
   end
 
+  test "complete native spans reject invalid identities, overflow and conflicting sessions" do
+    invalid = [
+      {"short-trace", %{"traceId" => "a"}},
+      {"nonhex-trace", %{"traceId" => String.duplicate("g", 32)}},
+      {"zero-trace", %{"traceId" => String.duplicate("0", 32)}},
+      {"short-span", %{"spanId" => "1"}},
+      {"nonhex-span", %{"spanId" => String.duplicate("g", 16)}},
+      {"zero-span", %{"spanId" => String.duplicate("0", 16)}},
+      {"invalid-parent", %{"parentSpanId" => "bad-parent"}},
+      {"zero-parent", %{"parentSpanId" => String.duplicate("0", 16)}},
+      {"overflow-end", %{"endTimeUnixNano" => "18446744073709551616"}}
+    ]
+
+    malformed = Enum.map(invalid, fn {id, fields} -> event(id, span(fields)) end)
+    conflict = resource_event("conflicting-session", session("other"), session("s"))
+
+    maximum =
+      event(
+        "maximum-time",
+        span(%{
+          "startTimeUnixNano" => "18446744073709551615",
+          "endTimeUnixNano" => "18446744073709551615"
+        })
+      )
+
+    parent = event("valid-parent", span(%{"parentSpanId" => String.duplicate("2", 16)}))
+
+    capture =
+      enrich(
+        prior(),
+        client(fn _, _ -> page([event("good"), maximum, parent, conflict | malformed]) end)
+      )
+
+    linked_ids = MapSet.new(capture.correlations, & &1.from_record_id)
+    linked = Enum.filter(capture.records, &MapSet.member?(linked_ids, &1.id))
+    assert Enum.map(linked, & &1.native_id) == ["good", "maximum-time", "valid-parent"]
+    assert Enum.all?(capture.correlations, &(&1.relation == :same_session))
+    assert List.last(capture.sources).status == :partial
+    invalid_ids = ["conflicting-session" | Enum.map(invalid, &elem(&1, 0))]
+
+    for record <- Enum.filter(capture.records, &(&1.native_id in invalid_ids)) do
+      assert Enum.any?(
+               capture.diagnostics,
+               &(&1.record_id == record.id and &1.code == :unsupported_record)
+             )
+    end
+
+    assert Enum.count(capture.records, &(&1.native_id in invalid_ids)) == length(invalid_ids)
+  end
+
+  test "explicit matching trace selection accepts exact and mixed-case native IDs" do
+    trace = String.duplicate("ab", 16)
+    native = event("selected", span(%{"traceId" => trace}))
+
+    for selected <- [trace, String.upcase(trace), String.duplicate("aB", 16)] do
+      {:ok, query} = Query.new(Map.put(query_attrs(), :trace_ids, [selected]))
+      capture = enrich(prior(), client(fn _, _ -> page([native]) end), [], query)
+      [_, record] = capture.records
+      assert [%{from_record_id: id, relation: :same_session}] = capture.correlations
+      assert id == record.id
+      assert List.last(capture.sources).status == :complete
+    end
+  end
+
   defp enrich(prior, client, opts \\ [], query \\ query()) do
     {:ok, options} = Options.new(Keyword.put_new(opts, :content, :retain))
     assert {:ok, capture} = CloudWatch.enrich(prior, query, options, client: client)
@@ -466,8 +530,8 @@ defmodule ReqManagedAgents.Evidence.CloudWatchTest do
         overrides
       )
 
-  defp resource_event(id, attributes) do
-    event = event(id, span(%{"attributes" => []}))
+  defp resource_event(id, attributes, span_attributes \\ []) do
+    event = event(id, span(%{"attributes" => span_attributes}))
     message = Jason.decode!(event["message"])
 
     message =
