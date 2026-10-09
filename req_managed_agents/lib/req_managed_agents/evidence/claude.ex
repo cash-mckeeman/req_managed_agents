@@ -293,25 +293,25 @@ defmodule ReqManagedAgents.Evidence.Claude do
   end
 
   defp admit(state, source, payload, ordinal) when is_map(payload) do
+    observation = ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence.interpret(payload)
+
     attrs = %{
       id: id(),
       source_id: source.id,
-      native_id: native_id(payload),
+      native_id: observation.native_id,
       ordinal: ordinal,
       observed_at: DateTime.utc_now(),
-      occurred_at: Map.get(payload, "processed_at"),
+      occurred_at: observation.occurred_at,
       clock: :wall,
       kind: :native,
       payload: payload
     }
 
-    case Record.parse(attrs) do
+    case Record.parse(attrs, source.kind) do
       {:ok, record} ->
-        malformed_id? = Map.get(payload, "id") != nil and record.native_id == nil
-
         admit_record(state, %{
           record
-          | validation_issue?: record.validation_issue? or malformed_id?
+          | validation_issue?: record.validation_issue? or observation.malformed_metadata?
         })
 
       {:error, _} ->
@@ -323,7 +323,7 @@ defmodule ReqManagedAgents.Evidence.Claude do
 
   defp admit_record(state, record) do
     identity = NativeIdentity.new(record, state.config.options.content)
-    record = Content.apply(record, state.config.options.content)
+    record = Content.apply(record, state.config.options.content, :managed)
 
     bytes =
       record

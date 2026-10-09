@@ -65,6 +65,8 @@ defmodule ReqManagedAgents.Evidence.Capture do
   @spec parse(map()) :: {:ok, t()} | {:error, Error.t()}
   def parse(attrs) when is_map(attrs) do
     with 1 <- Validation.get(attrs, :version, 1),
+         {:ok, sources} <- Validation.list(Validation.get(attrs, :sources, []), &Source.new/1),
+         source_kinds = Map.new(sources, &{&1.id, &1.kind}),
          {:ok, fields} <-
            Validation.fields(attrs, [
              {:capture_id, &Validation.id/1, nil},
@@ -72,12 +74,14 @@ defmodule ReqManagedAgents.Evidence.Capture do
              {:session_id, &Validation.optional(&1, fn v -> Validation.id(v) end), nil},
              {:started_at, &Validation.utc/1, nil},
              {:ended_at, &Validation.utc/1, nil},
-             {:sources, &Validation.list(&1, fn v -> Source.new(v) end), []},
-             {:records, &Validation.list(&1, fn v -> Record.parse(v) end), []},
+             {:records,
+              &Validation.list(&1, fn v ->
+                parse_record(v, source_kinds)
+              end), []},
              {:correlations, &Validation.list(&1, fn v -> Correlation.new(v) end), []},
              {:diagnostics, &Validation.list(&1, fn v -> Diagnostic.new(v) end), []}
            ]),
-         capture = struct!(__MODULE__, fields),
+         capture = struct!(__MODULE__, Map.put(fields, :sources, sources)),
          true <- valid_identity?(capture),
          true <- valid_references?(capture) do
       {:ok, capture}
@@ -89,6 +93,11 @@ defmodule ReqManagedAgents.Evidence.Capture do
   end
 
   def parse(_), do: Error.error(:invalid_input)
+
+  defp parse_record(attrs, source_kinds) when is_map(attrs),
+    do: Record.parse(attrs, Map.get(source_kinds, Validation.get(attrs, :source_id)))
+
+  defp parse_record(_, _), do: Error.error(:invalid_input)
 
   defp valid_identity?(c) do
     Validation.ordered?(c.started_at, c.ended_at) and
@@ -223,7 +232,10 @@ defmodule ReqManagedAgents.Evidence.Capture do
   end
 
   defp retain(capture, content) do
-    records = Enum.map(capture.records, &Content.apply(&1, content))
+    kinds = Map.new(capture.sources, &{&1.id, &1.kind})
+
+    records =
+      Enum.map(capture.records, &Content.apply(&1, content, Map.fetch!(kinds, &1.source_id)))
 
     diagnostics =
       Enum.flat_map(records, fn record ->

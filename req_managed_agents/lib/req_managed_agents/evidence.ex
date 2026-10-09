@@ -2,6 +2,11 @@ defmodule ReqManagedAgents.Evidence do
   @moduledoc """
   Version 1 private managed-agent evidence. The producer dialect is
   `managed_agent_evidence_v1`; retention does not authorize browser display.
+
+  `Evidence.Recorder` observes live provider frames and local execution lifecycle events.
+  `Evidence.Claude` retrieves persisted Claude session and thread events without assigning
+  local attempt identities. Native interpretation follows each declared source kind when
+  restoring captures; content is dropped by default when constructing captures.
   """
   alias ReqManagedAgents.Evidence.{Capture, Error, Validation}
 
