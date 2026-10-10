@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.13.0 (2026-10-10)
+
+### Added
+
+- `Evidence` capture, record, correlation and artifact types, with versioned JSON
+  serialization and content dropped by default. `Evidence.Recorder` observes
+  session invocations, attempts, provider frames and local tool execution through
+  the opt-in `:evidence_recorder` session option.
+- `Providers.ClaudeManagedAgents.History` retrieves persisted session and thread
+  events with page, record, byte and deadline bounds and explicit source coverage.
+- `CloudWatch.Evidence` enriches captures from a caller-selected log group and UTC
+  interval using `FilterLogEvents`. Supported OTLP JSON spans can establish
+  same-session associations; this input shape has not been verified against live
+  AgentCore harness output.
+
+### Changed
+
+- Provider-specific clients, streaming, wire types, provisioning and artifact
+  handling now live under `Providers.ClaudeManagedAgents`,
+  `Providers.BedrockAgentCore` and `Providers.Local`. Shared AWS signing lives
+  under `AWS.SigV4`. Existing public module names remain compatibility entrypoints;
+  new code should use the provider namespaces.
+
 ## v0.12.0 (2026-10-07)
 
 ### Added

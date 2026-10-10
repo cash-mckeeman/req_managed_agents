@@ -2,6 +2,11 @@
 
 All notable changes to `req_managed_agents_host` are documented here.
 
+## v0.13.0
+
+- Requires `{:req_managed_agents, "~> 0.13.0"}` (was `~> 0.12.0`). No host API or
+  behaviour changes.
+
 ## v0.12.0
 
 - Requires `{:req_managed_agents, "~> 0.12.0"}` (was `~> 0.11.0`).
