@@ -7,6 +7,144 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.HistoryTest do
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.History
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request
 
+  test "descriptor links survive drop and bounded child coverage remains truthful" do
+    descriptors = [
+      %{
+        "type" => "session_thread",
+        "id" => "sthr_one",
+        "session_id" => "s",
+        "parent_thread_id" => nil
+      },
+      %{
+        "type" => "session_thread",
+        "id" => "sthr_two",
+        "session_id" => "s",
+        "parent_thread_id" => "sthr_one"
+      }
+    ]
+
+    client =
+      transport(fn
+        "/v1/sessions/s/events", nil -> page([event("session")])
+        "/v1/sessions/s/threads", nil -> page(descriptors)
+        "/v1/sessions/s/threads/sthr_one/events", nil -> page([event("child")])
+        "/v1/sessions/s/threads/sthr_two/events", nil -> page([])
+      end)
+
+    capture = fetch(client, content: :drop)
+    assert Enum.slice(Enum.map(capture.records, & &1.payload), 1, 2) == descriptors
+    assert Enum.any?(capture.sources, &(&1.scope == "sthr_one" and &1.status == :complete))
+    assert Enum.any?(capture.sources, &(&1.scope == "sthr_two" and &1.status == :complete))
+    assert {:ok, restored} = capture |> Evidence.to_wire() |> Evidence.from_wire()
+    assert restored.records == capture.records
+
+    bounded = fetch(client, content: :drop, max_pages: 3)
+
+    assert Enum.map(bounded.records, & &1.native_id) == [
+             "session",
+             "sthr_one",
+             "sthr_two",
+             "child"
+           ]
+
+    assert Enum.any?(
+             bounded.sources,
+             &(&1.scope == "sessions/s/threads" and &1.status == :partial)
+           )
+
+    refute Enum.any?(bounded.sources, &(&1.scope == "sthr_two"))
+  end
+
+  test "child gaps preserve completed siblings and available child records" do
+    for body <- [
+          %{},
+          page([event("available")], 42),
+          page([event("available")], "loop"),
+          {:error, 403, %{}}
+        ] do
+      client =
+        transport(fn
+          "/v1/sessions/s/events", nil -> page([])
+          "/v1/sessions/s/threads", nil -> page([%{"id" => "one"}, %{"id" => "two"}])
+          "/v1/sessions/s/threads/one/events", nil -> page([event("sibling")])
+          "/v1/sessions/s/threads/two/events", nil -> body
+          "/v1/sessions/s/threads/two/events", "loop" -> page([], "loop")
+        end)
+
+      capture = fetch(client)
+      assert Enum.any?(capture.records, &(&1.native_id == "sibling"))
+      assert Enum.any?(capture.sources, &(&1.scope == "one" and &1.status == :complete))
+
+      assert Enum.any?(
+               capture.sources,
+               &(&1.scope == "two" and &1.status in [:partial, :unavailable])
+             )
+
+      if is_map(body) and is_list(body["data"]),
+        do: assert(Enum.any?(capture.records, &(&1.native_id == "available")))
+    end
+  end
+
+  test "synthetic producer wire fixture preserves descriptor links and native thread scope" do
+    wire =
+      "test/fixtures/evidence/managed_threads_wirev1.json"
+      |> File.read!()
+      |> Jason.decode!()
+
+    assert {:ok, capture} = Evidence.from_wire(wire)
+
+    assert Enum.map(capture.records, & &1.payload) == [
+             %{
+               "type" => "session_thread",
+               "id" => "sthr_root",
+               "session_id" => "sesn_synthetic",
+               "parent_thread_id" => nil
+             },
+             %{
+               "type" => "session_thread",
+               "id" => "sthr_child",
+               "session_id" => "sesn_synthetic",
+               "parent_thread_id" => "sthr_root"
+             },
+             %{
+               "type" => "agent.message",
+               "id" => "evt_synthetic",
+               "session_thread_id" => "sthr_child"
+             }
+           ]
+
+    child = List.last(capture.records)
+    assert Enum.any?(capture.sources, &(&1.id == child.source_id and &1.scope == "sthr_child"))
+    assert Evidence.to_wire(capture) == wire
+  end
+
+  test "child deadline cancels its worker and preserves a completed sibling" do
+    owner = self()
+
+    client =
+      transport(fn
+        "/v1/sessions/s/events", nil ->
+          page([])
+
+        "/v1/sessions/s/threads", nil ->
+          page([%{"id" => "one"}, %{"id" => "two"}])
+
+        "/v1/sessions/s/threads/one/events", nil ->
+          page([event("sibling")])
+
+        "/v1/sessions/s/threads/two/events", nil ->
+          send(owner, {:child_worker, self()})
+          Process.sleep(:infinity)
+      end)
+
+    capture = fetch(client, timeout_ms: 200)
+    assert_receive {:child_worker, worker}
+    refute Process.alive?(worker)
+    assert Enum.any?(capture.records, &(&1.native_id == "sibling"))
+    assert Enum.any?(capture.sources, &(&1.scope == "one" and &1.status == :complete))
+    assert Enum.any?(capture.sources, &(&1.scope == "two" and &1.status == :partial))
+  end
+
   test "default drop honors raw numeric equality in nested retrieved payloads" do
     for {value, equivalent, unequal} <- [
           {1, 1.0, 2.0},
