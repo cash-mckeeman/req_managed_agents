@@ -137,7 +137,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.HistoryTest do
           Process.sleep(:infinity)
       end)
 
-    capture = fetch(client, timeout_ms: 200)
+    started = System.monotonic_time(:millisecond)
+    capture = fetch(client, timeout_ms: 1_000)
+    assert System.monotonic_time(:millisecond) - started < 2_000
     assert_receive {:child_worker, worker}
     refute Process.alive?(worker)
     assert Enum.any?(capture.records, &(&1.native_id == "sibling"))
