@@ -65,12 +65,15 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.AuthTest do
     direct = client(path)
     gateway = client(nil, api_key: "grant")
 
-    Req.Test.stub(__MODULE__, fn conn ->
-      case Plug.Conn.get_req_header(conn, "authorization") do
-        ["Bearer token-a"] -> assert Plug.Conn.get_req_header(conn, "x-api-key") == []
-        [] -> assert Plug.Conn.get_req_header(conn, "x-api-key") == ["grant"]
-      end
+    Req.Test.expect(__MODULE__, fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer token-a"]
+      assert Plug.Conn.get_req_header(conn, "x-api-key") == []
+      Req.Test.json(conn, %{"id" => "s"})
+    end)
 
+    Req.Test.expect(__MODULE__, fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == []
+      assert Plug.Conn.get_req_header(conn, "x-api-key") == ["grant"]
       Req.Test.json(conn, %{"id" => "s"})
     end)
 
