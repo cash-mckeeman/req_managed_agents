@@ -7,6 +7,46 @@ defmodule ReqManagedAgents.Evidence.AdapterTest do
 
   @time "2026-10-08T12:00:00Z"
 
+  test "descriptor metadata excludes nested content" do
+    payload = %{
+      "type" => "session_thread",
+      "id" => "sthr_child",
+      "session_id" => "sesn_test",
+      "parent_thread_id" => "sthr_parent",
+      "agent" => %{"system" => "PRIVATE_SENTINEL"},
+      "name" => "PRIVATE_SENTINEL",
+      "system" => "PRIVATE_SENTINEL"
+    }
+
+    observation = Claude.interpret(payload)
+    assert observation.supported?
+    refute observation.malformed_metadata?
+    assert observation.safe_payload == Map.take(payload, ~w(type id session_id parent_thread_id))
+    assert {:ok, dropped} = Record.new(record(payload))
+    assert dropped.payload == observation.safe_payload
+    refute Jason.encode!(dropped.payload) =~ "PRIVATE_SENTINEL"
+    assert {:ok, retained} = Record.new(record(payload), content: :retain)
+    assert retained.payload == payload
+
+    root = Map.put(payload, "parent_thread_id", nil)
+    refute Claude.interpret(root).malformed_metadata?
+    assert Map.fetch!(Claude.interpret(root).safe_payload, "parent_thread_id") == nil
+
+    for invalid <- [
+          Map.delete(payload, "parent_thread_id"),
+          Map.put(payload, "parent_thread_id", 12),
+          Map.put(payload, "parent_thread_id", ""),
+          Map.put(payload, "session_id", nil),
+          Map.put(payload, "id", "")
+        ] do
+      assert Claude.interpret(invalid).malformed_metadata?
+      assert {:ok, diagnosed} = Record.new(record(invalid))
+      assert diagnosed.validation_issue?
+    end
+
+    refute Claude.interpret(%{"type" => "unrelated", "id" => "other"}).supported?
+  end
+
   test "Claude interpretation keeps safe native facts and diagnoses malformed metadata" do
     payload = %{
       "type" => "agent.message",

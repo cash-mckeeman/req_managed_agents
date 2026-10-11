@@ -51,8 +51,21 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
   @usage ~w(input_tokens output_tokens cache_read_input_tokens cache_creation_input_tokens total_tokens
     inputTokens outputTokens totalTokens)
 
+  defp supported?(%{"type" => "session_thread"}), do: true
   defp supported?(%{"type" => type}) when type in @claude_types, do: true
   defp supported?(_), do: false
+
+  defp valid_id?(value), do: match?({:ok, _}, Validation.id(value))
+
+  defp malformed_metadata?(%{"type" => "session_thread"} = payload) do
+    not valid_id?(Map.get(payload, "id")) or
+      not valid_id?(Map.get(payload, "session_id")) or
+      case Map.fetch(payload, "parent_thread_id") do
+        {:ok, nil} -> false
+        {:ok, parent} -> not valid_id?(parent)
+        :error -> true
+      end
+  end
 
   defp malformed_metadata?(%{"type" => type} = payload) when type in @claude_types do
     malformed_fields?(payload, @strings, &is_binary/1) or
@@ -76,6 +89,16 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
     do: not malformed_fields?(usage, @usage, &nonnegative_number?/1)
 
   defp valid_usage?(_), do: false
+
+  defp metadata(%{"type" => "session_thread"} = payload) do
+    payload
+    |> Map.take(~w(type id session_id parent_thread_id))
+    |> Map.filter(fn
+      {"type", _} -> true
+      {"parent_thread_id", nil} -> true
+      {_, value} -> valid_id?(value)
+    end)
+  end
 
   defp metadata(%{"type" => type} = payload) when type in @claude_types do
     payload

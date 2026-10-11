@@ -1,0 +1,138 @@
+{
+  "capture_id": "zLEsq263SeXumPWpG7raPaxG",
+  "correlations": [],
+  "diagnostics": [
+    {
+      "code": "content_unavailable",
+      "count": 1,
+      "message": "Record content is unavailable.",
+      "record_id": "ZXKxX17rHz26fJD06XLoMOe7",
+      "source_id": "zN_S-habW7YynY2e-mIeujc5"
+    },
+    {
+      "code": "content_unavailable",
+      "count": 1,
+      "message": "Record content is unavailable.",
+      "record_id": "cYbKVPv-v8YZ_44EoQnkHGSH",
+      "source_id": "zN_S-habW7YynY2e-mIeujc5"
+    },
+    {
+      "code": "content_unavailable",
+      "count": 1,
+      "message": "Record content is unavailable.",
+      "record_id": "axW8IVHKqd3cJpHX9HqQa83r",
+      "source_id": "8DjJMHjnrdK-sIHiHGIqJcEq"
+    }
+  ],
+  "ended_at": "2026-10-11T14:56:56.468045Z",
+  "provider": "managed",
+  "records": [
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "dropped",
+      "id": "ZXKxX17rHz26fJD06XLoMOe7",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "sthr_root",
+      "observed_at": "2026-10-11T14:56:56.465571Z",
+      "occurred_at": null,
+      "ordinal": 1,
+      "payload": {
+        "id": "sthr_root",
+        "parent_thread_id": null,
+        "session_id": "sesn_synthetic",
+        "type": "session_thread"
+      },
+      "source_id": "zN_S-habW7YynY2e-mIeujc5"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "dropped",
+      "id": "cYbKVPv-v8YZ_44EoQnkHGSH",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "sthr_child",
+      "observed_at": "2026-10-11T14:56:56.467724Z",
+      "occurred_at": null,
+      "ordinal": 2,
+      "payload": {
+        "id": "sthr_child",
+        "parent_thread_id": "sthr_root",
+        "session_id": "sesn_synthetic",
+        "type": "session_thread"
+      },
+      "source_id": "zN_S-habW7YynY2e-mIeujc5"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "dropped",
+      "id": "axW8IVHKqd3cJpHX9HqQa83r",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "evt_synthetic",
+      "observed_at": "2026-10-11T14:56:56.468010Z",
+      "occurred_at": null,
+      "ordinal": 1,
+      "payload": {
+        "id": "evt_synthetic",
+        "session_thread_id": "sthr_child",
+        "type": "agent.message"
+      },
+      "source_id": "8DjJMHjnrdK-sIHiHGIqJcEq"
+    }
+  ],
+  "session_id": "sesn_synthetic",
+  "sources": [
+    {
+      "id": "tswKEby8hjfCDf8Xct-v-C8I",
+      "interval": null,
+      "kind": "claude_session",
+      "pages": 1,
+      "reason": null,
+      "records_seen": 0,
+      "scope": "sesn_synthetic",
+      "status": "complete"
+    },
+    {
+      "id": "zN_S-habW7YynY2e-mIeujc5",
+      "interval": null,
+      "kind": "claude_thread",
+      "pages": 1,
+      "reason": null,
+      "records_seen": 2,
+      "scope": "sessions/sesn_synthetic/threads",
+      "status": "complete"
+    },
+    {
+      "id": "1elLd1ujqXidW8_l8mmsgpx-",
+      "interval": null,
+      "kind": "claude_thread",
+      "pages": 1,
+      "reason": null,
+      "records_seen": 0,
+      "scope": "sthr_root",
+      "status": "complete"
+    },
+    {
+      "id": "8DjJMHjnrdK-sIHiHGIqJcEq",
+      "interval": null,
+      "kind": "claude_thread",
+      "pages": 1,
+      "reason": null,
+      "records_seen": 1,
+      "scope": "sthr_child",
+      "status": "complete"
+    }
+  ],
+  "started_at": "2026-10-11T14:56:56.445251Z",
+  "version": 1
+}
