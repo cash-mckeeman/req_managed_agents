@@ -10,6 +10,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
   @behaviour ReqManagedAgents.Providers.ClaudeManagedAgents.Client.Behaviour
 
   alias ReqManagedAgents.Config
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Auth
 
   @base_url "https://api.anthropic.com"
   @beta "managed-agents-2026-04-01"
@@ -22,6 +23,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
   @derive {Inspect, except: [:api_key]}
   defstruct [
     :api_key,
+    :bearer_token_file,
     base_url: @base_url,
     beta: @beta,
     files_beta: @files_beta,
@@ -32,7 +34,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
   ]
 
   @type t :: %__MODULE__{
-          api_key: String.t(),
+          api_key: String.t() | nil,
+          bearer_token_file: String.t() | nil,
           base_url: String.t(),
           beta: String.t(),
           files_beta: String.t(),
@@ -45,12 +48,27 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
   @doc """
   Build a client. Resolves `:api_key` from the option, then
   `Application.get_env(:req_managed_agents, :api_key)`, then `ANTHROPIC_API_KEY`.
-  Other keys fall back to the same application env, then defaults.
+  Alternatively resolve `:bearer_token_file` from the option, application env or
+  `ANTHROPIC_BEARER_TOKEN_FILE`. Select exactly one source; explicit nil disables
+  a source. Other keys fall back to application env, then defaults.
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
+    {key, path} =
+      case Auth.resolve(opts) do
+        {:ok, {:api_key, key}} ->
+          {key, nil}
+
+        {:ok, {:bearer_file, path}} ->
+          {nil, path}
+
+        {:error, reason} ->
+          raise ArgumentError, "invalid CMA authentication configuration: #{reason}"
+      end
+
     %__MODULE__{
-      api_key: Config.resolve!(opts, :api_key, "ANTHROPIC_API_KEY"),
+      api_key: key,
+      bearer_token_file: path,
       base_url: Config.resolve(opts, :base_url, nil, @base_url),
       beta: Config.resolve(opts, :beta, nil, @beta),
       anthropic_version: Config.resolve(opts, :anthropic_version, nil, @anthropic_version),
@@ -65,8 +83,15 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
   def headers(%ReqManagedAgents.Client{} = c), do: headers(normalize(c))
 
   def headers(%__MODULE__{} = c) do
+    case Auth.headers(c) do
+      {:ok, auth} -> auth ++ metadata_headers(c)
+      {:error, {:authentication_error, reason}} -> raise Auth.Error, reason: reason
+    end
+  end
+
+  @doc false
+  def metadata_headers(c) do
     [
-      {"x-api-key", c.api_key},
       {"anthropic-version", c.anthropic_version},
       {"anthropic-beta", c.beta},
       {"content-type", "application/json"}
@@ -76,7 +101,6 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
   # Files endpoints use their own beta header (no JSON content-type — multipart sets its own).
   defp file_headers(c, beta) do
     [
-      {"x-api-key", c.api_key},
       {"anthropic-version", c.anthropic_version},
       {"anthropic-beta", beta}
     ]
@@ -89,6 +113,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
        extra)
     |> Req.new()
     |> Req.merge(c.req_options)
+    |> Auth.attach(c)
   end
 
   defp file_part(path, content_type) when is_binary(path) do
@@ -305,18 +330,19 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
     [
       base_url: c.base_url,
       url: path,
-      headers: headers(c),
+      headers: metadata_headers(c),
       receive_timeout: c.receive_timeout,
       retry: :transient,
       max_retries: 3
     ]
     |> Req.new()
     |> Req.merge(c.req_options)
+    |> Auth.attach(c)
   end
 
   defp handle({:ok, %{status: s, body: body}}) when s in 200..299, do: {:ok, body}
   defp handle({:ok, %{status: s, body: body}}), do: {:error, {:http_error, s, body}}
-  defp handle({:error, reason}), do: {:error, reason}
+  defp handle({:error, _} = error), do: Auth.result(error)
   defp normalize(%__MODULE__{} = client), do: client
 
   defp normalize(%ReqManagedAgents.Client{} = client),

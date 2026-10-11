@@ -14,7 +14,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Stream do
       {:managed_agents, ref, :done}
       {:managed_agents, ref, {:error, reason}}
   """
-  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Auth, Client}
   alias ReqManagedAgents.SSE
 
   @doc """
@@ -37,7 +37,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Stream do
     md = opts[:telemetry_metadata] || %{}
 
     url = "#{client.base_url}/v1/sessions/#{session_id}/events/stream"
-    headers = Client.headers(client) ++ [{"accept", "text/event-stream"}]
+    headers = Client.metadata_headers(client) ++ [{"accept", "text/event-stream"}]
 
     req =
       Req.new(
@@ -49,8 +49,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Stream do
         into: :self
       )
       |> Req.merge(client.req_options)
+      |> Auth.attach(client)
 
-    case Req.get(req) do
+    case Auth.result(Req.get(req)) do
       {:ok, %Req.Response{status: status} = resp} when status in 200..299 ->
         :telemetry.execute([:req_managed_agents, :stream, :connected], %{}, meta(md, session_id))
         send(subscriber, {:managed_agents, ref, :connected})
