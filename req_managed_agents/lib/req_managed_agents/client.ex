@@ -22,6 +22,7 @@ defmodule ReqManagedAgents.Client do
   @derive {Inspect, except: [:api_key]}
   defstruct [
     :api_key,
+    :bearer_token_file,
     base_url: @base_url,
     beta: @beta,
     files_beta: @files_beta,
@@ -32,7 +33,8 @@ defmodule ReqManagedAgents.Client do
   ]
 
   @type t :: %__MODULE__{
-          api_key: String.t(),
+          api_key: String.t() | nil,
+          bearer_token_file: String.t() | nil,
           base_url: String.t(),
           beta: String.t(),
           files_beta: String.t(),

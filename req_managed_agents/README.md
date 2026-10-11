@@ -76,7 +76,8 @@ list of keys read anywhere in the library:
 
 | Key | opt | `:req_managed_agents` app env | ENV var | Default |
 | --- | --- | --- | --- | --- |
-| Anthropic API key | `:api_key` | `:api_key` | `ANTHROPIC_API_KEY` | *(required)* |
+| Anthropic API key | `:api_key` | `:api_key` | `ANTHROPIC_API_KEY` | *(one auth source required)* |
+| Anthropic bearer file | `:bearer_token_file` | `:bearer_token_file` | `ANTHROPIC_BEARER_TOKEN_FILE` | *(one auth source required)* |
 | Base URL | `:base_url` | `:base_url` | — | `"https://api.anthropic.com"` |
 | Beta header | `:beta` | `:beta` | — | `"managed-agents-2026-04-01"` |
 | Files beta header | `:files_beta` | `:files_beta` | — | `"files-api-2025-04-14"` |
@@ -87,6 +88,18 @@ list of keys read anywhere in the library:
 | AWS secret access key | `:aws_secret_access_key` | `:aws_secret_access_key` | `AWS_SECRET_ACCESS_KEY` | *(required)* |
 | AWS region | `:aws_region` | `:aws_region` | `AWS_REGION`, then `AWS_DEFAULT_REGION` | `"us-east-1"` |
 | AWS session token | `:aws_session_token` | `:aws_session_token` | `AWS_SESSION_TOKEN` | `nil` |
+
+Select exactly one auth source. Explicit `api_key: nil` selects a bearer file even
+when an API key is configured; `bearer_token_file: nil` selects an API key even
+when a bearer file is configured. Both clients can coexist in one process.
+
+The bearer file contains JSON `{"access_token":"…","expires_at":2000000600}`,
+where `expires_at` is UTC Unix seconds. Supply it as a regular file and replace
+it atomically when rotating credentials. Every JSON, Files and SSE HTTP attempt
+reads the current file, including transient retries. Invalid files or tokens
+with 30 seconds or less remaining fail before dispatch with
+`{:error, {:authentication_error, reason}}`. Bearer requests do not follow redirects.
+
 
 `Providers.ClaudeManagedAgents.Client.new/1` resolves the Anthropic keys; `AWS.SigV4.from_env/1`
 resolves the AWS keys (it still works called with no args — `opts` just gives

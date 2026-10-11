@@ -14,7 +14,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   the response echoes it back; see `ReqManagedAgents.Budget`. It cannot be combined with
   `:session_id`.
 
-  A `model_config: %{api_key:, base_url:}` opt builds the client when no `:client` is injected — the canonical way to run a session on a granted key + routed base_url.
+  The `model_config` keys `:api_key`, `:bearer_token_file` and `:base_url` build the client when no `:client` is injected.
   """
   @behaviour ReqManagedAgents.Provider
 
@@ -545,7 +545,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     end)
   end
 
-  # Canonical model_config keys (:api_key, :base_url) build the client when no
+  # Canonical model_config keys (:api_key, :bearer_token_file, :base_url) build the client when no
   # explicit :client is injected — this is how a granted key + routed base_url
   # reach a session on this provider. Only the client-relevant keys are taken;
   # :model/:metadata stay opaque to this provider.
@@ -553,7 +553,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     case opts[:client] do
       nil ->
         config = opts[:model_config] || %{}
-        Client.new(config |> Map.take([:api_key, :base_url]) |> Map.to_list())
+        Client.new(config |> Map.take([:api_key, :bearer_token_file, :base_url]) |> Map.to_list())
 
       client ->
         client
