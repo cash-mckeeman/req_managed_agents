@@ -32,16 +32,19 @@ defmodule ReqManagedAgents.Evidence.AdapterTest do
     refute Claude.interpret(root).malformed_metadata?
     assert Map.fetch!(Claude.interpret(root).safe_payload, "parent_thread_id") == nil
 
-    for invalid <- [
-          Map.delete(payload, "parent_thread_id"),
-          Map.put(payload, "parent_thread_id", 12),
-          Map.put(payload, "parent_thread_id", ""),
-          Map.put(payload, "session_id", nil),
-          Map.put(payload, "id", "")
+    for {invalid, omitted} <- [
+          {Map.delete(payload, "parent_thread_id"), "parent_thread_id"},
+          {Map.put(payload, "parent_thread_id", 12), "parent_thread_id"},
+          {Map.put(payload, "parent_thread_id", ""), "parent_thread_id"},
+          {Map.put(payload, "session_id", nil), "session_id"},
+          {Map.put(payload, "id", ""), "id"}
         ] do
-      assert Claude.interpret(invalid).malformed_metadata?
+      observation = Claude.interpret(invalid)
+      assert observation.malformed_metadata?
+      refute Map.has_key?(observation.safe_payload, omitted)
       assert {:ok, diagnosed} = Record.new(record(invalid))
       assert diagnosed.validation_issue?
+      refute Map.has_key?(diagnosed.payload, omitted)
     end
 
     refute Claude.interpret(%{"type" => "unrelated", "id" => "other"}).supported?
