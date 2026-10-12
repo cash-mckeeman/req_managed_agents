@@ -374,6 +374,14 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def reconnect(conn, subscriber, seen) do
+    case reconnect_with_events(conn, subscriber, seen) do
+      {:ok, conn, pending, seen, _events} -> {:ok, conn, pending, seen}
+      error -> error
+    end
+  end
+
+  @impl true
+  def reconnect_with_events(conn, subscriber, seen) do
     {started?, conn} = Map.pop(conn, :evidence_attempt_started, false)
 
     evidence =
@@ -388,7 +396,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     case Client.list_all_events(conn.client, conn.session_id) do
       {:ok, past} ->
         Enum.each(past, &Recorder.history(evidence || Map.get(conn, :evidence_recorder), &1))
-        {_fresh, seen} = Consolidate.dedupe(past, seen)
+        {fresh, seen} = Consolidate.dedupe(past, seen)
         pending = pending_tool_uses(past)
 
         ref = make_ref()
@@ -398,7 +406,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
             Stream.stream(conn.client, conn.session_id, subscriber, ref: ref)
           end)
 
-        {:ok, Map.merge(conn, %{ref: ref, consumer: task, evidence: evidence}), pending, seen}
+        {:ok, Map.merge(conn, %{ref: ref, consumer: task, evidence: evidence}), pending, seen,
+         fresh}
 
       {:error, reason} ->
         Recorder.observe(evidence, :transport_error, error_code: Recorder.code(reason))

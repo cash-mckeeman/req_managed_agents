@@ -56,7 +56,7 @@ defmodule ReqManagedAgents.Session.State do
           enforced_terminal_tool: String.t() | nil,
           pending_user_message: String.t() | nil,
           delta?: boolean(),
-          kicked_off: boolean(),
+          kicked_off: boolean() | :resuming,
           seen: MapSet.t(),
           reconnect_attempts: non_neg_integer(),
           events: [map()],
