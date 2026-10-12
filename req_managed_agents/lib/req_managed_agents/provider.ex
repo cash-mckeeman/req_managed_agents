@@ -76,6 +76,7 @@ defmodule ReqManagedAgents.Provider do
   @doc """
   :streaming only — after a stream drop, re-open the stream (delivering to `subscriber`) and
   return any unanswered tool calls to re-drive locally, plus the grown `seen` set.
+  `Session` prefers `reconnect_with_events/3` when both callbacks are implemented.
 
   Optional: required only for providers that must recover events or unanswered tool
   calls across a reconnect (streaming drops, or list-events surfaces). A
@@ -84,6 +85,17 @@ defmodule ReqManagedAgents.Provider do
   """
   @callback reconnect(conn(), subscriber :: pid(), seen :: MapSet.t()) ::
               {:ok, conn(), [ReqManagedAgents.ToolUse.t()], MapSet.t()} | {:error, term()}
+
+  @doc """
+  Optional alternative to `reconnect/3`, also returning fresh historical events in
+  chronological order, already deduplicated and included in the returned seen set.
+  Session prefers this callback and processes history before queued stream events,
+  without recording it as live evidence. Initial reattachment ignores historical
+  turns; pending tool calls take precedence over historical event processing.
+  """
+  @callback reconnect_with_events(conn(), subscriber :: pid(), seen :: MapSet.t()) ::
+              {:ok, conn(), [ReqManagedAgents.ToolUse.t()], MapSet.t(), [map()]}
+              | {:error, term()}
 
   @doc """
   The provider-side session id `conn` carries, if any (`Session` surfaces it in
@@ -109,7 +121,7 @@ defmodule ReqManagedAgents.Provider do
   creating a fresh one. Gates `Session`'s reattach behavior (#66).
 
   Returning `true` routes `Session` through the `:resume` → `:reconnect` continuation.
-  If the provider does not implement `reconnect/3`, resume proceeds with no event
+  If neither reconnect callback is implemented, resume proceeds with no event
   recovery (`{:ok, conn, [], seen}`) — correct for request_response reattach. A
   synchronous `Session.run/2` resume with no `:prompt` has nothing to deliver and
   parks until the run timeout — reattach callers should always pass `prompt:`.
@@ -168,6 +180,7 @@ defmodule ReqManagedAgents.Provider do
                       push_input: 2,
                       turn_boundary?: 1,
                       reconnect: 3,
+                      reconnect_with_events: 3,
                       teardown: 2,
                       transcript: 1,
                       text_delta: 1,

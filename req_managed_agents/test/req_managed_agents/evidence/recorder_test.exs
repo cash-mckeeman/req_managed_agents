@@ -747,7 +747,10 @@ defmodule ReqManagedAgents.Evidence.RecorderTest do
                1 + if(opts[:resume], do: 1, else: 0) + if(opts[:fail_history], do: 1, else: 0)
            }
 
-    assert Enum.map(first.events, & &1["id"]) == ["done-1"]
+    expected_first =
+      if opts[:resume] || opts[:idle_drop], do: ["done-1"], else: ["preview", "done-1"]
+
+    assert Enum.map(first.events, & &1["id"]) == expected_first
     assert Enum.map(second.events, & &1["id"]) == ["done-2"]
     GenServer.stop(session)
     Agent.stop(transport)

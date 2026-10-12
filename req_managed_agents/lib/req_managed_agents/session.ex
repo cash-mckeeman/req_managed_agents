@@ -316,7 +316,7 @@ defmodule ReqManagedAgents.Session do
   # kicked_off so the reconnected stream's :connected does not fire a spurious kickoff.
   def handle_continue(:resume, s) do
     send(self(), :reconnect)
-    {:noreply, %{s | kicked_off: true}}
+    {:noreply, %{s | kicked_off: :resuming}}
   end
 
   @impl true
@@ -357,9 +357,11 @@ defmodule ReqManagedAgents.Session do
     s = prepare_reconnect_evidence(s)
 
     case safe_reconnect(s) do
-      {:ok, conn, pending, seen} ->
+      {:ok, conn, pending, seen, recovered} ->
         # reconnect_attempts is NOT reset here — only a real terminal (finish/2) resets it — so a
         # connect→drop flap actually escalates the backoff instead of hammering at 500ms.
+        resuming? = s.kicked_off == :resuming
+
         s = %{
           s
           | conn: conn,
@@ -367,7 +369,7 @@ defmodule ReqManagedAgents.Session do
             ref: s.provider.ref(conn),
             consumer: s.provider.consumer(conn),
             seen: seen,
-            turn_events: []
+            kicked_off: true
         }
 
         cond do
@@ -388,8 +390,11 @@ defmodule ReqManagedAgents.Session do
               false
             )
 
-          true ->
+          resuming? ->
             {:noreply, s}
+
+          true ->
+            recover_events(s, recovered)
         end
 
       # A sync run/2 surfaces a list/reconnect failure; a live session backs off and retries.
@@ -556,6 +561,25 @@ defmodule ReqManagedAgents.Session do
       _ ->
         s
     end
+  end
+
+  # History has already been recorded with historical provenance and deduplicated
+  # by the provider. Process it before queued stream events can observe the grown seen set.
+  defp recover_events(s, events) do
+    Enum.reduce_while(events, {:noreply, s}, fn ev, {:noreply, s} ->
+      forward_with_delta(s, ev)
+      s = %{s | turn_events: s.turn_events ++ [ev]}
+
+      result =
+        if s.provider.turn_boundary?(ev),
+          do: handle_turn(s, s.turn_events),
+          else: {:noreply, s}
+
+      case result do
+        {:noreply, _} -> {:cont, result}
+        {:stop, _, _} -> {:halt, result}
+      end
+    end)
   end
 
   # ── shared per-turn handling ──────────────────────────────────────────────────
@@ -750,10 +774,20 @@ defmodule ReqManagedAgents.Session do
   defp prepare_reconnect_evidence(s), do: s
 
   defp safe_reconnect(s) do
-    if Code.ensure_loaded?(s.provider) and function_exported?(s.provider, :reconnect, 3) do
-      s.provider.reconnect(s.conn, self(), s.seen)
-    else
-      {:ok, s.conn, [], s.seen}
+    Code.ensure_loaded?(s.provider)
+
+    cond do
+      function_exported?(s.provider, :reconnect_with_events, 3) ->
+        s.provider.reconnect_with_events(s.conn, self(), s.seen)
+
+      function_exported?(s.provider, :reconnect, 3) ->
+        case s.provider.reconnect(s.conn, self(), s.seen) do
+          {:ok, conn, pending, seen} -> {:ok, conn, pending, seen, []}
+          result -> result
+        end
+
+      true ->
+        {:ok, s.conn, [], s.seen, []}
     end
   end
 
