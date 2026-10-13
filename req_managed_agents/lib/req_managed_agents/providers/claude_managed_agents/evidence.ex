@@ -46,7 +46,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
     user.custom_tool_result agent.mcp_tool_use agent.mcp_tool_result user.tool_result
     user.tool_confirmation session.status_idle session.status_running session.status_terminated
     session.error span.model_request_start span.model_request_end)
-  @strings ~w(id session_id thread_id span_id parent_span_id tool_use_id name status stop_reason model_request_start_id mcp_tool_use_id custom_tool_use_id session_thread_id from_session_thread_id to_session_thread_id)
+  @strings ~w(id session_id thread_id span_id parent_span_id tool_use_id name status model_request_start_id mcp_tool_use_id custom_tool_use_id session_thread_id from_session_thread_id to_session_thread_id)
   @times ~w(created_at timestamp started_at ended_at processed_at)
   @usage ~w(input_tokens output_tokens cache_read_input_tokens cache_creation_input_tokens total_tokens
     inputTokens outputTokens totalTokens)
@@ -69,6 +69,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
 
   defp malformed_metadata?(%{"type" => type} = payload) when type in @claude_types do
     malformed_fields?(payload, @strings, &is_binary/1) or
+      malformed_fields?(payload, ["stop_reason"], &(normalize_stop_reason(&1) != nil)) or
       malformed_fields?(payload, @times, &match?({:ok, _}, Validation.utc(&1))) or
       malformed_fields?(payload, ["usage", "model_usage"], &valid_usage?/1)
   end
@@ -103,12 +104,27 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
   defp metadata(%{"type" => type} = payload) when type in @claude_types do
     payload
     |> strings(["type" | @strings])
+    |> stop_reason(payload)
     |> Map.merge(times(payload))
     |> usage(payload, "usage")
     |> usage(payload, "model_usage")
   end
 
   defp metadata(_), do: %{}
+
+  defp stop_reason(result, payload) do
+    case normalize_stop_reason(Map.get(payload, "stop_reason")) do
+      nil -> result
+      reason -> Map.put(result, "stop_reason", reason)
+    end
+  end
+
+  defp normalize_stop_reason(reason) when is_binary(reason), do: reason
+
+  defp normalize_stop_reason(%{"type" => type}) when is_binary(type) and byte_size(type) > 0,
+    do: %{"type" => type}
+
+  defp normalize_stop_reason(_), do: nil
 
   defp strings(payload, fields) do
     payload

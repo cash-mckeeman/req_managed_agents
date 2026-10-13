@@ -1,11 +1,127 @@
 defmodule ReqManagedAgents.Evidence.AdapterTest do
   use ExUnit.Case, async: true
 
+  alias ReqManagedAgents.Evidence
   alias ReqManagedAgents.Evidence.{Adapter, Capture, NativeObservation, Record}
   alias ReqManagedAgents.Providers.BedrockAgentCore.Evidence, as: Bedrock
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Event
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence, as: Claude
 
   @time "2026-10-08T12:00:00Z"
+
+  test "typed Claude idle reasons survive capture serialization without unsupported diagnostics" do
+    for {reason, terminal} <- [
+          {"end_turn", :end_turn},
+          {"requires_action", :requires_action},
+          {"future_reason", :unknown_idle}
+        ] do
+      payload = %{"type" => "session.status_idle", "stop_reason" => %{"type" => reason}}
+
+      observation = Claude.interpret(payload)
+      assert observation.supported?
+      refute observation.malformed_metadata?
+      assert observation.safe_payload == payload
+      assert Event.classify(payload) == terminal
+      assert {:ok, capture} = Capture.new(capture_attrs(payload))
+      assert [%Record{payload: ^payload, validation_issue?: false}] = capture.records
+      refute Enum.any?(capture.diagnostics, &(&1.code == :unsupported_record))
+
+      wire = capture |> Evidence.to_wire() |> Jason.encode!() |> Jason.decode!()
+      assert {:ok, restored} = Evidence.from_wire(wire)
+      assert [%Record{payload: ^payload, validation_issue?: false}] = restored.records
+      assert Event.classify(hd(restored.records).payload) == terminal
+      refute Enum.any?(restored.diagnostics, &(&1.code == :unsupported_record))
+    end
+  end
+
+  test "Claude stop reason projection excludes arbitrary nested content from capture JSON" do
+    payload = %{
+      "type" => "session.status_idle",
+      "stop_reason" => %{
+        "type" => "requires_action",
+        "event_ids" => ["event"],
+        "content" => "PRIVATE_SENTINEL",
+        "extra" => %{"nested" => [%{"text" => "PRIVATE_SENTINEL"}]}
+      }
+    }
+
+    safe = %{"type" => "session.status_idle", "stop_reason" => %{"type" => "requires_action"}}
+    assert Claude.interpret(payload).safe_payload == safe
+    assert {:ok, capture} = Capture.new(capture_attrs(payload))
+    assert hd(capture.records).payload == safe
+    encoded = Jason.encode!(Evidence.to_wire(capture))
+    refute encoded =~ "PRIVATE_SENTINEL"
+    assert {:ok, restored} = Evidence.from_wire(Jason.decode!(encoded))
+    assert hd(restored.records).payload == safe
+    refute Jason.encode!(Evidence.to_wire(restored)) =~ "PRIVATE_SENTINEL"
+
+    assert {:ok, retained} = Capture.new(capture_attrs(payload), content: :retain)
+    assert hd(retained.records).payload == payload
+  end
+
+  test "Claude stop reasons preserve legacy strings and optional absence" do
+    for {fields, safe_fields} <- [
+          {%{}, %{}},
+          {%{"stop_reason" => nil}, %{}},
+          {%{"stop_reason" => "end_turn"}, %{"stop_reason" => "end_turn"}},
+          {%{"stop_reason" => ""}, %{"stop_reason" => ""}}
+        ] do
+      payload = Map.put(fields, "type", "session.status_idle")
+      safe = Map.put(safe_fields, "type", "session.status_idle")
+      refute Claude.interpret(payload).malformed_metadata?
+      assert {:ok, capture} = Capture.new(capture_attrs(payload))
+      assert [%Record{payload: ^safe, validation_issue?: false}] = capture.records
+      refute Enum.any?(capture.diagnostics, &(&1.code == :unsupported_record))
+    end
+  end
+
+  test "malformed Claude stop reasons remain diagnostic after content drop and JSON restoration" do
+    for reason <- [
+          %{},
+          %{"type" => nil},
+          %{"type" => ""},
+          %{"type" => 1},
+          %{"type" => true},
+          %{"type" => []},
+          %{"type" => %{"content" => "PRIVATE_SENTINEL"}},
+          1,
+          true,
+          [],
+          ["end_turn"]
+        ] do
+      payload = %{"type" => "session.status_idle", "stop_reason" => reason}
+      observation = Claude.interpret(payload)
+      assert observation.supported?
+      assert observation.malformed_metadata?
+      refute Map.has_key?(observation.safe_payload, "stop_reason")
+      assert {:ok, capture} = Capture.new(capture_attrs(payload))
+      assert [%Record{validation_issue?: true}] = capture.records
+      assert Enum.any?(capture.diagnostics, &(&1.code == :unsupported_record))
+      encoded = Jason.encode!(Evidence.to_wire(capture))
+      refute encoded =~ "PRIVATE_SENTINEL"
+      assert {:ok, restored} = Evidence.from_wire(Jason.decode!(encoded))
+      assert Enum.any?(restored.diagnostics, &(&1.code == :unsupported_record))
+      refute Map.has_key?(hd(restored.records).payload, "stop_reason")
+    end
+  end
+
+  test "typed Claude stop reasons do not bypass native JSON validation" do
+    for reason <- [
+          %{"type" => <<255>>},
+          %{"type" => "end_turn", "extra" => self()},
+          %{"type" => "end_turn", :extra => "content"}
+        ] do
+      payload = %{"type" => "session.status_idle", "stop_reason" => reason}
+
+      assert %NativeObservation{
+               supported?: false,
+               malformed_metadata?: true,
+               safe_payload: %{}
+             } = Claude.interpret(payload)
+
+      assert {:error, _} = Capture.new(capture_attrs(payload))
+    end
+  end
 
   test "descriptor metadata excludes nested content" do
     payload = %{
@@ -318,6 +434,18 @@ defmodule ReqManagedAgents.Evidence.AdapterTest do
       assert %NativeObservation{supported?: false, safe_payload: %{}} = Adapter.interpret(payload)
       assert {:ok, %Record{validation_issue?: true, payload: %{}}} = Record.new(record(payload))
     end
+  end
+
+  defp capture_attrs(payload) do
+    %{
+      capture_id: "capture",
+      provider: :managed,
+      session_id: "session",
+      started_at: @time,
+      ended_at: @time,
+      sources: [%{id: "source", kind: :claude_session, scope: "session", status: :complete}],
+      records: [record(payload)]
+    }
   end
 
   defp record(payload) do
