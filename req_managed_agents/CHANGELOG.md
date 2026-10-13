@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.13.3 (2026-10-12)
+
+### Fixed
+
+- Preserve structured Claude Managed Agents stop reasons in evidence metadata
+  without marking valid terminal events as unsupported. Dropped-content captures
+  retain only the reason type; legacy strings and malformed-input diagnostics
+  keep their existing behavior.
+
 ## v0.13.2 (2026-10-11)
 
 ### Fixed
