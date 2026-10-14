@@ -85,7 +85,13 @@ defmodule ReqManagedAgents.Evidence.ClaudeNativeEventsTest do
     }
 
     assert {:ok, capture} = Capture.new(repeated)
-    wire = capture |> Evidence.to_wire() |> Jason.encode!() |> Jason.decode!()
+
+    wire =
+      capture
+      |> Evidence.to_wire()
+      |> Jason.encode!()
+      |> Jason.decode!()
+
     assert {:ok, restored} = Evidence.from_wire(wire)
     assert Enum.map(restored.records, & &1.payload) == [safe, safe]
     refute Enum.any?(restored.diagnostics, &(&1.code == :unsupported_record))
@@ -275,7 +281,13 @@ defmodule ReqManagedAgents.Evidence.ClaudeNativeEventsTest do
 
   defp round_trip(payload, kind, options \\ []) do
     assert {:ok, capture} = Capture.new(attrs(payload, kind), options)
-    wire = capture |> Evidence.to_wire() |> Jason.encode!() |> Jason.decode!()
+
+    wire =
+      capture
+      |> Evidence.to_wire()
+      |> Jason.encode!()
+      |> Jason.decode!()
+
     assert {:ok, restored} = Evidence.from_wire(wire)
     restored
   end
