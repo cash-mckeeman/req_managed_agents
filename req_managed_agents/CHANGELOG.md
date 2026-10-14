@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- Preserve Claude Managed Agents thread running/idle metadata and cumulative
+  session usage in evidence captures, with validated counters, USD amounts and
+  optional budget metadata. Thread status does not end a session turn.
+
 ## v0.13.3 (2026-10-12)
 
 ### Fixed
