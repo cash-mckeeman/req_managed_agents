@@ -3,6 +3,18 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
   @behaviour ReqManagedAgents.Evidence.Adapter
   alias ReqManagedAgents.Evidence.{NativeObservation, Validation}
 
+  @native_metadata_types ~w(session.thread_status_running session.thread_status_idle session.usage)
+  @session_usage [
+    {"active_seconds", :number},
+    {"cache_creation",
+     [{"ephemeral_1h_input_tokens", :counter}, {"ephemeral_5m_input_tokens", :counter}]},
+    {"cache_read_input_tokens", :counter},
+    {"input_tokens", :counter},
+    {"output_tokens", :counter},
+    {"list_cost", :money},
+    {"server_tool_use", [{"web_fetch_requests", :counter}, {"web_search_requests", :counter}]}
+  ]
+
   @doc "Extracts native facts and a metadata-only projection without retaining content."
   @impl true
   @spec interpret(map()) :: NativeObservation.t()
@@ -13,13 +25,15 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
   end
 
   defp interpret_json(payload) do
+    {safe, malformed?} = projection(payload)
+
     {:ok, observation} =
       NativeObservation.new(%{
         supported?: supported?(payload),
-        malformed_metadata?: malformed_metadata?(payload) or malformed_id?(payload),
+        malformed_metadata?: malformed?,
         native_id: native_id(payload),
         occurred_at: occurred_at(payload),
-        safe_payload: metadata(payload)
+        safe_payload: safe
       })
 
     observation
@@ -52,8 +66,90 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
     inputTokens outputTokens totalTokens)
 
   defp supported?(%{"type" => "session_thread"}), do: true
+  defp supported?(%{"type" => type}) when type in @native_metadata_types, do: true
   defp supported?(%{"type" => type}) when type in @claude_types, do: true
   defp supported?(_), do: false
+
+  # These maps are decoded provider JSON projected at the native wire boundary.
+  # Session usage remains cumulative metadata, independent of per-turn metering.
+  defp projection(%{"type" => type} = payload) when type in @native_metadata_types do
+    fields = [{"id", :id}, {"processed_at", :time}]
+
+    fields =
+      case type do
+        "session.usage" ->
+          fields ++ [{"usage", @session_usage}, {"budget", :budget}]
+
+        "session.thread_status_idle" ->
+          fields ++ [{"session_thread_id", :id}, {"stop_reason", :reason}]
+
+        _ ->
+          fields ++ [{"session_thread_id", :id}]
+      end
+
+    required =
+      if type == "session.usage",
+        do: ~w(id processed_at usage),
+        else: ~w(id processed_at session_thread_id)
+
+    {safe, malformed?} = project_fields(payload, fields)
+    missing? = Enum.any?(required, &(not Map.has_key?(safe, &1)))
+    {Map.put(safe, "type", type), malformed? or missing?}
+  end
+
+  defp projection(payload),
+    do: {metadata(payload), malformed_metadata?(payload) or malformed_id?(payload)}
+
+  defp project_fields(payload, fields) do
+    Enum.reduce(fields, {%{}, false}, fn {key, rule}, {safe, malformed?} ->
+      case Map.fetch(payload, key) do
+        :error -> {safe, malformed?}
+        {:ok, nil} when rule == :budget -> {safe, malformed?}
+        {:ok, value} -> project_field(safe, malformed?, key, value, rule)
+      end
+    end)
+  end
+
+  defp project_field(safe, malformed?, key, value, fields)
+       when is_list(fields) and is_map(value) do
+    {nested, invalid?} = project_fields(value, fields)
+    {Map.put(safe, key, nested), malformed? or invalid?}
+  end
+
+  defp project_field(safe, malformed?, key, value, rule) do
+    case project_value(value, rule) do
+      {:ok, projected} -> {Map.put(safe, key, projected), malformed?}
+      :error -> {safe, true}
+    end
+  end
+
+  defp project_value(value, :id), do: validate(value, &valid_id?/1)
+  defp project_value(value, :time), do: validate(value, &match?({:ok, _}, Validation.utc(&1)))
+  defp project_value(value, :counter), do: validate(value, &(is_integer(&1) and &1 >= 0))
+  defp project_value(value, :number), do: validate(value, &nonnegative_number?/1)
+
+  defp project_value(%{"type" => type}, :reason) when is_binary(type) and byte_size(type) > 0,
+    do: {:ok, %{"type" => type}}
+
+  defp project_value(%{"amount" => amount, "currency" => "USD"} = value, :money)
+       when is_binary(amount) do
+    if Regex.match?(~r/\A(?:0|[1-9][0-9]*)\z/, amount),
+      do: {:ok, Map.take(value, ~w(amount currency))},
+      else: :error
+  end
+
+  defp project_value(%{"type" => "limit", "max_list_cost" => cost}, :budget) do
+    case project_value(cost, :money) do
+      {:ok, money} -> {:ok, %{"type" => "limit", "max_list_cost" => money}}
+      :error -> :error
+    end
+  end
+
+  defp project_value(_, _), do: :error
+
+  defp validate(value, valid?) do
+    if valid?.(value), do: {:ok, value}, else: :error
+  end
 
   defp valid_id?(value), do: match?({:ok, _}, Validation.id(value))
 
