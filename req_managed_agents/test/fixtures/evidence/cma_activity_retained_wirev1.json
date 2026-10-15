@@ -6,84 +6,7 @@
       "code": "unsupported_record",
       "count": 1,
       "message": "Some native fields or records are unsupported.",
-      "record_id": "synthetic-record-thinking-session",
-      "source_id": "synthetic-source-session"
-    },
-    {
-      "code": "unsupported_record",
-      "count": 1,
-      "message": "Some native fields or records are unsupported.",
-      "record_id": "synthetic-record-thinking-root",
-      "source_id": "synthetic-source-root"
-    },
-    {
-      "code": "unsupported_record",
-      "count": 1,
-      "message": "Some native fields or records are unsupported.",
-      "record_id": "synthetic-record-thinking-unrelated",
-      "source_id": "synthetic-source-unrelated"
-    },
-    {
-      "code": "unsupported_record",
-      "count": 1,
-      "message": "Some native fields or records are unsupported.",
-      "record_id": "synthetic-record-created-session",
-      "source_id": "synthetic-source-session"
-    },
-    {
-      "code": "unsupported_record",
-      "count": 1,
-      "message": "Some native fields or records are unsupported.",
-      "record_id": "synthetic-record-created-root",
-      "source_id": "synthetic-source-root"
-    },
-    {
-      "code": "unsupported_record",
-      "count": 1,
-      "message": "Some native fields or records are unsupported.",
-      "record_id": "synthetic-record-sent-session",
-      "source_id": "synthetic-source-session"
-    },
-    {
-      "code": "unsupported_record",
-      "count": 1,
-      "message": "Some native fields or records are unsupported.",
-      "record_id": "synthetic-record-sent-root",
-      "source_id": "synthetic-source-root"
-    },
-    {
-      "code": "unsupported_record",
-      "count": 1,
-      "message": "Some native fields or records are unsupported.",
-      "record_id": "synthetic-record-sent-unrelated",
-      "source_id": "synthetic-source-unrelated"
-    },
-    {
-      "code": "unsupported_record",
-      "count": 1,
-      "message": "Some native fields or records are unsupported.",
-      "record_id": "synthetic-record-sent-peer-conflict",
-      "source_id": "synthetic-source-root"
-    },
-    {
-      "code": "unsupported_record",
-      "count": 1,
-      "message": "Some native fields or records are unsupported.",
-      "record_id": "synthetic-record-sent-body-conflict",
-      "source_id": "synthetic-source-root"
-    },
-    {
-      "code": "unsupported_record",
-      "count": 1,
-      "message": "Some native fields or records are unsupported.",
-      "record_id": "synthetic-record-received-session",
-      "source_id": "synthetic-source-session"
-    },
-    {
-      "code": "unsupported_record",
-      "count": 1,
-      "message": "Some native fields or records are unsupported.",
-      "record_id": "synthetic-record-received-child",
+      "record_id": "synthetic-record-thinking-malformed-hint",
       "source_id": "synthetic-source-child"
     },
     {
@@ -650,6 +573,35 @@
       "clock": "wall",
       "clock_id": null,
       "content_state": "retained",
+      "id": "synthetic-record-thinking-malformed-hint",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-thinking-child",
+      "observed_at": "2026-01-01T00:00:11Z",
+      "occurred_at": "2026-01-01T00:00:11Z",
+      "ordinal": 4,
+      "payload": {
+        "agent_name": "synthetic-agent-name-sentinel",
+        "content": [
+          {
+            "text": "synthetic-thinking-content-sentinel",
+            "type": "text"
+          }
+        ],
+        "id": "synthetic-thinking-child",
+        "processed_at": "2026-01-01T00:00:11Z",
+        "session_thread_id": 7,
+        "synthetic_unknown": "synthetic-unknown-field-sentinel",
+        "type": "agent.thinking"
+      },
+      "source_id": "synthetic-source-child"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
       "id": "synthetic-record-idle",
       "invocation_id": null,
       "kind": "native",
@@ -812,7 +764,7 @@
       "kind": "claude_thread",
       "pages": 1,
       "reason": null,
-      "records_seen": 3,
+      "records_seen": 4,
       "scope": "synthetic-thread-child",
       "status": "complete"
     },
