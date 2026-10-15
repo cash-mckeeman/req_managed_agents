@@ -138,6 +138,40 @@ defmodule ReqManagedAgents.Evidence.ClaudeActivityTest do
     end
   end
 
+  test "cross-source duplicates without an origin hint stay distinct records" do
+    retained = Jason.decode!(File.read!(fixture_path("cma_activity_retained_wirev1.json")))
+    assert {:ok, capture} = Capture.new(Map.put(retained, "diagnostics", []), content: :drop)
+    records = Map.new(capture.records, &{&1.id, &1})
+
+    for {pair, hinted} <- [
+          {~w(synthetic-record-thinking-session synthetic-record-thinking-root),
+           "synthetic-record-thinking-unrelated"},
+          {~w(synthetic-record-sent-session synthetic-record-sent-root),
+           "synthetic-record-sent-unrelated"}
+        ] do
+      [session, root] = Enum.map(pair, &Map.fetch!(records, &1))
+      assert session.native_id == root.native_id
+      assert session.payload == root.payload
+      refute Map.has_key?(session.payload, "session_thread_id")
+      assert session.source_id != root.source_id
+
+      refute Enum.any?(
+               capture.diagnostics,
+               &(&1.record_id in pair and &1.code != :content_unavailable)
+             )
+
+      refute Enum.any?(capture.correlations, fn link ->
+               link.from_record_id in pair or Enum.any?(link.evidence_record_ids, &(&1 in pair))
+             end)
+
+      hinted = Map.fetch!(records, hinted)
+      assert hinted.native_id == root.native_id
+      assert Map.has_key?(hinted.payload, "session_thread_id")
+    end
+  end
+
+  defp fixture_path(name), do: Path.expand("../../fixtures/evidence/#{name}", __DIR__)
+
   defp assert_projection(payload, expected) do
     payload =
       Map.merge(payload, %{
