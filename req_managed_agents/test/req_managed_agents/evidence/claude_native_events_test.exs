@@ -8,6 +8,8 @@ defmodule ReqManagedAgents.Evidence.ClaudeNativeEventsTest do
 
   @time "2026-10-13T12:00:00Z"
   @private "PRIVATE_NATIVE_SENTINEL"
+  @error_flag_types ~w(agent.tool_result agent.mcp_tool_result user.tool_result
+    user.custom_tool_result span.model_request_end)
 
   test "thread status round trips retain identity and reason without ending a session" do
     for type <- ~w(session.thread_status_running session.thread_status_idle) do
@@ -224,6 +226,84 @@ defmodule ReqManagedAgents.Evidence.ClaudeNativeEventsTest do
     unknown = round_trip(event("session.future"), :claude_session)
     assert hd(unknown.records).payload == %{}
     assert Enum.any?(unknown.diagnostics, &(&1.code == :unsupported_record))
+  end
+
+  test "failure status survives dropped content" do
+    for type <- @error_flag_types, flag <- [true, false] do
+      payload =
+        type
+        |> event()
+        |> Map.merge(%{
+          "is_error" => flag,
+          "content" => [%{"type" => "text", "text" => @private}]
+        })
+
+      assert_dropped(payload, Map.take(payload, ~w(type id processed_at is_error)))
+    end
+
+    for status <- ~w(retrying exhausted terminal) do
+      payload =
+        Map.put(event("session.error"), "error", %{
+          "type" => "repository_clone_error",
+          "message" => @private,
+          "repository_url" => @private,
+          "retry_status" => %{"type" => status, "detail" => @private}
+        })
+
+      assert_dropped(
+        payload,
+        Map.put(event("session.error"), "error", %{
+          "type" => "repository_clone_error",
+          "retry_status" => %{"type" => status}
+        })
+      )
+    end
+  end
+
+  test "malformed failure status is diagnosed and omitted while valid siblings survive" do
+    for type <- @error_flag_types, bad <- ["true", 1, %{"value" => @private}] do
+      restored = round_trip(Map.put(event(type), "is_error", bad), :claude_thread)
+      assert hd(restored.records).payload == event(type)
+      assert Enum.any?(restored.diagnostics, &(&1.code == :unsupported_record))
+    end
+
+    valid = %{"type" => "model_overloaded_error", "retry_status" => %{"type" => "retrying"}}
+
+    for {error, safe} <- [
+          {Map.put(valid, "retry_status", %{"type" => @private}),
+           %{"type" => "model_overloaded_error"}},
+          {Map.put(valid, "retry_status", "retrying"), %{"type" => "model_overloaded_error"}},
+          {Map.put(valid, "type", "#{@private} message"),
+           %{"retry_status" => %{"type" => "retrying"}}},
+          {Map.delete(valid, "type"), %{"retry_status" => %{"type" => "retrying"}}},
+          {@private, nil}
+        ] do
+      payload = Map.put(event("session.error"), "error", error)
+
+      expected =
+        if safe, do: Map.put(event("session.error"), "error", safe), else: event("session.error")
+
+      restored = round_trip(payload, :claude_session)
+      assert hd(restored.records).payload == expected
+      assert Enum.any?(restored.diagnostics, &(&1.code == :unsupported_record))
+      refute Jason.encode!(Evidence.to_wire(restored)) =~ @private
+    end
+
+    unlisted = Map.put(event("agent.message"), "is_error", true)
+    assert hd(round_trip(unlisted, :claude_thread).records).payload == event("agent.message")
+  end
+
+  defp assert_dropped(payload, expected) do
+    observation = Claude.interpret(payload)
+    assert observation.supported?
+    refute observation.malformed_metadata?
+
+    for kind <- [:claude_session, :claude_thread] do
+      restored = round_trip(payload, kind)
+      assert hd(restored.records).payload == expected
+      refute Enum.any?(restored.diagnostics, &(&1.code == :unsupported_record))
+      refute Jason.encode!(Evidence.to_wire(restored)) =~ @private
+    end
   end
 
   defp event(type), do: %{"type" => type, "id" => "evt_invented", "processed_at" => @time}
