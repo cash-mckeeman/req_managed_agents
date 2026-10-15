@@ -87,6 +87,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
 
     fields = Enum.map(required, &{&1, if(&1 == "processed_at", do: :time, else: :id)})
 
+    # The provider schemas do not document session_thread_id on thinking or thread
+    # messages, so a present value is validated and kept but never required.
     fields =
       if type == "session.thread_created",
         do: fields,
