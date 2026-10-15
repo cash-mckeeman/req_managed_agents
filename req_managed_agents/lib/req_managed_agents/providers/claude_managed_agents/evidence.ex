@@ -63,6 +63,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
     session.error span.model_request_start span.model_request_end)
   @strings ~w(id session_id thread_id span_id parent_span_id tool_use_id name status model_request_start_id mcp_tool_use_id custom_tool_use_id session_thread_id from_session_thread_id to_session_thread_id)
   @times ~w(created_at timestamp started_at ended_at processed_at)
+  @error_flag_types ~w(agent.tool_result agent.mcp_tool_result user.tool_result
+    user.custom_tool_result span.model_request_end)
+  @retry_statuses ~w(retrying exhausted terminal)
   @usage ~w(input_tokens output_tokens cache_read_input_tokens cache_creation_input_tokens total_tokens
     inputTokens outputTokens totalTokens)
 
@@ -190,7 +193,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
     malformed_fields?(payload, @strings, &is_binary/1) or
       malformed_fields?(payload, ["stop_reason"], &(normalize_stop_reason(&1) != nil)) or
       malformed_fields?(payload, @times, &match?({:ok, _}, Validation.utc(&1))) or
-      malformed_fields?(payload, ["usage", "model_usage"], &valid_usage?/1)
+      malformed_fields?(payload, ["usage", "model_usage"], &valid_usage?/1) or
+      malformed_failure?(payload)
   end
 
   defp malformed_metadata?(_), do: false
@@ -227,9 +231,47 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
     |> Map.merge(times(payload))
     |> usage(payload, "usage")
     |> usage(payload, "model_usage")
+    |> failure(payload)
   end
 
   defp metadata(_), do: %{}
+
+  # Failure status is not content: error messages and error-specific fields stay dropped.
+  defp failure(result, %{"type" => type, "is_error" => flag})
+       when type in @error_flag_types and is_boolean(flag),
+       do: Map.put(result, "is_error", flag)
+
+  defp failure(result, %{"type" => "session.error", "error" => error}) when is_map(error) do
+    safe =
+      %{}
+      |> put_if(error, "type", &error_type?/1)
+      |> put_if(error, "retry_status", &retry_status?/1, &Map.take(&1, ["type"]))
+
+    if safe == %{}, do: result, else: Map.put(result, "error", safe)
+  end
+
+  defp failure(result, _), do: result
+
+  defp malformed_failure?(%{"type" => type} = payload) when type in @error_flag_types,
+    do: malformed_fields?(payload, ["is_error"], &is_boolean/1)
+
+  defp malformed_failure?(%{"type" => "session.error"} = payload) do
+    malformed_fields?(payload, ["error"], fn error ->
+      is_map(error) and error_type?(Map.get(error, "type")) and
+        not malformed_fields?(error, ["retry_status"], &retry_status?/1)
+    end)
+  end
+
+  defp malformed_failure?(_), do: false
+
+  defp put_if(result, source, key, valid?, project \\ & &1) do
+    value = Map.get(source, key)
+    if valid?.(value), do: Map.put(result, key, project.(value)), else: result
+  end
+
+  defp error_type?(type), do: match?({:ok, _}, Validation.safe_id(type))
+  defp retry_status?(%{"type" => type}), do: type in @retry_statuses
+  defp retry_status?(_), do: false
 
   defp stop_reason(result, payload) do
     case normalize_stop_reason(Map.get(payload, "stop_reason")) do
