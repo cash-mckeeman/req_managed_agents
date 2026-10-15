@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- Preserve Claude Managed Agents thinking progress, child thread identity and
+  directional thread-message peers in dropped-content evidence, without names
+  or message bodies. Diagnose malformed metadata while retaining valid fields.
+
 ## v0.13.4 (2026-10-15)
 
 ### Fixed

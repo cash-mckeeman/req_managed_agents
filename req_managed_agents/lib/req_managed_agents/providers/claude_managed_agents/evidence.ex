@@ -4,6 +4,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
   alias ReqManagedAgents.Evidence.{NativeObservation, Validation}
 
   @native_metadata_types ~w(session.thread_status_running session.thread_status_idle session.usage)
+  @activity_types ~w(agent.thinking session.thread_created agent.thread_message_sent agent.thread_message_received)
   @session_usage [
     {"active_seconds", :number},
     {"cache_creation",
@@ -66,11 +67,33 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
     inputTokens outputTokens totalTokens)
 
   defp supported?(%{"type" => "session_thread"}), do: true
+  defp supported?(%{"type" => type}) when type in @activity_types, do: true
   defp supported?(%{"type" => type}) when type in @native_metadata_types, do: true
   defp supported?(%{"type" => type}) when type in @claude_types, do: true
   defp supported?(_), do: false
 
   # These maps are decoded provider JSON projected at the native wire boundary.
+  defp projection(%{"type" => type} = payload) when type in @activity_types do
+    required =
+      case type do
+        "agent.thinking" -> ~w(id processed_at)
+        "session.thread_created" -> ~w(id processed_at session_thread_id)
+        "agent.thread_message_sent" -> ~w(id processed_at to_session_thread_id)
+        "agent.thread_message_received" -> ~w(id processed_at from_session_thread_id)
+      end
+
+    fields = Enum.map(required, &{&1, if(&1 == "processed_at", do: :time, else: :id)})
+
+    fields =
+      if type == "session.thread_created",
+        do: fields,
+        else: fields ++ [{"session_thread_id", :id}]
+
+    {safe, malformed?} = project_fields(payload, fields)
+    missing? = Enum.any?(required, &(not Map.has_key?(safe, &1)))
+    {Map.put(safe, "type", type), malformed? or missing?}
+  end
+
   # Session usage remains cumulative metadata, independent of per-turn metering.
   defp projection(%{"type" => type} = payload) when type in @native_metadata_types do
     fields = [{"id", :id}, {"processed_at", :time}]
