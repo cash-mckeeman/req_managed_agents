@@ -3,6 +3,13 @@
   "correlations": [],
   "diagnostics": [
     {
+      "code": "unsupported_record",
+      "count": 1,
+      "message": "Some native fields or records are unsupported.",
+      "record_id": "synthetic-record-thinking-malformed-hint",
+      "source_id": "synthetic-source-child"
+    },
+    {
       "code": "conflicting_duplicate",
       "count": 1,
       "message": "A native identity has conflicting records.",
@@ -154,6 +161,13 @@
       "count": 1,
       "message": "Record content is unavailable.",
       "record_id": "synthetic-record-message-redacted",
+      "source_id": "synthetic-source-child"
+    },
+    {
+      "code": "content_unavailable",
+      "count": 1,
+      "message": "Record content is unavailable.",
+      "record_id": "synthetic-record-thinking-malformed-hint",
       "source_id": "synthetic-source-child"
     },
     {
@@ -593,6 +607,26 @@
       "clock": "wall",
       "clock_id": null,
       "content_state": "dropped",
+      "id": "synthetic-record-thinking-malformed-hint",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-thinking-child",
+      "observed_at": "2026-01-01T00:00:11Z",
+      "occurred_at": "2026-01-01T00:00:11Z",
+      "ordinal": 4,
+      "payload": {
+        "id": "synthetic-thinking-child",
+        "processed_at": "2026-01-01T00:00:11Z",
+        "type": "agent.thinking"
+      },
+      "source_id": "synthetic-source-child"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "dropped",
       "id": "synthetic-record-idle",
       "invocation_id": null,
       "kind": "native",
@@ -755,7 +789,7 @@
       "kind": "claude_thread",
       "pages": 1,
       "reason": null,
-      "records_seen": 3,
+      "records_seen": 4,
       "scope": "synthetic-thread-child",
       "status": "complete"
     },

@@ -2,12 +2,13 @@ defmodule ReqManagedAgents.Evidence.ClaudeActivityTest do
   use ExUnit.Case, async: true
 
   alias ReqManagedAgents.Evidence
-  alias ReqManagedAgents.Evidence.Capture
+  alias ReqManagedAgents.Evidence.{Adapter, Capture}
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.Event
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence, as: Claude
 
   @time "2026-01-01T00:00:00Z"
   @private "PRIVATE_ACTIVITY_SENTINEL"
+  @malformed_hint "synthetic-record-thinking-malformed-hint"
   @types ~w(agent.thinking session.thread_created agent.thread_message_sent agent.thread_message_received)
 
   test "thinking retains progress metadata without content" do
@@ -124,13 +125,13 @@ defmodule ReqManagedAgents.Evidence.ClaudeActivityTest do
       Enum.filter(capture.records, &(&1.kind == :native and &1.payload["type"] in @types))
 
     assert Enum.frequencies_by(activities, & &1.payload["type"]) == %{
-             "agent.thinking" => 3,
+             "agent.thinking" => 4,
              "session.thread_created" => 2,
              "agent.thread_message_sent" => 5,
              "agent.thread_message_received" => 2
            }
 
-    for record <- activities do
+    for record <- activities, record.id != @malformed_hint do
       raw = Enum.find(retained["records"], &(&1["id"] == record.id))["payload"]
       keys = Enum.uniq(["type", "session_thread_id" | required_keys(raw["type"])])
       assert record.payload == Map.take(raw, keys)
@@ -168,6 +169,39 @@ defmodule ReqManagedAgents.Evidence.ClaudeActivityTest do
       assert hinted.native_id == root.native_id
       assert Map.has_key?(hinted.payload, "session_thread_id")
     end
+  end
+
+  test "malformed origin hint projects identically under retain and drop" do
+    retained_wire = Jason.decode!(File.read!(fixture_path("cma_activity_retained_wirev1.json")))
+    dropped_wire = Jason.decode!(File.read!(fixture_path("cma_activity_drop_wirev1.json")))
+
+    assert {:ok, kept} =
+             Capture.new(Map.put(retained_wire, "diagnostics", []), content: :retain)
+
+    assert Evidence.to_wire(kept) == retained_wire
+
+    assert {:ok, retained} = Evidence.from_wire(retained_wire)
+    assert {:ok, dropped} = Evidence.from_wire(dropped_wire)
+    kinds = Map.new(retained.sources, &{&1.id, &1.kind})
+    assert length(retained.records) == length(dropped.records)
+
+    for {raw, lean} <- Enum.zip(retained.records, dropped.records), raw.kind == :native do
+      assert lean.id == raw.id
+      assert Adapter.interpret(raw.payload, kinds[raw.source_id]).safe_payload == lean.payload
+      assert {lean.native_id, lean.occurred_at} == {raw.native_id, raw.occurred_at}
+    end
+
+    unsupported = fn capture ->
+      for d <- capture.diagnostics, d.code == :unsupported_record, do: d.record_id
+    end
+
+    assert unsupported.(retained) == [@malformed_hint]
+    assert unsupported.(dropped) == [@malformed_hint]
+
+    raw = Enum.find(retained.records, &(&1.id == @malformed_hint))
+    lean = Enum.find(dropped.records, &(&1.id == @malformed_hint))
+    assert raw.payload["session_thread_id"] == 7
+    assert lean.payload == Map.take(raw.payload, ~w(type id processed_at))
   end
 
   defp fixture_path(name), do: Path.expand("../../fixtures/evidence/#{name}", __DIR__)
