@@ -1,0 +1,848 @@
+{
+  "capture_id": "synthetic-capture-cma-activity",
+  "correlations": [],
+  "diagnostics": [
+    {
+      "code": "unsupported_record",
+      "count": 1,
+      "message": "Some native fields or records are unsupported.",
+      "record_id": "synthetic-record-thinking-session",
+      "source_id": "synthetic-source-session"
+    },
+    {
+      "code": "unsupported_record",
+      "count": 1,
+      "message": "Some native fields or records are unsupported.",
+      "record_id": "synthetic-record-thinking-root",
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "code": "unsupported_record",
+      "count": 1,
+      "message": "Some native fields or records are unsupported.",
+      "record_id": "synthetic-record-thinking-unrelated",
+      "source_id": "synthetic-source-unrelated"
+    },
+    {
+      "code": "unsupported_record",
+      "count": 1,
+      "message": "Some native fields or records are unsupported.",
+      "record_id": "synthetic-record-created-session",
+      "source_id": "synthetic-source-session"
+    },
+    {
+      "code": "unsupported_record",
+      "count": 1,
+      "message": "Some native fields or records are unsupported.",
+      "record_id": "synthetic-record-created-root",
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "code": "unsupported_record",
+      "count": 1,
+      "message": "Some native fields or records are unsupported.",
+      "record_id": "synthetic-record-sent-session",
+      "source_id": "synthetic-source-session"
+    },
+    {
+      "code": "unsupported_record",
+      "count": 1,
+      "message": "Some native fields or records are unsupported.",
+      "record_id": "synthetic-record-sent-root",
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "code": "unsupported_record",
+      "count": 1,
+      "message": "Some native fields or records are unsupported.",
+      "record_id": "synthetic-record-sent-unrelated",
+      "source_id": "synthetic-source-unrelated"
+    },
+    {
+      "code": "unsupported_record",
+      "count": 1,
+      "message": "Some native fields or records are unsupported.",
+      "record_id": "synthetic-record-sent-peer-conflict",
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "code": "unsupported_record",
+      "count": 1,
+      "message": "Some native fields or records are unsupported.",
+      "record_id": "synthetic-record-sent-body-conflict",
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "code": "unsupported_record",
+      "count": 1,
+      "message": "Some native fields or records are unsupported.",
+      "record_id": "synthetic-record-received-session",
+      "source_id": "synthetic-source-session"
+    },
+    {
+      "code": "unsupported_record",
+      "count": 1,
+      "message": "Some native fields or records are unsupported.",
+      "record_id": "synthetic-record-received-child",
+      "source_id": "synthetic-source-child"
+    },
+    {
+      "code": "conflicting_duplicate",
+      "count": 1,
+      "message": "A native identity has conflicting records.",
+      "record_id": "synthetic-record-sent-peer-conflict",
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "code": "conflicting_duplicate",
+      "count": 1,
+      "message": "A native identity has conflicting records.",
+      "record_id": "synthetic-record-sent-body-conflict",
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "code": "content_unavailable",
+      "count": 1,
+      "message": "Record content is unavailable.",
+      "record_id": "synthetic-record-message-redacted",
+      "source_id": "synthetic-source-child"
+    }
+  ],
+  "ended_at": "2026-01-01T00:00:30Z",
+  "provider": "managed",
+  "records": [
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-descriptor-root",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-thread-root",
+      "observed_at": "2026-01-01T00:00:00Z",
+      "occurred_at": null,
+      "ordinal": 1,
+      "payload": {
+        "id": "synthetic-thread-root",
+        "parent_thread_id": null,
+        "session_id": "synthetic-session",
+        "type": "session_thread"
+      },
+      "source_id": "synthetic-source-descriptors"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-descriptor-child",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-thread-child",
+      "observed_at": "2026-01-01T00:00:00Z",
+      "occurred_at": null,
+      "ordinal": 2,
+      "payload": {
+        "id": "synthetic-thread-child",
+        "parent_thread_id": "synthetic-thread-root",
+        "session_id": "synthetic-session",
+        "type": "session_thread"
+      },
+      "source_id": "synthetic-source-descriptors"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-running",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-running",
+      "observed_at": "2026-01-01T00:00:00Z",
+      "occurred_at": "2026-01-01T00:00:00Z",
+      "ordinal": 1,
+      "payload": {
+        "id": "synthetic-running",
+        "processed_at": "2026-01-01T00:00:00Z",
+        "type": "session.status_running"
+      },
+      "source_id": "synthetic-source-session"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-model-start",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-model-start",
+      "observed_at": "2026-01-01T00:00:02Z",
+      "occurred_at": "2026-01-01T00:00:02Z",
+      "ordinal": 1,
+      "payload": {
+        "id": "synthetic-model-start",
+        "processed_at": "2026-01-01T00:00:02Z",
+        "session_thread_id": "synthetic-thread-root",
+        "type": "span.model_request_start"
+      },
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-model-end",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-model-end",
+      "observed_at": "2026-01-01T00:00:04Z",
+      "occurred_at": "2026-01-01T00:00:04Z",
+      "ordinal": 2,
+      "payload": {
+        "id": "synthetic-model-end",
+        "model_request_start_id": "synthetic-model-start",
+        "processed_at": "2026-01-01T00:00:04Z",
+        "session_thread_id": "synthetic-thread-root",
+        "type": "span.model_request_end"
+      },
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-model-open",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-model-open",
+      "observed_at": "2026-01-01T00:00:05Z",
+      "occurred_at": "2026-01-01T00:00:05Z",
+      "ordinal": 3,
+      "payload": {
+        "id": "synthetic-model-open",
+        "processed_at": "2026-01-01T00:00:05Z",
+        "session_thread_id": "synthetic-thread-root",
+        "type": "span.model_request_start"
+      },
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-thinking-session",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-thinking",
+      "observed_at": "2026-01-01T00:00:05Z",
+      "occurred_at": "2026-01-01T00:00:05Z",
+      "ordinal": 2,
+      "payload": {
+        "agent_name": "synthetic-agent-name-sentinel",
+        "content": [
+          {
+            "text": "synthetic-thinking-content-sentinel",
+            "type": "text"
+          }
+        ],
+        "id": "synthetic-thinking",
+        "processed_at": "2026-01-01T00:00:05Z",
+        "session_thread_id": "synthetic-thread-root",
+        "synthetic_unknown": "synthetic-unknown-field-sentinel",
+        "type": "agent.thinking",
+        "workflow_run_id": "synthetic-workflow-unlinked"
+      },
+      "source_id": "synthetic-source-session"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-thinking-root",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-thinking",
+      "observed_at": "2026-01-01T00:00:05Z",
+      "occurred_at": "2026-01-01T00:00:05Z",
+      "ordinal": 4,
+      "payload": {
+        "agent_name": "synthetic-agent-name-sentinel",
+        "content": [
+          {
+            "text": "synthetic-thinking-content-sentinel",
+            "type": "text"
+          }
+        ],
+        "id": "synthetic-thinking",
+        "processed_at": "2026-01-01T00:00:05Z",
+        "session_thread_id": "synthetic-thread-root",
+        "synthetic_unknown": "synthetic-unknown-field-sentinel",
+        "type": "agent.thinking",
+        "workflow_run_id": "synthetic-workflow-unlinked"
+      },
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-thinking-unrelated",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-thinking",
+      "observed_at": "2026-01-01T00:00:05Z",
+      "occurred_at": "2026-01-01T00:00:05Z",
+      "ordinal": 1,
+      "payload": {
+        "agent_name": "synthetic-agent-name-sentinel",
+        "content": [
+          {
+            "text": "synthetic-thinking-content-sentinel",
+            "type": "text"
+          }
+        ],
+        "id": "synthetic-thinking",
+        "processed_at": "2026-01-01T00:00:05Z",
+        "session_thread_id": "synthetic-thread-unrelated",
+        "synthetic_unknown": "synthetic-unknown-field-sentinel",
+        "type": "agent.thinking",
+        "workflow_run_id": "synthetic-workflow-unlinked"
+      },
+      "source_id": "synthetic-source-unrelated"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-created-session",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-created",
+      "observed_at": "2026-01-01T00:00:06Z",
+      "occurred_at": "2026-01-01T00:00:06Z",
+      "ordinal": 3,
+      "payload": {
+        "agent_name": "synthetic-agent-name-sentinel",
+        "id": "synthetic-created",
+        "processed_at": "2026-01-01T00:00:06Z",
+        "session_thread_id": "synthetic-thread-child",
+        "synthetic_unknown": "synthetic-unknown-field-sentinel",
+        "type": "session.thread_created",
+        "workflow_run_id": "synthetic-workflow-unlinked"
+      },
+      "source_id": "synthetic-source-session"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-created-root",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-created",
+      "observed_at": "2026-01-01T00:00:06Z",
+      "occurred_at": "2026-01-01T00:00:06Z",
+      "ordinal": 5,
+      "payload": {
+        "agent_name": "synthetic-agent-name-sentinel",
+        "id": "synthetic-created",
+        "processed_at": "2026-01-01T00:00:06Z",
+        "session_thread_id": "synthetic-thread-child",
+        "synthetic_unknown": "synthetic-unknown-field-sentinel",
+        "type": "session.thread_created",
+        "workflow_run_id": "synthetic-workflow-unlinked"
+      },
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-sent-session",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-sent",
+      "observed_at": "2026-01-01T00:00:07Z",
+      "occurred_at": "2026-01-01T00:00:07Z",
+      "ordinal": 4,
+      "payload": {
+        "agent_name": "synthetic-agent-name-sentinel",
+        "content": [
+          {
+            "text": "synthetic-sent-body-sentinel",
+            "type": "text"
+          }
+        ],
+        "id": "synthetic-sent",
+        "processed_at": "2026-01-01T00:00:07Z",
+        "session_thread_id": "synthetic-thread-root",
+        "synthetic_unknown": "synthetic-unknown-field-sentinel",
+        "to_agent_name": "synthetic-to-agent-name-sentinel",
+        "to_session_thread_id": "synthetic-thread-child",
+        "type": "agent.thread_message_sent",
+        "workflow_run_id": "synthetic-workflow-unlinked"
+      },
+      "source_id": "synthetic-source-session"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-sent-root",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-sent",
+      "observed_at": "2026-01-01T00:00:07Z",
+      "occurred_at": "2026-01-01T00:00:07Z",
+      "ordinal": 6,
+      "payload": {
+        "agent_name": "synthetic-agent-name-sentinel",
+        "content": [
+          {
+            "text": "synthetic-sent-body-sentinel",
+            "type": "text"
+          }
+        ],
+        "id": "synthetic-sent",
+        "processed_at": "2026-01-01T00:00:07Z",
+        "session_thread_id": "synthetic-thread-root",
+        "synthetic_unknown": "synthetic-unknown-field-sentinel",
+        "to_agent_name": "synthetic-to-agent-name-sentinel",
+        "to_session_thread_id": "synthetic-thread-child",
+        "type": "agent.thread_message_sent",
+        "workflow_run_id": "synthetic-workflow-unlinked"
+      },
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-sent-unrelated",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-sent",
+      "observed_at": "2026-01-01T00:00:07Z",
+      "occurred_at": "2026-01-01T00:00:07Z",
+      "ordinal": 2,
+      "payload": {
+        "agent_name": "synthetic-agent-name-sentinel",
+        "content": [
+          {
+            "text": "synthetic-sent-body-sentinel",
+            "type": "text"
+          }
+        ],
+        "id": "synthetic-sent",
+        "processed_at": "2026-01-01T00:00:07Z",
+        "session_thread_id": "synthetic-thread-unrelated",
+        "synthetic_unknown": "synthetic-unknown-field-sentinel",
+        "to_agent_name": "synthetic-to-agent-name-sentinel",
+        "to_session_thread_id": "synthetic-thread-child",
+        "type": "agent.thread_message_sent",
+        "workflow_run_id": "synthetic-workflow-unlinked"
+      },
+      "source_id": "synthetic-source-unrelated"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-sent-peer-conflict",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-sent",
+      "observed_at": "2026-01-01T00:00:07Z",
+      "occurred_at": "2026-01-01T00:00:07Z",
+      "ordinal": 7,
+      "payload": {
+        "agent_name": "synthetic-agent-name-sentinel",
+        "content": [
+          {
+            "text": "synthetic-sent-body-sentinel",
+            "type": "text"
+          }
+        ],
+        "id": "synthetic-sent",
+        "processed_at": "2026-01-01T00:00:07Z",
+        "session_thread_id": "synthetic-thread-root",
+        "synthetic_unknown": "synthetic-unknown-field-sentinel",
+        "to_agent_name": "synthetic-to-agent-name-sentinel",
+        "to_session_thread_id": "synthetic-thread-other-peer",
+        "type": "agent.thread_message_sent",
+        "workflow_run_id": "synthetic-workflow-unlinked"
+      },
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-sent-body-conflict",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-sent",
+      "observed_at": "2026-01-01T00:00:07Z",
+      "occurred_at": "2026-01-01T00:00:07Z",
+      "ordinal": 8,
+      "payload": {
+        "agent_name": "synthetic-agent-name-sentinel",
+        "content": [
+          {
+            "text": "synthetic-conflicting-body-sentinel",
+            "type": "text"
+          }
+        ],
+        "id": "synthetic-sent",
+        "processed_at": "2026-01-01T00:00:07Z",
+        "session_thread_id": "synthetic-thread-root",
+        "synthetic_unknown": "synthetic-unknown-field-sentinel",
+        "to_agent_name": "synthetic-to-agent-name-sentinel",
+        "to_session_thread_id": "synthetic-thread-child",
+        "type": "agent.thread_message_sent",
+        "workflow_run_id": "synthetic-workflow-unlinked"
+      },
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-received-session",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-received",
+      "observed_at": "2026-01-01T00:00:08Z",
+      "occurred_at": "2026-01-01T00:00:08Z",
+      "ordinal": 5,
+      "payload": {
+        "agent_name": "synthetic-agent-name-sentinel",
+        "content": [
+          {
+            "text": "synthetic-received-body-sentinel",
+            "type": "text"
+          }
+        ],
+        "from_agent_name": "synthetic-from-agent-name-sentinel",
+        "from_session_thread_id": "synthetic-thread-root",
+        "id": "synthetic-received",
+        "processed_at": "2026-01-01T00:00:08Z",
+        "session_thread_id": "synthetic-thread-child",
+        "synthetic_unknown": "synthetic-unknown-field-sentinel",
+        "type": "agent.thread_message_received",
+        "workflow_run_id": "synthetic-workflow-unlinked"
+      },
+      "source_id": "synthetic-source-session"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-received-child",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-received",
+      "observed_at": "2026-01-01T00:00:08Z",
+      "occurred_at": "2026-01-01T00:00:08Z",
+      "ordinal": 1,
+      "payload": {
+        "agent_name": "synthetic-agent-name-sentinel",
+        "content": [
+          {
+            "text": "synthetic-received-body-sentinel",
+            "type": "text"
+          }
+        ],
+        "from_agent_name": "synthetic-from-agent-name-sentinel",
+        "from_session_thread_id": "synthetic-thread-root",
+        "id": "synthetic-received",
+        "processed_at": "2026-01-01T00:00:08Z",
+        "session_thread_id": "synthetic-thread-child",
+        "synthetic_unknown": "synthetic-unknown-field-sentinel",
+        "type": "agent.thread_message_received",
+        "workflow_run_id": "synthetic-workflow-unlinked"
+      },
+      "source_id": "synthetic-source-child"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-message-blocks",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-message-blocks",
+      "observed_at": "2026-01-01T00:00:09Z",
+      "occurred_at": "2026-01-01T00:00:09Z",
+      "ordinal": 2,
+      "payload": {
+        "content": [
+          {
+            "text": "synthetic-message-body-sentinel",
+            "type": "text"
+          },
+          {
+            "data": "synthetic-redacted-block-sentinel",
+            "type": "redacted_thinking"
+          }
+        ],
+        "id": "synthetic-message-blocks",
+        "processed_at": "2026-01-01T00:00:09Z",
+        "session_thread_id": "synthetic-thread-child",
+        "type": "agent.message"
+      },
+      "source_id": "synthetic-source-child"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "redacted",
+      "id": "synthetic-record-message-redacted",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-message-redacted",
+      "observed_at": "2026-01-01T00:00:10Z",
+      "occurred_at": "2026-01-01T00:00:10Z",
+      "ordinal": 3,
+      "payload": {
+        "id": "synthetic-message-redacted",
+        "processed_at": "2026-01-01T00:00:10Z",
+        "session_thread_id": "synthetic-thread-child",
+        "type": "agent.message"
+      },
+      "source_id": "synthetic-source-child"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "retained",
+      "id": "synthetic-record-idle",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-idle",
+      "observed_at": "2026-01-01T00:00:16Z",
+      "occurred_at": "2026-01-01T00:00:16Z",
+      "ordinal": 6,
+      "payload": {
+        "id": "synthetic-idle",
+        "processed_at": "2026-01-01T00:00:16Z",
+        "type": "session.status_idle"
+      },
+      "source_id": "synthetic-source-session"
+    },
+    {
+      "attempt_id": null,
+      "clock": "monotonic",
+      "clock_id": "synthetic-clock",
+      "content_state": "retained",
+      "id": "synthetic-record-invocation-start",
+      "invocation_id": "synthetic-invocation",
+      "kind": "local",
+      "monotonic_ticks": 0,
+      "native_id": null,
+      "observed_at": "2026-01-01T00:00:00Z",
+      "occurred_at": "2026-01-01T00:00:00Z",
+      "ordinal": 1,
+      "payload": {
+        "attempt_id": null,
+        "clock_id": "synthetic-clock",
+        "ended_ticks": null,
+        "error_code": null,
+        "invocation_id": "synthetic-invocation",
+        "parent_attempt_id": null,
+        "result": null,
+        "started_ticks": null,
+        "tool_use_id": null,
+        "type": "invocation_started"
+      },
+      "source_id": "synthetic-source-local"
+    },
+    {
+      "attempt_id": "synthetic-attempt",
+      "clock": "monotonic",
+      "clock_id": "synthetic-clock",
+      "content_state": "retained",
+      "id": "synthetic-record-attempt-start",
+      "invocation_id": "synthetic-invocation",
+      "kind": "local",
+      "monotonic_ticks": 1000000000,
+      "native_id": null,
+      "observed_at": "2026-01-01T00:00:01Z",
+      "occurred_at": "2026-01-01T00:00:01Z",
+      "ordinal": 2,
+      "payload": {
+        "attempt_id": "synthetic-attempt",
+        "clock_id": "synthetic-clock",
+        "ended_ticks": null,
+        "error_code": null,
+        "invocation_id": "synthetic-invocation",
+        "parent_attempt_id": null,
+        "result": null,
+        "started_ticks": 1000000000,
+        "tool_use_id": null,
+        "type": "attempt_started"
+      },
+      "source_id": "synthetic-source-local"
+    },
+    {
+      "attempt_id": "synthetic-attempt",
+      "clock": "monotonic",
+      "clock_id": "synthetic-clock",
+      "content_state": "retained",
+      "id": "synthetic-record-attempt-end",
+      "invocation_id": "synthetic-invocation",
+      "kind": "local",
+      "monotonic_ticks": 14000000000,
+      "native_id": null,
+      "observed_at": "2026-01-01T00:00:14Z",
+      "occurred_at": "2026-01-01T00:00:14Z",
+      "ordinal": 3,
+      "payload": {
+        "attempt_id": "synthetic-attempt",
+        "clock_id": "synthetic-clock",
+        "ended_ticks": 14000000000,
+        "error_code": null,
+        "invocation_id": "synthetic-invocation",
+        "parent_attempt_id": null,
+        "result": "ok",
+        "started_ticks": null,
+        "tool_use_id": null,
+        "type": "attempt_finished"
+      },
+      "source_id": "synthetic-source-local"
+    },
+    {
+      "attempt_id": null,
+      "clock": "monotonic",
+      "clock_id": "synthetic-clock",
+      "content_state": "retained",
+      "id": "synthetic-record-invocation-end",
+      "invocation_id": "synthetic-invocation",
+      "kind": "local",
+      "monotonic_ticks": 15000000000,
+      "native_id": null,
+      "observed_at": "2026-01-01T00:00:15Z",
+      "occurred_at": "2026-01-01T00:00:15Z",
+      "ordinal": 4,
+      "payload": {
+        "attempt_id": null,
+        "clock_id": "synthetic-clock",
+        "ended_ticks": null,
+        "error_code": null,
+        "invocation_id": "synthetic-invocation",
+        "parent_attempt_id": null,
+        "result": "ok",
+        "started_ticks": null,
+        "tool_use_id": null,
+        "type": "invocation_finished"
+      },
+      "source_id": "synthetic-source-local"
+    }
+  ],
+  "session_id": "synthetic-session",
+  "sources": [
+    {
+      "id": "synthetic-source-session",
+      "interval": null,
+      "kind": "claude_session",
+      "pages": 1,
+      "reason": null,
+      "records_seen": 6,
+      "scope": "synthetic-session",
+      "status": "complete"
+    },
+    {
+      "id": "synthetic-source-descriptors",
+      "interval": null,
+      "kind": "claude_thread",
+      "pages": 1,
+      "reason": null,
+      "records_seen": 2,
+      "scope": "sessions/synthetic-session/threads",
+      "status": "complete"
+    },
+    {
+      "id": "synthetic-source-root",
+      "interval": null,
+      "kind": "claude_thread",
+      "pages": 1,
+      "reason": null,
+      "records_seen": 8,
+      "scope": "synthetic-thread-root",
+      "status": "complete"
+    },
+    {
+      "id": "synthetic-source-child",
+      "interval": null,
+      "kind": "claude_thread",
+      "pages": 1,
+      "reason": null,
+      "records_seen": 3,
+      "scope": "synthetic-thread-child",
+      "status": "complete"
+    },
+    {
+      "id": "synthetic-source-unrelated",
+      "interval": null,
+      "kind": "claude_thread",
+      "pages": 1,
+      "reason": null,
+      "records_seen": 2,
+      "scope": "synthetic-thread-unrelated",
+      "status": "complete"
+    },
+    {
+      "id": "synthetic-source-local",
+      "interval": null,
+      "kind": "rma_local",
+      "pages": 0,
+      "reason": null,
+      "records_seen": 4,
+      "scope": "synthetic-session",
+      "status": "complete"
+    }
+  ],
+  "started_at": "2026-01-01T00:00:00Z",
+  "version": 1
+}
