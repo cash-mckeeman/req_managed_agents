@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-### Fixed
+### Added
 
 - Preserve Claude Managed Agents thinking progress, child thread identity and
   directional thread-message peers in dropped-content evidence, without names
   or message bodies. Diagnose malformed metadata while retaining valid fields.
+
+### Fixed
+
 - Keep tool, model-request and session failure status in dropped-content
   Claude Managed Agents evidence: `is_error` on result events, and the error
   type and retry status of `session.error`. Error messages stay dropped.
