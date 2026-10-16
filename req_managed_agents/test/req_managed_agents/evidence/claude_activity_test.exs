@@ -107,6 +107,25 @@ defmodule ReqManagedAgents.Evidence.ClaudeActivityTest do
     end
   end
 
+  test "free-text thread ids are omitted and diagnosed under drop" do
+    text = "Please email #{@private} the numbers"
+
+    for payload <- activities(),
+        key <- (required_keys(payload["type"]) -- ~w(id processed_at)) ++ hint_key(payload),
+        bad <- [text, "https://#{@private}", String.duplicate("a", 257)] do
+      malformed = Map.put(payload, key, bad)
+      observation = Claude.interpret(malformed)
+      assert observation.supported?
+      assert observation.malformed_metadata?, inspect({payload["type"], key, bad})
+      assert observation.safe_payload == Map.delete(payload, key)
+      assert_diagnosed(malformed, observation.safe_payload)
+
+      for kind <- [:claude_session, :claude_thread] do
+        refute Jason.encode!(Evidence.to_wire(round_trip(malformed, kind))) =~ @private
+      end
+    end
+  end
+
   test "retained activity fixture produces the frozen dropped artifact" do
     fixture_dir = Path.expand("../../fixtures/evidence", __DIR__)
     retained_bytes = File.read!(Path.join(fixture_dir, "cma_activity_retained_wirev1.json"))
@@ -263,6 +282,9 @@ defmodule ReqManagedAgents.Evidence.ClaudeActivityTest do
     do: ~w(id processed_at from_session_thread_id)
 
   defp required_keys("agent.thinking"), do: ~w(id processed_at)
+
+  defp hint_key(%{"type" => "session.thread_created"}), do: []
+  defp hint_key(_), do: ["session_thread_id"]
 
   defp event(type), do: %{"type" => type, "id" => "evt_invented", "processed_at" => @time}
 
