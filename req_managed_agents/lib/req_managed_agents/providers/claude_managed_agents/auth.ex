@@ -44,13 +44,33 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Auth do
     request =
       if client.bearer_token_file, do: Req.merge(request, redirect: false), else: request
 
-    # Req retries resume at the adapter, after ordinary request steps have run.
+    # Authenticate at dispatch so retries reread rotated credentials.
     Req.Request.append_request_steps(request,
-      rma_auth: fn request ->
-        adapter = request.adapter
-        %{request | adapter: fn request -> authenticate(request, client, adapter) end}
-      end
+      rma_auth: &wrap_adapter(&1, client, &1.adapter)
     )
+  end
+
+  defp wrap_adapter(request, client, __MODULE__) do
+    Req.Request.put_private(request, :rma_auth_client, client)
+  end
+
+  defp wrap_adapter(request, client, adapter) when is_atom(adapter) do
+    request
+    |> Req.Request.put_private(:rma_auth_client, client)
+    |> Req.Request.put_private(:rma_auth_adapter, adapter)
+    |> Map.put(:adapter, __MODULE__)
+  end
+
+  defp wrap_adapter(request, client, adapter) when is_function(adapter, 1) do
+    %{request | adapter: fn request -> authenticate(request, client, adapter) end}
+  end
+
+  @doc false
+  @spec run(Req.Request.t()) :: {Req.Request.t(), Req.Response.t() | Exception.t()}
+  def run(request) do
+    client = Req.Request.get_private(request, :rma_auth_client)
+    adapter = Req.Request.get_private(request, :rma_auth_adapter)
+    authenticate(request, client, adapter)
   end
 
   defp authenticate(request, client, adapter) do
@@ -62,12 +82,15 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Auth do
           |> Req.Request.delete_header("x-api-key")
           |> Req.Request.put_headers(headers)
 
-        adapter.(request)
+        run_adapter(request, adapter)
 
       {:error, {:authentication_error, reason}} ->
         Req.Request.halt(request, %Error{reason: reason})
     end
   end
+
+  defp run_adapter(request, adapter) when is_atom(adapter), do: adapter.run(request)
+  defp run_adapter(request, adapter) when is_function(adapter, 1), do: adapter.(request)
 
   @spec result({:ok, term()} | {:error, term()}) :: {:ok, term()} | {:error, term()}
   def result({:error, %Error{reason: reason}}), do: {:error, {:authentication_error, reason}}
