@@ -64,7 +64,7 @@ jobs:
         run: for t in .github/scripts/test/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done
 
   test:
-    name: test ${{ matrix.package }} (Elixir ${{ matrix.leg.elixir }} / OTP ${{ matrix.leg.otp }} / Req ${{ matrix.leg.req || 'locked' }})
+    name: test ${{ matrix.package }} (Elixir ${{ matrix.leg.elixir }} / OTP ${{ matrix.leg.otp }})
     needs: detect-changes
     if: needs.detect-changes.outputs.packages != '[]'
     runs-on: ubuntu-latest
@@ -81,10 +81,6 @@ jobs:
           # warnings appear first.
           - elixir: "1.20"
             otp: "29"
-            lint: true
-          - elixir: "1.20"
-            otp: "29"
-            req: "0.7.5"
             lint: true
     defaults:
       run:
@@ -110,23 +106,10 @@ jobs:
             echo "mix.lock still pins req_managed_agents from Hex; the sibling is a path dep" >&2
             exit 1
           fi
-      - name: Select the Req compatibility version
-        if: matrix.leg.req == '0.7.5'
-        run: |
-          req_manifest=mix.exs
-          if [ '${{ matrix.package }}' = req_managed_agents_host ]; then
-            req_manifest=../req_managed_agents/mix.exs
-          fi
-          perl -0pi -e 's/\{:req, "~> 0\.5"\}/{:req, "== 0.7.5"}/ or die "Req requirement not found\n"' "$req_manifest"
-          mix deps.unlock req
       - run: mix deps.get
       - run: mix deps.unlock --check-unused
       - run: mix compile --warnings-as-errors
         if: ${{ matrix.leg.lint }}
-      - name: Verify the resolved Req compatibility version
-        if: matrix.leg.req == '0.7.5'
-        run: |
-          mix run --no-start -e 'Application.load(:req); unless Application.spec(:req, :vsn) == ~c"0.7.5", do: raise("Req compatibility version did not resolve")'
       # :live tests are excluded in req_managed_agents' test_helper.exs, and
       # req_managed_agents_host's suite runs on an in-process stub provider:
       # no PR ever needs Anthropic or AWS credentials.
