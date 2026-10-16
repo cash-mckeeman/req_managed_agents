@@ -40,16 +40,19 @@ defmodule ReqManagedAgents.Conformance.Capture do
   """
   @spec attach(String.t() | atom(), keyword()) :: keyword()
   def attach(name, req_options \\ []) do
-    real_adapter = req_options[:adapter] || (&Req.Steps.run_finch/1)
+    real_adapter = req_options[:adapter] || Req.new().adapter
 
     adapter = fn req ->
-      {req, result} = real_adapter.(req)
+      {req, result} = run_adapter(real_adapter, req)
       capture(name, req, result)
       {req, result}
     end
 
     Keyword.put(req_options, :adapter, adapter)
   end
+
+  defp run_adapter(adapter, req) when is_atom(adapter), do: adapter.run(req)
+  defp run_adapter(adapter, req) when is_function(adapter, 1), do: adapter.(req)
 
   defp capture(name, req, %Req.Response{} = resp) do
     start_collector()
