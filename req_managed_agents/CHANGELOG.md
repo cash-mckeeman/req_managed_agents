@@ -9,9 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ReqManagedAgents.ModelConfig`, the typed `:model_config` session option:
+  `:model`, `:api_key`, `:bearer_token_file`, `:base_url` and `:metadata`.
+- `ReqManagedAgents.Provider.supports?/2`, `ReqManagedAgents.Provider.data_plane/1`
+  and two optional provider callbacks: `supports_runtime_model?/0` and
+  `data_plane/0`. Local declares per-run model support and the chat-completions
+  wire; Claude Managed Agents declares the managed-agents API wire; Bedrock
+  AgentCore declares per-run model support and no data-plane wire.
+- `ReqManagedAgents.Provider.native_model/2` and the optional `native_model/1`
+  callback translate a catalog model id (`"provider:model_id"`) into a provider's
+  wire model. Claude Managed Agents translates `anthropic:<id>` to the bare id,
+  and Bedrock AgentCore translates `bedrock:<modelId>` to its
+  `bedrockModelConfig` union.
 - Preserve Claude Managed Agents thinking progress, child thread identity and
   directional thread-message peers in dropped-content evidence, without names
   or message bodies. Diagnose malformed metadata while retaining valid fields.
+
+### Changed (breaking)
+
+- `Session` validates `:model_config` at start. Keys outside the canonical set,
+  including string keys, and wrongly typed credentials, destinations or metadata
+  return `{:error, {:invalid_opts, {:model_config, reason}}}` instead of being
+  ignored. Pass a `ModelConfig` struct, an atom-keyed map or a keyword list;
+  `nil` means absent. A non-nil scalar (which Local used to lift to
+  `%{model: term}`) now returns
+  `{:error, {:invalid_opts, {:model_config, :not_a_map}}}`; pass `%{model: term}`.
+- `Session` refuses a `model_config` `:model` on a provider that cannot apply a
+  per-run model (`{:error, :runtime_model_unsupported}`). Claude Managed Agents
+  runs the provisioned agent's model.
+- `Session` refuses an `:api_key`, `:bearer_token_file` or `:base_url` on a
+  provider that cannot use it (`{:error, :data_plane_unsupported}`). Bedrock
+  AgentCore signs its requests for AWS. A `:bearer_token_file` is refused
+  everywhere except the managed-agents API wire, so Local no longer drops one
+  silently.
+- Bedrock AgentCore uses `model_config`'s `:model` as the invocation model when
+  top-level `:model` is not given. Binary catalog ids are translated to the
+  provider's wire model before opening; an id the provider cannot express returns
+  `{:error, {:invalid_opts, {:model_config, {:unsupported_model, id}}}}`.
+  Non-binary models pass through as native values. When both model options are
+  present, their native values must match or the session returns
+  `{:error, {:invalid_opts, :model_conflict}}`.
 
 ### Fixed
 

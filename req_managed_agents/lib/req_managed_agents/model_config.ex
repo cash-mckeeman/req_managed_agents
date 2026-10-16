@@ -6,6 +6,11 @@ defmodule ReqManagedAgents.ModelConfig do
   value, `:api_key`, `:bearer_token_file` and `:base_url` supply the provider's
   credential and destination, and `:metadata` holds correlation information.
 
+  `ReqManagedAgents.Session` validates the option before opening the provider and
+  refuses fields the provider cannot apply. A binary `:model` is translated from
+  a catalog id through `ReqManagedAgents.Provider.native_model/2`; non-binary
+  models are treated as native values. Providers receive the map from `to_map/1`.
+
   This differs from `ReqManagedAgents.Agent.Spec`'s `model_config`, the
   provider-native model object sent verbatim when a resource is provisioned.
   """
