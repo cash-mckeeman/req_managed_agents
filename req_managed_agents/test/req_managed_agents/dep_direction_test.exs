@@ -5,6 +5,8 @@ defmodule ReqManagedAgents.DepDirectionTest do
   twice: the declared runtime deps, and the modules and source this package
   ships. `only:` deps (dev and test tooling) are not runtime deps and are
   filtered out.
+  It also never names a Mimir module: the two families compose over neutral
+  seams, never by dependency.
   """
   use ExUnit.Case, async: true
 
@@ -33,6 +35,19 @@ defmodule ReqManagedAgents.DepDirectionTest do
     assert "lib/mix/tasks/req_managed_agents.qa_checkpoint.ex" in paths
 
     offenders = for path <- paths, File.read!(path) =~ ~r/ReqManagedAgents\.Host\b/, do: path
+
+    assert offenders == []
+  end
+
+  # Scope: lib/ only, as above. Lowercase "mimir" prose is allowed; module
+  # references use Mimir. or a Mimir-prefixed alias.
+  test "no source file under lib/ names a Mimir module" do
+    paths = Path.wildcard("lib/**/*.{ex,exs}")
+
+    assert "lib/req_managed_agents.ex" in paths
+    assert "lib/req_managed_agents/model_config.ex" in paths
+
+    offenders = for path <- paths, File.read!(path) =~ ~r/\bMimir(\.|[A-Z])/, do: path
 
     assert offenders == []
   end
