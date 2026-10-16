@@ -174,6 +174,20 @@
       "code": "content_unavailable",
       "count": 1,
       "message": "Record content is unavailable.",
+      "record_id": "synthetic-record-tool-result",
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "code": "content_unavailable",
+      "count": 1,
+      "message": "Record content is unavailable.",
+      "record_id": "synthetic-record-session-error",
+      "source_id": "synthetic-source-session"
+    },
+    {
+      "code": "content_unavailable",
+      "count": 1,
+      "message": "Record content is unavailable.",
       "record_id": "synthetic-record-idle",
       "source_id": "synthetic-source-session"
     }
@@ -279,6 +293,7 @@
       "ordinal": 2,
       "payload": {
         "id": "synthetic-model-end",
+        "is_error": true,
         "model_request_start_id": "synthetic-model-start",
         "processed_at": "2026-01-01T00:00:04Z",
         "session_thread_id": "synthetic-thread-root",
@@ -627,6 +642,55 @@
       "clock": "wall",
       "clock_id": null,
       "content_state": "dropped",
+      "id": "synthetic-record-tool-result",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-tool-result",
+      "observed_at": "2026-01-01T00:00:12Z",
+      "occurred_at": "2026-01-01T00:00:12Z",
+      "ordinal": 9,
+      "payload": {
+        "id": "synthetic-tool-result",
+        "is_error": true,
+        "processed_at": "2026-01-01T00:00:12Z",
+        "session_thread_id": "synthetic-thread-root",
+        "tool_use_id": "synthetic-tool-use",
+        "type": "agent.tool_result"
+      },
+      "source_id": "synthetic-source-root"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "dropped",
+      "id": "synthetic-record-session-error",
+      "invocation_id": null,
+      "kind": "native",
+      "monotonic_ticks": null,
+      "native_id": "synthetic-session-error",
+      "observed_at": "2026-01-01T00:00:13Z",
+      "occurred_at": "2026-01-01T00:00:13Z",
+      "ordinal": 6,
+      "payload": {
+        "error": {
+          "retry_status": {
+            "type": "exhausted"
+          },
+          "type": "repository_clone_error"
+        },
+        "id": "synthetic-session-error",
+        "processed_at": "2026-01-01T00:00:13Z",
+        "type": "session.error"
+      },
+      "source_id": "synthetic-source-session"
+    },
+    {
+      "attempt_id": null,
+      "clock": "wall",
+      "clock_id": null,
+      "content_state": "dropped",
       "id": "synthetic-record-idle",
       "invocation_id": null,
       "kind": "native",
@@ -634,7 +698,7 @@
       "native_id": "synthetic-idle",
       "observed_at": "2026-01-01T00:00:16Z",
       "occurred_at": "2026-01-01T00:00:16Z",
-      "ordinal": 6,
+      "ordinal": 7,
       "payload": {
         "id": "synthetic-idle",
         "processed_at": "2026-01-01T00:00:16Z",
@@ -759,7 +823,7 @@
       "kind": "claude_session",
       "pages": 1,
       "reason": null,
-      "records_seen": 6,
+      "records_seen": 7,
       "scope": "synthetic-session",
       "status": "complete"
     },
@@ -779,7 +843,7 @@
       "kind": "claude_thread",
       "pages": 1,
       "reason": null,
-      "records_seen": 8,
+      "records_seen": 9,
       "scope": "synthetic-thread-root",
       "status": "complete"
     },
