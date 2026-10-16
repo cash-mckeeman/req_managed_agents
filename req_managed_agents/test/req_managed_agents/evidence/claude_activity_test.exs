@@ -158,6 +158,25 @@ defmodule ReqManagedAgents.Evidence.ClaudeActivityTest do
     end
   end
 
+  test "frozen dropped artifact carries failure status without error content" do
+    retained = Jason.decode!(File.read!(fixture_path("cma_activity_retained_wirev1.json")))
+    dropped = Jason.decode!(File.read!(fixture_path("cma_activity_drop_wirev1.json")))
+    payload = fn wire, id -> Enum.find(wire["records"], &(&1["id"] == id))["payload"] end
+
+    assert payload.(dropped, "synthetic-record-model-end")["is_error"] == true
+    assert payload.(dropped, "synthetic-record-tool-result")["is_error"] == true
+
+    assert payload.(dropped, "synthetic-record-session-error")["error"] == %{
+             "type" => "repository_clone_error",
+             "retry_status" => %{"type" => "exhausted"}
+           }
+
+    raw_error = Jason.encode!(payload.(retained, "synthetic-record-session-error"))
+    assert raw_error =~ "synthetic-error-message-sentinel"
+    assert raw_error =~ "synthetic-repository-url-sentinel"
+    assert raw_error =~ "synthetic-retry-detail-sentinel"
+  end
+
   test "cross-source duplicates without an origin hint stay distinct records" do
     retained = Jason.decode!(File.read!(fixture_path("cma_activity_retained_wirev1.json")))
     assert {:ok, capture} = Capture.new(Map.put(retained, "diagnostics", []), content: :drop)
