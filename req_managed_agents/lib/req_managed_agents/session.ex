@@ -54,6 +54,14 @@ defmodule ReqManagedAgents.Session do
   Transport liveness is guarded per turn by `:idle_timeout` and total
   cost by the `:timeout_seconds`/`:max_iterations`/`:max_tokens` per-invocation overrides
   (Bedrock AgentCore only).
+  `:model_config` (a `%ReqManagedAgents.ModelConfig{}`, or a map or keyword list with its
+  keys) carries the run's model, the provider's credential and destination, and
+  correlation `:metadata`. It is validated at start (`{:error, {:invalid_opts,
+  {:model_config, reason}}}`). A `:model` the provider cannot apply returns
+  `{:error, :runtime_model_unsupported}`, and an `:api_key`, `:bearer_token_file` or
+  `:base_url` it cannot use returns `{:error, :data_plane_unsupported}`; see
+  `ReqManagedAgents.Provider.supports?/2`.
+
   Provider-specific opts (e.g. `:agent_id`/`:environment_id`, `:harness_arn`/`:runtime_session_id`,
   `:session_id` to resume) are forwarded to the provider's `open/2`. `:agent`/`:environment` accept
   the handle returned by `ReqManagedAgents.ensure_agent/3` / `ensure_environment/3`
@@ -66,6 +74,7 @@ defmodule ReqManagedAgents.Session do
   require Logger
 
   alias ReqManagedAgents.{
+    ModelConfig,
     Outcome,
     Provider,
     Session.State,
@@ -144,14 +153,17 @@ defmodule ReqManagedAgents.Session do
     # (driving reconnect or a surfaced error) instead of killing this process and its caller.
     Process.flag(:trap_exit, true)
 
-    case validate_opts(provider, opts) do
-      :ok -> open_session(provider, opts)
+    with {:ok, opts} <- coerce_model_config(opts),
+         :ok <- validate_opts(provider, opts),
+         {:ok, opts} <- native_model_config(provider, opts) do
+      open_session(provider, opts)
+    else
       {:error, reason} -> {:stop, reason}
     end
   end
 
-  # The one home for start-time contract checks — later tasks add clauses here,
-  # not another chain in init/1.
+  # ModelConfig is parsed before these start-time checks so capability validation
+  # cannot silently miss keys in the caller's input shape.
   defp validate_opts(provider, opts) do
     cond do
       not valid_turn_guard?(opts[:turn_guard]) ->
@@ -168,19 +180,77 @@ defmodule ReqManagedAgents.Session do
     end
   end
 
+  @start_requirements [
+    {:outcome, :outcome_unsupported},
+    {:budget, :budget_unsupported},
+    {:runtime_model, :runtime_model_unsupported},
+    {:data_plane, :data_plane_unsupported},
+    {:bearer_token_file, :data_plane_unsupported}
+  ]
+
   defp validate_supported(provider, opts) do
-    cond do
-      # AgentCore has no in-session outcome equivalent (Evaluations is trace-level,
-      # out-of-session); fail at start rather than silently kicking off a user.message.
-      opts[:outcome] != nil and not Provider.supports?(provider, :outcomes) ->
-        {:error, :outcome_unsupported}
+    requested = requested_options(opts)
 
-      # A spend cap that is silently dropped is worse than none: refuse it where it cannot bind.
-      opts[:budget] != nil and not Provider.supports?(provider, :budget) ->
-        {:error, :budget_unsupported}
+    Enum.find_value(@start_requirements, :ok, fn {option, refusal} ->
+      if option in requested and not applies?(provider, option), do: {:error, refusal}
+    end)
+  end
 
-      true ->
-        :ok
+  defp applies?(provider, :outcome), do: Provider.supports?(provider, :outcomes)
+  defp applies?(provider, :budget), do: Provider.supports?(provider, :budget)
+  defp applies?(provider, :runtime_model), do: Provider.supports?(provider, :runtime_model)
+  defp applies?(provider, :data_plane), do: Provider.supports?(provider, :data_plane)
+  # A bearer-token file authenticates a managed-agents API client; a chat-completions
+  # wire takes an api_key, so the file would be silently dropped there.
+  defp applies?(provider, :bearer_token_file),
+    do: Provider.data_plane(provider) == :managed_agents_api
+
+  defp requested_options(opts) do
+    config = opts[:model_config]
+
+    for {option, true} <- [
+          outcome: opts[:outcome] != nil,
+          budget: opts[:budget] != nil,
+          runtime_model: match?(%ModelConfig{model: model} when model != nil, config),
+          data_plane: match?(%ModelConfig{}, config) and ModelConfig.data_plane?(config),
+          bearer_token_file:
+            match?(%ModelConfig{bearer_token_file: file} when file != nil, config)
+        ],
+        do: option
+  end
+
+  defp coerce_model_config(opts) do
+    case opts[:model_config] do
+      nil ->
+        {:ok, opts}
+
+      value ->
+        case ModelConfig.new(value) do
+          {:ok, config} -> {:ok, Keyword.put(opts, :model_config, config)}
+          {:error, reason} -> {:error, {:invalid_opts, {:model_config, reason}}}
+        end
+    end
+  end
+
+  # Translate only after capability validation: providers must refuse a model they
+  # cannot apply before attempting to interpret its catalog id.
+  defp native_model_config(provider, opts) do
+    case opts[:model_config] do
+      %ModelConfig{model: model} = config when is_binary(model) ->
+        case Provider.native_model(provider, model) do
+          {:ok, native} -> {:ok, Keyword.put(opts, :model_config, %{config | model: native})}
+          {:error, reason} -> {:error, {:invalid_opts, {:model_config, reason}}}
+        end
+
+      _no_catalog_model ->
+        {:ok, opts}
+    end
+  end
+
+  defp canonical_model_config(opts) do
+    case opts[:model_config] do
+      %ModelConfig{} = config -> Keyword.put(opts, :model_config, ModelConfig.to_map(config))
+      _absent_or_canonical -> opts
     end
   end
 
@@ -189,10 +259,12 @@ defmodule ReqManagedAgents.Session do
   defp valid_turn_guard?(nil), do: true
   defp valid_turn_guard?(guard), do: is_function(guard, 1)
 
-  # The former init/1 body, from `case provider.open(opts, self()) do` down, moves here
-  # verbatim — state map and {:continue, …} tuple unchanged (plus the new :turn_guard key).
   defp open_session(provider, opts) do
-    opts = lift_handles(opts)
+    opts =
+      opts
+      |> lift_handles()
+      |> canonical_model_config()
+
     evidence = Recorder.begin(opts[:evidence_recorder], provider)
     opts = evidence_opts(opts, evidence)
 
