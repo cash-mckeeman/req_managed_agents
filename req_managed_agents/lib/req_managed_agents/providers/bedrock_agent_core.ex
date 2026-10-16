@@ -831,6 +831,19 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   def resumed?(conn), do: Map.get(conn, :resume, false)
 
   @impl true
+  def supports_runtime_model?, do: true
+
+  # SigV4 authentication cannot use a model-config credential or base URL.
+  @impl true
+  def data_plane, do: :none
+
+  @impl true
+  def native_model("bedrock:" <> id) when id != "",
+    do: {:ok, %{"bedrockModelConfig" => %{"modelId" => id}}}
+
+  def native_model(_model), do: :error
+
+  @impl true
   def open(opts, subscriber) do
     # #80: RMA-canonical session_id: targets an EXISTING runtime session (reattach,
     # within AgentCore's session window); absent, the fresh path requires a

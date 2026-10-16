@@ -67,6 +67,7 @@ defmodule ReqManagedAgents.Session do
 
   alias ReqManagedAgents.{
     Outcome,
+    Provider,
     Session.State,
     SessionInfo,
     SessionResult,
@@ -171,11 +172,11 @@ defmodule ReqManagedAgents.Session do
     cond do
       # AgentCore has no in-session outcome equivalent (Evaluations is trace-level,
       # out-of-session); fail at start rather than silently kicking off a user.message.
-      opts[:outcome] != nil and not outcomes_supported?(provider) ->
+      opts[:outcome] != nil and not Provider.supports?(provider, :outcomes) ->
         {:error, :outcome_unsupported}
 
       # A spend cap that is silently dropped is worse than none: refuse it where it cannot bind.
-      opts[:budget] != nil and not budget_supported?(provider) ->
+      opts[:budget] != nil and not Provider.supports?(provider, :budget) ->
         {:error, :budget_unsupported}
 
       true ->
@@ -184,16 +185,6 @@ defmodule ReqManagedAgents.Session do
   end
 
   defp valid_outcome?(outcome), do: match?({:ok, _}, Outcome.new(outcome))
-
-  defp outcomes_supported?(provider) do
-    Code.ensure_loaded?(provider) and function_exported?(provider, :supports_outcomes?, 0) and
-      provider.supports_outcomes?()
-  end
-
-  defp budget_supported?(provider) do
-    Code.ensure_loaded?(provider) and function_exported?(provider, :supports_budget?, 0) and
-      provider.supports_budget?()
-  end
 
   defp valid_turn_guard?(nil), do: true
   defp valid_turn_guard?(guard), do: is_function(guard, 1)
