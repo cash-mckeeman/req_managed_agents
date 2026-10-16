@@ -172,6 +172,74 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.AuthTest do
     assert {:ok, %{"id" => "s"}} = Client.get_session(c, "s")
   end
 
+  test "API-key authentication reaches the real HTTP adapter" do
+    bypass = Bypass.open()
+
+    Bypass.expect_once(bypass, "GET", "/v1/sessions/s", fn conn ->
+      assert Plug.Conn.get_req_header(conn, "x-api-key") == ["loopback-key"]
+      assert Plug.Conn.get_req_header(conn, "authorization") == []
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.send_resp(200, Jason.encode!(%{id: "s"}))
+    end)
+
+    c =
+      Client.new(
+        api_key: "loopback-key",
+        bearer_token_file: nil,
+        base_url: "http://127.0.0.1:#{bypass.port}",
+        req_options: [retry: false]
+      )
+
+    assert {:ok, %{"id" => "s"}} = Client.get_session(c, "s")
+  end
+
+  test "real HTTP retries use the rotated bearer token", %{path: path} do
+    bypass = Bypass.open()
+
+    Bypass.expect(bypass, "GET", "/v1/sessions/s", fn conn ->
+      assert Plug.Conn.get_req_header(conn, "x-api-key") == []
+
+      case Plug.Conn.get_req_header(conn, "authorization") do
+        ["Bearer token-a"] ->
+          rotate(path, "token-b")
+          Plug.Conn.send_resp(conn, 503, "retry")
+
+        ["Bearer token-b"] ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.send_resp(200, Jason.encode!(%{id: "s"}))
+      end
+    end)
+
+    c =
+      client(path,
+        base_url: "http://127.0.0.1:#{bypass.port}",
+        req_options: [retry_delay: 0, retry_log_level: false, max_retries: 1]
+      )
+
+    assert {:ok, %{"id" => "s"}} = Client.get_session(c, "s")
+  end
+
+  test "real HTTP retries stop when the bearer file expires", %{path: path} do
+    bypass = Bypass.open()
+
+    Bypass.expect_once(bypass, "GET", "/v1/sessions/s", fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer token-a"]
+      rotate(path, "expired-token", System.system_time(:second))
+      Plug.Conn.send_resp(conn, 503, "retry")
+    end)
+
+    c =
+      client(path,
+        base_url: "http://127.0.0.1:#{bypass.port}",
+        req_options: [retry_delay: 0, retry_log_level: false, max_retries: 1]
+      )
+
+    assert {:error, {:authentication_error, :expired}} = Client.get_session(c, "s")
+  end
+
   test "expired and malformed files fail before JSON Files or SSE dispatch", %{path: path} do
     c = client(path)
     rotate(path, "never-send", System.system_time(:second) + 30)
