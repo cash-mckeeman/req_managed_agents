@@ -278,4 +278,162 @@ defmodule ReqManagedAgents.SessionModelConfigTest do
                )
     end
   end
+
+  @creds %{
+    access_key_id: "AKID",
+    secret_access_key: "secret",
+    region: "us-east-1",
+    security_token: nil
+  }
+
+  defp capture_invoke_body(bypass, response \\ {400, ~s({"message":"stop here"})}) do
+    {status, response_body} = response
+    test = self()
+
+    Bypass.stub(bypass, "POST", "/harnesses/invoke", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(test, {:invoke_body, Jason.decode!(body)})
+      Plug.Conn.resp(conn, status, response_body)
+    end)
+
+    ReqManagedAgents.Providers.BedrockAgentCore.Client.new(
+      credentials: @creds,
+      base_url: "http://localhost:#{bypass.port}"
+    )
+  end
+
+  defp run_agentcore_client(client, extra) do
+    Session.run(
+      BedrockAgentCore,
+      [
+        handler: fn _, _, _ -> {:ok, ""} end,
+        prompt: "hi",
+        harness_arn: "arn:new",
+        runtime_session_id: String.duplicate("s", 33),
+        client: client,
+        invoke_retries: 0,
+        timeout: 5_000
+      ] ++ extra
+    )
+  end
+
+  describe "AgentCore model on the wire" do
+    test "a bedrock catalog id is sent to InvokeHarness as the bedrockModelConfig union" do
+      client = capture_invoke_body(Bypass.open())
+
+      assert {:error, _} =
+               run_agentcore_client(client,
+                 model_config: %{model: "bedrock:us.anthropic.claude-sonnet-4-6"}
+               )
+
+      assert_received {:invoke_body,
+                       %{
+                         "model" => %{
+                           "bedrockModelConfig" => %{
+                             "modelId" => "us.anthropic.claude-sonnet-4-6"
+                           }
+                         }
+                       }}
+    end
+
+    test "a native union in model_config is sent as given" do
+      client = capture_invoke_body(Bypass.open())
+      union = %{"bedrockModelConfig" => %{"modelId" => "us.anthropic.claude-haiku-4-5"}}
+
+      assert {:error, _} = run_agentcore_client(client, model_config: %{model: union})
+      assert_received {:invoke_body, %{"model" => ^union}}
+    end
+
+    test "a catalog id AgentCore cannot express is refused before any request" do
+      client = capture_invoke_body(Bypass.open())
+
+      assert {:error,
+              {:invalid_opts, {:model_config, {:unsupported_model, "anthropic:claude-haiku-4-5"}}}} =
+               run_agentcore_client(client, model_config: %{model: "anthropic:claude-haiku-4-5"})
+
+      refute_received {:invoke_body, _}
+    end
+
+    test "the same model in both places runs; a conflicting top-level :model is refused" do
+      client = capture_invoke_body(Bypass.open())
+      union = %{"bedrockModelConfig" => %{"modelId" => "us.anthropic.claude-sonnet-4-6"}}
+
+      assert {:error, _} =
+               run_agentcore_client(client,
+                 model: union,
+                 model_config: %{model: "bedrock:us.anthropic.claude-sonnet-4-6"}
+               )
+
+      assert_received {:invoke_body, %{"model" => ^union}}
+
+      assert {:error, {:invalid_opts, :model_conflict}} =
+               run_agentcore_client(client,
+                 model: %{"bedrockModelConfig" => %{"modelId" => "other"}},
+                 model_config: %{model: "bedrock:us.anthropic.claude-sonnet-4-6"}
+               )
+
+      refute_received {:invoke_body, _}
+    end
+
+    test "the same native model in both places completes through InvokeHarness" do
+      response =
+        ReqManagedAgents.EventStreamFrames.frame(~s({"messageStop":{"stopReason":"end_turn"}}))
+
+      client = capture_invoke_body(Bypass.open(), {200, response})
+      union = %{"bedrockModelConfig" => %{"modelId" => "us.anthropic.claude-sonnet-4-6"}}
+
+      assert {:ok, %ReqManagedAgents.SessionResult{terminal: :end_turn}} =
+               run_agentcore_client(client, model: union, model_config: %{model: union})
+
+      assert_received {:invoke_body, %{"model" => ^union}}
+    end
+
+    test "top-level :model alone is unchanged" do
+      client = capture_invoke_body(Bypass.open())
+      union = %{"bedrockModelConfig" => %{"modelId" => "direct"}}
+
+      assert {:error, _} = run_agentcore_client(client, model: union)
+      assert_received {:invoke_body, %{"model" => ^union}}
+    end
+  end
+
+  describe "CMA configured model on the wire" do
+    test "an agent provisioned for an anthropic catalog id is created with the bare id" do
+      bypass = Bypass.open()
+      test = self()
+
+      Bypass.stub(bypass, "POST", "/v1/agents", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test, {:agent_body, Jason.decode!(body)})
+        Req.Test.json(conn, %{"id" => "agent_1"})
+      end)
+
+      Bypass.stub(bypass, "POST", "/v1/environments", fn conn ->
+        Req.Test.json(conn, %{"id" => "env_1"})
+      end)
+
+      client =
+        ReqManagedAgents.Providers.ClaudeManagedAgents.Client.new(
+          api_key: "sk-test",
+          base_url: "http://localhost:#{bypass.port}"
+        )
+
+      {:ok, wire_model} =
+        ReqManagedAgents.Provider.native_model(ClaudeManagedAgents, "anthropic:claude-haiku-4-5")
+
+      assert {:ok, %{agent_id: "agent_1", environment_id: "env_1"}} =
+               ClaudeManagedAgents.provision(
+                 %{
+                   name: "binding",
+                   system_prompt: "s",
+                   tools: [],
+                   model_config: "anthropic:claude-haiku-4-5"
+                 },
+                 client: client
+               )
+
+      assert wire_model == "claude-haiku-4-5"
+      assert_received {:agent_body, %{"model" => ^wire_model}}
+    end
+  end
 end

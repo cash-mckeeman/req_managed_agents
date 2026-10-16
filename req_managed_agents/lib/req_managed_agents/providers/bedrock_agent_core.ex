@@ -851,32 +851,49 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     # session_id: wins and runtime_session_id: is ignored.
     sid = opts[:session_id] || Keyword.fetch!(opts, :runtime_session_id)
 
-    {:ok,
-     %{
-       harness_arn: Keyword.fetch!(opts, :harness_arn),
-       evidence: opts[:evidence_context],
-       sid: sid,
-       session_id: sid,
-       resume: opts[:session_id] != nil,
-       # The endpoint every invoke on this connection reaches, sent as
-       # InvokeHarness's `qualifier`. Same option name and same default as
-       # provision/2's, so the endpoint readiness is gated on and the endpoint the
-       # turns actually reach cannot be different ones. It rides open/2 rather than
-       # the provision handle because it is a call-time routing choice, not part of
-       # the resource identity: it is excluded from the content digest, one harness
-       # has many endpoints, and a handle replayed from the provisioner store would
-       # otherwise pin whichever endpoint the first provision happened to ask for.
-       endpoint_name: opts[:endpoint_name],
-       model: opts[:model],
-       retries: opts[:invoke_retries] || 2,
-       subscriber: subscriber,
-       idle_timeout: opts[:idle_timeout],
-       timeout_seconds: opts[:timeout_seconds],
-       max_iterations: opts[:max_iterations],
-       max_tokens: opts[:max_tokens],
-       # Build the real client (which reads AWS creds) ONLY when no invoke_fun is injected.
-       invoke_fun: opts[:invoke_fun] || default_invoke_fun(opts)
-     }}
+    with {:ok, model} <- invocation_model(opts) do
+      {:ok,
+       %{
+         harness_arn: Keyword.fetch!(opts, :harness_arn),
+         evidence: opts[:evidence_context],
+         sid: sid,
+         session_id: sid,
+         resume: opts[:session_id] != nil,
+         # The endpoint every invoke on this connection reaches, sent as
+         # InvokeHarness's `qualifier`. Same option name and same default as
+         # provision/2's, so the endpoint readiness is gated on and the endpoint the
+         # turns actually reach cannot be different ones. It rides open/2 rather than
+         # the provision handle because it is a call-time routing choice, not part of
+         # the resource identity: it is excluded from the content digest, one harness
+         # has many endpoints, and a handle replayed from the provisioner store would
+         # otherwise pin whichever endpoint the first provision happened to ask for.
+         endpoint_name: opts[:endpoint_name],
+         model: model,
+         retries: opts[:invoke_retries] || 2,
+         subscriber: subscriber,
+         idle_timeout: opts[:idle_timeout],
+         timeout_seconds: opts[:timeout_seconds],
+         max_iterations: opts[:max_iterations],
+         max_tokens: opts[:max_tokens],
+         # Build the real client (which reads AWS creds) ONLY when no invoke_fun is injected.
+         invoke_fun: opts[:invoke_fun] || default_invoke_fun(opts)
+       }}
+    end
+  end
+
+  defp invocation_model(opts) do
+    from_config =
+      case opts[:model_config] do
+        %{model: model} -> model
+        _ -> nil
+      end
+
+    case {opts[:model], from_config} do
+      {nil, model} -> {:ok, model}
+      {model, nil} -> {:ok, model}
+      {same, same} -> {:ok, same}
+      {_direct, _routed} -> {:error, {:invalid_opts, :model_conflict}}
+    end
   end
 
   defp default_invoke_fun(opts) do
