@@ -5,9 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## v0.13.4 (2026-10-15)
 
 ### Fixed
+
+- Authenticate Claude Managed Agents requests with both function and module
+  HTTP adapters, preserving bearer-token refresh and validation on retries.
 
 - Preserve Claude Managed Agents thread running/idle metadata and cumulative
   session usage in evidence captures, with validated counters, USD amounts and
