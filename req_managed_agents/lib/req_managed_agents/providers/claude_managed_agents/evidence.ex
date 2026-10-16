@@ -85,14 +85,14 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
         "agent.thread_message_received" -> ~w(id processed_at from_session_thread_id)
       end
 
-    fields = Enum.map(required, &{&1, if(&1 == "processed_at", do: :time, else: :id)})
+    fields = Enum.map(required, &{&1, activity_rule(&1)})
 
     # The provider schemas do not document session_thread_id on thinking or thread
     # messages, so a present value is validated and kept but never required.
     fields =
       if type == "session.thread_created",
         do: fields,
-        else: fields ++ [{"session_thread_id", :id}]
+        else: fields ++ [{"session_thread_id", :thread_id}]
 
     {safe, malformed?} = project_fields(payload, fields)
     missing? = Enum.any?(required, &(not Map.has_key?(safe, &1)))
@@ -152,6 +152,10 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
   end
 
   defp project_value(value, :id), do: validate(value, &valid_id?/1)
+
+  defp project_value(value, :thread_id),
+    do: validate(value, &match?({:ok, _}, Validation.safe_id(&1)))
+
   defp project_value(value, :time), do: validate(value, &match?({:ok, _}, Validation.utc(&1)))
   defp project_value(value, :counter), do: validate(value, &(is_integer(&1) and &1 >= 0))
   defp project_value(value, :number), do: validate(value, &nonnegative_number?/1)
@@ -174,6 +178,11 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Evidence do
   end
 
   defp project_value(_, _), do: :error
+
+  # Thread ids are opaque tokens; rejecting whitespace keeps free text out of dropped content.
+  defp activity_rule("id"), do: :id
+  defp activity_rule("processed_at"), do: :time
+  defp activity_rule(_thread_id), do: :thread_id
 
   defp validate(value, valid?) do
     if valid?.(value), do: {:ok, value}, else: :error
