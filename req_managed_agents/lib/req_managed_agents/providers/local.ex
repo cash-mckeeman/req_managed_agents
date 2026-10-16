@@ -72,6 +72,12 @@ defmodule ReqManagedAgents.Providers.Local do
   def teardown(_handle, _opts), do: :ok
 
   @impl true
+  def supports_runtime_model?, do: true
+
+  @impl true
+  def data_plane, do: :chat_completions
+
+  @impl true
   def open(opts, _subscriber) do
     spec = opts[:spec] || %{}
     model_config = normalize_model_config(opts[:model_config] || spec[:model_config])

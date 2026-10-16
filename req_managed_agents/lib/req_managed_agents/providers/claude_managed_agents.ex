@@ -348,6 +348,17 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @impl true
   def supports_budget?, do: true
 
+  # A run uses the provisioned agent's model.
+  @impl true
+  def supports_runtime_model?, do: false
+
+  @impl true
+  def data_plane, do: :managed_agents_api
+
+  @impl true
+  def native_model("anthropic:" <> id) when id != "", do: {:ok, id}
+  def native_model(_model), do: :error
+
   @impl true
   def user_input(text), do: [Event.user_message(text)]
 

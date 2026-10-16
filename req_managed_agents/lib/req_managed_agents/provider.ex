@@ -155,6 +155,23 @@ defmodule ReqManagedAgents.Provider do
   @doc "Optional — true when the provider can enforce the `:budget` spend cap on a fresh session."
   @callback supports_budget?() :: boolean()
 
+  @doc "Optional — true when `ReqManagedAgents.ModelConfig.model` selects this run's model."
+  @callback supports_runtime_model?() :: boolean()
+
+  @doc """
+  Optional — the wire used when `ReqManagedAgents.ModelConfig` supplies a credential
+  or destination. `:none` means those settings cannot apply; it is also the default
+  when the callback is absent.
+  """
+  @callback data_plane() :: :none | :chat_completions | :managed_agents_api
+
+  @doc """
+  Optional — translate a catalog model id (`"provider:model_id"`) into the wire model
+  value. Return `:error` for an unsupported id. Without this callback, the catalog
+  id is sent as given.
+  """
+  @callback native_model(String.t()) :: {:ok, term()} | :error
+
   @doc """
   Optional — recover unanswered custom tool uses from `events` (the session's full
   accumulated raw event history, oldest first).
@@ -186,7 +203,60 @@ defmodule ReqManagedAgents.Provider do
                       text_delta: 1,
                       supports_outcomes?: 0,
                       supports_budget?: 0,
+                      supports_runtime_model?: 0,
+                      data_plane: 0,
+                      native_model: 1,
                       pending_tool_uses: 1
+
+  @capabilities %{
+    outcomes: :supports_outcomes?,
+    budget: :supports_budget?,
+    runtime_model: :supports_runtime_model?
+  }
+
+  @doc """
+  Whether the provider declares a capability. `:data_plane` means a wire other than
+  `:none`; the remaining capabilities read their optional `supports_*?/0` callbacks.
+  Absent callbacks mean `false`. The provider is loaded before checking callbacks.
+  """
+  @spec supports?(module(), :outcomes | :budget | :runtime_model | :data_plane) :: boolean()
+  def supports?(provider, :data_plane), do: data_plane(provider) != :none
+
+  def supports?(provider, capability) when is_map_key(@capabilities, capability) do
+    callback = Map.fetch!(@capabilities, capability)
+
+    Code.ensure_loaded?(provider) and function_exported?(provider, callback, 0) and
+      apply(provider, callback, []) == true
+  end
+
+  @doc """
+  The wire declared by `c:data_plane/0`, or `:none` when the callback is absent.
+  Loads the provider before checking for the callback.
+  """
+  @spec data_plane(module()) :: :none | :chat_completions | :managed_agents_api
+  def data_plane(provider) do
+    if Code.ensure_loaded?(provider) and function_exported?(provider, :data_plane, 0),
+      do: provider.data_plane(),
+      else: :none
+  end
+
+  @doc """
+  Translate a catalog model id using `c:native_model/1`, loading the provider first.
+  Without the callback, returns the id as given. Unsupported ids return
+  `{:error, {:unsupported_model, model}}`.
+  """
+  @spec native_model(module(), String.t()) ::
+          {:ok, term()} | {:error, {:unsupported_model, String.t()}}
+  def native_model(provider, model) when is_binary(model) do
+    if Code.ensure_loaded?(provider) and function_exported?(provider, :native_model, 1) do
+      case provider.native_model(model) do
+        {:ok, native} -> {:ok, native}
+        :error -> {:error, {:unsupported_model, model}}
+      end
+    else
+      {:ok, model}
+    end
+  end
 
   @doc """
   Legacy wire adapter: extract a canonical `%ToolResult{}` from a Claude Managed Agents tool-result event
