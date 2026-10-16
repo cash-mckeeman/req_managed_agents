@@ -71,4 +71,22 @@ defmodule ReqManagedAgents.Conformance.CaptureTest do
     assert {:ok, req_json, _resp} = Capture.fetch("iolist_req")
     assert req_json == %{"k" => "v"}
   end
+
+  test "attach/2 uses the installed default HTTP adapter" do
+    bypass = Bypass.open()
+
+    Bypass.expect_once(bypass, "POST", "/capture", fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.send_resp(200, Jason.encode!(%{response: "ok"}))
+    end)
+
+    opts = Capture.attach("loopback_adapter")
+
+    assert {:ok, %Req.Response{status: 200}} =
+             Req.post("http://127.0.0.1:#{bypass.port}/capture", [json: %{request: "ok"}] ++ opts)
+
+    assert {:ok, %{"request" => "ok"}, %{"response" => "ok"}} =
+             Capture.fetch("loopback_adapter")
+  end
 end
