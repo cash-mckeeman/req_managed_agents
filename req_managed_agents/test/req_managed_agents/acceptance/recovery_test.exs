@@ -86,6 +86,44 @@ defmodule ReqManagedAgents.Acceptance.RecoveryTest do
     assert assertion.outcome == :inconclusive
   end
 
+  test "equivalent explicit thread identity fields retain the positive control" do
+    for payloads <- [
+          Enum.map(
+            events(),
+            &(Map.delete(&1, "session_thread_id") |> Map.put("thread_id", "thread-one"))
+          ),
+          Enum.map(events(), &Map.put(&1, "thread_id", "thread-one"))
+        ] do
+      assert {:ok, assertion} = Recovery.assess(capture(payloads), "lookup", %{"key" => "value"})
+      assert assertion.outcome == :passed
+    end
+  end
+
+  test "explicit native thread scope must agree within and across attempts" do
+    cases = [
+      fn events ->
+        List.update_at(events, 1, &Map.put(&1, "session_thread_id", "other-thread"))
+      end,
+      fn events ->
+        Enum.with_index(events)
+        |> Enum.map(fn {event, index} ->
+          if index >= 2, do: Map.put(event, "session_thread_id", "other-thread"), else: event
+        end)
+      end,
+      fn events ->
+        List.update_at(events, 0, &Map.put(&1, "thread_id", "contradictory-thread"))
+      end,
+      fn events -> Enum.map(events, &Map.delete(&1, "session_thread_id")) end
+    ]
+
+    for change <- cases do
+      assert {:ok, assertion} =
+               Recovery.assess(capture(change.(events())), "lookup", %{"key" => "value"})
+
+      assert assertion.outcome == :inconclusive
+    end
+  end
+
   defp events do
     [
       %{
@@ -117,6 +155,7 @@ defmodule ReqManagedAgents.Acceptance.RecoveryTest do
         "processed_at" => time(3)
       }
     ]
+    |> Enum.map(&Map.put(&1, "session_thread_id", "thread-one"))
   end
 
   defp time(second), do: "2026-01-01T00:00:0#{second}Z"
