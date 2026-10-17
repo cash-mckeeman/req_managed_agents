@@ -40,7 +40,6 @@ defmodule ReqManagedAgents.Acceptance.ProposalTest do
       Map.put(config(), "retain_until", "2000-01-01T00:00:00Z"),
       Map.put(config(), "content", "all"),
       Map.put(config(), "resource", %{"reference" => nil}),
-      Map.put(config(), "bounds", %{"calls" => 0}),
       Map.put(config(), "secret", "forbidden"),
       Map.delete(config(), "inputs")
     ]
@@ -50,6 +49,30 @@ defmodule ReqManagedAgents.Acceptance.ProposalTest do
     end
 
     assert {:error, _} = Config.parse("not json")
+  end
+
+  test "each complete bound rejects nonpositive and noninteger values" do
+    valid = config()
+    assert {:ok, _} = Config.parse(Jason.encode!(valid))
+
+    for field <- ~w(calls records bytes timeout_ms), value <- [0, -1, 1.5, nil, "1"] do
+      invalid = put_in(valid, ["bounds", field], value)
+
+      assert {:error, :invalid_bounds} = Config.parse(Jason.encode!(invalid)),
+             "accepted #{field}=#{inspect(value)} with all other bounds valid"
+    end
+  end
+
+  test "bounds require the exact field set independently of their values" do
+    valid = config()
+
+    for field <- ~w(calls records bytes timeout_ms) do
+      invalid = update_in(valid, ["bounds"], &Map.delete(&1, field))
+      assert {:error, :invalid_bounds} = Config.parse(Jason.encode!(invalid))
+    end
+
+    invalid = put_in(valid, ["bounds", "unknown"], 1)
+    assert {:error, :invalid_bounds} = Config.parse(Jason.encode!(invalid))
   end
 
   test "programmatic mutation cannot bypass config validation" do
