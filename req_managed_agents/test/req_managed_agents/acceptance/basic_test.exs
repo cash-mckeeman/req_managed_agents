@@ -2,8 +2,10 @@ defmodule ReqManagedAgents.Acceptance.BasicTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.Acceptance
   alias ReqManagedAgents.Acceptance.{Config, Context, Source}
+  alias ReqManagedAgents.EventStreamFrames
   alias ReqManagedAgents.Evidence.{Artifact, Options, Recorder}
   alias ReqManagedAgents.Providers.BedrockAgentCore.Acceptance, as: AgentCore
+  alias ReqManagedAgents.Providers.BedrockAgentCore.Client
 
   test "actual AgentCore Session captures native completion and stops at the first turn" do
     owner = self()
@@ -84,6 +86,45 @@ defmodule ReqManagedAgents.Acceptance.BasicTest do
     refute_receive :invoked
   end
 
+  test "actual AgentCore client wire decoding keeps first-turn calls bounded and omits an absent model" do
+    owner = self()
+
+    for {reason, expected} <- [{"end_turn", :passed}, {"tool_use", :inconclusive}] do
+      plug = fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(owner, {:wire_invocation, Jason.decode!(body)})
+
+        frame =
+          EventStreamFrames.frame(Jason.encode!(%{"messageStop" => %{"stopReason" => reason}}))
+
+        Plug.Conn.send_resp(conn, 200, frame)
+      end
+
+      client =
+        Client.new(
+          credentials: %{
+            access_key_id: "invented",
+            secret_access_key: "invented",
+            security_token: nil,
+            region: "us-east-1"
+          },
+          req_options: [plug: plug]
+        )
+
+      context = context(client: client)
+      assert {:ok, observations} = AgentCore.run(context)
+      assert_receive {:wire_invocation, body}
+      refute Map.has_key?(body, "model")
+      assert body["maxIterations"] == 1
+      refute_receive {:wire_invocation, _}
+      assertions = AgentCore.assess(context, observations)
+      assert Enum.find(assertions, &(&1.name == "native_completion")).outcome == expected
+      assert {:ok, capture} = Recorder.snapshot(context.recorder)
+      assert Enum.any?(capture.records, &(&1.kind == :native))
+      stop_supervised(Recorder)
+    end
+  end
+
   defp context(invoke) do
     data = %{
       "schema_version" => 1,
@@ -121,7 +162,8 @@ defmodule ReqManagedAgents.Acceptance.BasicTest do
       root: root
     }
 
-    {:ok, context} = Context.new(config, proposal, source, recorder, root, invoke_fun: invoke)
+    transport = if is_function(invoke, 1), do: [invoke_fun: invoke], else: invoke
+    {:ok, context} = Context.new(config, proposal, source, recorder, root, transport)
     context
   end
 end
