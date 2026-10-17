@@ -32,6 +32,18 @@ defmodule ReqManagedAgents.ModelConfig do
           metadata: metadata()
         }
 
+  @typedoc """
+  Canonical provider-facing atom-keyed map; nil fields are tolerated.
+  The closed projection keeps metadata as an open caller-supplied bag.
+  """
+  @type provider_projection :: %{
+          optional(:model) => term(),
+          optional(:api_key) => String.t() | nil,
+          optional(:bearer_token_file) => String.t() | nil,
+          optional(:base_url) => String.t() | nil,
+          optional(:metadata) => metadata()
+        }
+
   @type reason :: {:unknown_keys, [term()]} | {:invalid, atom()} | :not_a_map
 
   @doc """
@@ -70,7 +82,7 @@ defmodule ReqManagedAgents.ModelConfig do
   def new(_other), do: {:error, :not_a_map}
 
   @doc "Renders the provider-facing atom-keyed map, omitting nil fields and empty metadata."
-  @spec to_map(t()) :: map()
+  @spec to_map(t()) :: provider_projection()
   def to_map(%__MODULE__{} = config) do
     config
     |> Map.from_struct()
@@ -79,9 +91,9 @@ defmodule ReqManagedAgents.ModelConfig do
   end
 
   @doc "Returns true when a credential or destination field is non-nil."
-  @spec data_plane?(t()) :: boolean()
-  def data_plane?(%__MODULE__{} = config),
-    do: Enum.any?(@data_plane_keys, &(Map.fetch!(config, &1) != nil))
+  @spec data_plane?(t() | provider_projection()) :: boolean()
+  def data_plane?(%{} = config),
+    do: Enum.any?(@data_plane_keys, &(Map.get(config, &1) != nil))
 
   defp validate(attrs) do
     attrs =

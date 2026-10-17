@@ -14,7 +14,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   the response echoes it back; see `ReqManagedAgents.Budget`. It cannot be combined with
   `:session_id`.
 
-  The `model_config` keys `:api_key`, `:bearer_token_file` and `:base_url` build the client when no `:client` is injected.
+  The `model_config` keys `:api_key`, `:bearer_token_file` and `:base_url` build the client
+  when no `:client` is injected. Combining a non-nil field with an injected runtime client
+  returns `{:error, :data_plane_unsupported}`, including on reattach.
   """
   @behaviour ReqManagedAgents.Provider
 
@@ -25,6 +27,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   alias ReqManagedAgents.{
     Budget,
     Environment,
+    ModelConfig,
     Outcome,
     ToolUse,
     TurnResult,
@@ -108,13 +111,22 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def open(opts, subscriber) do
-    with {:ok, budget} <- budget_from(opts) do
+    with {:ok, budget} <- budget_from(opts),
+         :ok <- validate_transport(opts) do
       client = client_from(opts)
 
       case opts[:session_id] do
         nil -> open_fresh(client, opts, budget, subscriber)
         sid -> open_resume(client, sid, opts[:evidence_context])
       end
+    end
+  end
+
+  defp validate_transport(opts) do
+    if opts[:client] != nil and ModelConfig.data_plane?(opts[:model_config] || %{}) do
+      {:error, :data_plane_unsupported}
+    else
+      :ok
     end
   end
 

@@ -6,9 +6,10 @@ defmodule ReqManagedAgents.Providers.Local do
   The chat wire contract is neutral, OpenAI-chat-completions-shaped, plain string-keyed
   maps: `chat_fun.(%{model:, messages:, tools:}) :: {:ok, response} | {:error, reason}`.
   The default chat_fun adapts it to `ReqLLM.generate_text/3` (optional `req_llm` dep);
-  pointing a chat_fun at any OpenAI-compatible endpoint is a bare `Req.post` — e.g. a
-  mimir lane (`/v1/chat/completions` + granted key via `model_config`) for hard
-  data-plane budget enforcement.
+  with an explicit `model_config.base_url` it uses the chat-completions wire and the
+  per-run credential. An injected `chat_fun` owns its credentials and destination;
+  combining it with non-nil `:api_key`, `:bearer_token_file` or `:base_url` in the
+  effective model config returns `{:error, :data_plane_unsupported}`.
 
   The chat_fun's response must be OpenAI-chat-completions shaped, string-keyed:
   `%{"choices" => [%{"message" => message, "finish_reason" => reason} | _], "usage" => usage}`
@@ -32,6 +33,7 @@ defmodule ReqManagedAgents.Providers.Local do
   """
   @behaviour ReqManagedAgents.Provider
 
+  alias ReqManagedAgents.ModelConfig
   alias ReqManagedAgents.Providers.Local.{Deps, Directives, ReqLLMChat, Retry}
   alias ReqManagedAgents.{ToolResult, ToolUse, TurnResult, Usage}
 
@@ -81,7 +83,12 @@ defmodule ReqManagedAgents.Providers.Local do
   def open(opts, _subscriber) do
     spec = opts[:spec] || %{}
     model_config = normalize_model_config(opts[:model_config] || spec[:model_config])
-    {:ok, build_conn(opts, spec, model_config)}
+
+    if opts[:chat_fun] != nil and ModelConfig.data_plane?(model_config) do
+      {:error, :data_plane_unsupported}
+    else
+      {:ok, build_conn(opts, spec, model_config)}
+    end
   end
 
   defp build_conn(opts, spec, model_config) do

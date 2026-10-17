@@ -10,6 +10,14 @@ One loop, three backends behind a single `Provider` behaviour:
 | **AWS Bedrock AgentCore Harness** | `ReqManagedAgents.Providers.BedrockAgentCore` | `:request_response` — synchronous SigV4-signed invoke |
 | **Local (in-process)** | `ReqManagedAgents.Providers.Local` | `:request_response` — in-process loop over a pluggable `chat_fun` (default: ReqLLM via the optional `req_llm` dep); one model call per turn; loop guards for weak-instruction-following local models; reattachable via `history:` |
 
+An injected CMA `:client` or Local `:chat_fun` owns its credentials and destination.
+Combining it with a non-nil `model_config.api_key`, `:bearer_token_file` or
+`:base_url` returns `{:error, :data_plane_unsupported}` before provider work,
+including on reattach. Omit those fields or use the default transport to apply
+them where supported. Bearer-token files are supported only by CMA. Explicit nil
+fields and metadata remain valid; Local also accepts a model.
+This runtime rule is separate from provider-specific provisioning configuration.
+
 ### Local + routing
 
 With an explicit `model_config.base_url`, Local's default `chat_fun` uses OpenAI-compatible

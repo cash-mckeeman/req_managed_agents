@@ -93,4 +93,21 @@ defmodule ReqManagedAgents.ModelConfigTest do
     {:ok, config} = ModelConfig.new(%{api_key: ""})
     assert ModelConfig.data_plane?(config)
   end
+
+  test "data_plane?/1 accepts canonical provider projections with nil fields" do
+    for {attrs, expected} <- [
+          {%{}, false},
+          {%{api_key: nil, bearer_token_file: nil, base_url: nil}, false},
+          {%{model: "model", metadata: %{request_id: "r"}}, false},
+          {%{api_key: "key"}, true},
+          {%{bearer_token_file: "/token"}, true},
+          {%{base_url: "http://localhost"}, true},
+          {%{api_key: ""}, true}
+        ] do
+      {:ok, config} = ModelConfig.new(attrs)
+      assert ModelConfig.data_plane?(config) == expected
+      assert ModelConfig.data_plane?(ModelConfig.to_map(config)) == expected
+      assert ModelConfig.data_plane?(attrs) == expected
+    end
+  end
 end
