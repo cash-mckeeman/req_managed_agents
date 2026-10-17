@@ -4,6 +4,7 @@ defmodule ReqManagedAgents.Acceptance.BasicTest do
   alias ReqManagedAgents.Acceptance.{Config, Context, Source}
   alias ReqManagedAgents.EventStreamFrames
   alias ReqManagedAgents.Evidence.{Artifact, Options, Recorder}
+  alias ReqManagedAgents.Providers.BedrockAgentCore
   alias ReqManagedAgents.Providers.BedrockAgentCore.Acceptance, as: AgentCore
   alias ReqManagedAgents.Providers.BedrockAgentCore.Client
 
@@ -42,15 +43,19 @@ defmodule ReqManagedAgents.Acceptance.BasicTest do
   test "a requires-action first turn never causes another native invocation" do
     owner = self()
 
+    assert [_] =
+             BedrockAgentCore.normalize(native_events("tool_use")).custom_tool_uses
+
     context =
       context(fn _ ->
         send(owner, :invoked)
-        {:ok, [%{"messageStop" => %{"stopReason" => "tool_use"}}]}
+        {:ok, native_events("tool_use")}
       end)
 
-    assert {:ok, observations} = AgentCore.run(context)
+    result = AgentCore.run(context)
     assert_receive :invoked
     refute_receive :invoked
+    assert {:ok, observations} = result
     assertions = AgentCore.assess(context, observations)
     assert Enum.find(assertions, &(&1.name == "native_completion")).outcome == :inconclusive
   end
@@ -89,13 +94,18 @@ defmodule ReqManagedAgents.Acceptance.BasicTest do
   test "actual AgentCore client wire decoding keeps first-turn calls bounded and omits an absent model" do
     owner = self()
 
+    assert [_] =
+             BedrockAgentCore.normalize(native_events("tool_use")).custom_tool_uses
+
     for {reason, expected} <- [{"end_turn", :passed}, {"tool_use", :inconclusive}] do
       plug = fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         send(owner, {:wire_invocation, Jason.decode!(body)})
 
         frame =
-          EventStreamFrames.frame(Jason.encode!(%{"messageStop" => %{"stopReason" => reason}}))
+          native_events(reason)
+          |> Enum.map(&EventStreamFrames.frame(Jason.encode!(&1)))
+          |> IO.iodata_to_binary()
 
         Plug.Conn.send_resp(conn, 200, frame)
       end
@@ -112,11 +122,12 @@ defmodule ReqManagedAgents.Acceptance.BasicTest do
         )
 
       context = context(client: client)
-      assert {:ok, observations} = AgentCore.run(context)
+      result = AgentCore.run(context)
       assert_receive {:wire_invocation, body}
       refute Map.has_key?(body, "model")
       assert body["maxIterations"] == 1
       refute_receive {:wire_invocation, _}
+      assert {:ok, observations} = result
       assertions = AgentCore.assess(context, observations)
       assert Enum.find(assertions, &(&1.name == "native_completion")).outcome == expected
       assert {:ok, capture} = Recorder.snapshot(context.recorder)
@@ -124,6 +135,26 @@ defmodule ReqManagedAgents.Acceptance.BasicTest do
       stop_supervised(Recorder)
     end
   end
+
+  defp native_events("tool_use") do
+    [
+      %{
+        "contentBlockStart" => %{
+          "contentBlockIndex" => 0,
+          "start" => %{"toolUse" => %{"toolUseId" => "tool-1", "name" => "denied"}}
+        }
+      },
+      %{
+        "contentBlockDelta" => %{
+          "contentBlockIndex" => 0,
+          "delta" => %{"toolUse" => %{"input" => "{}"}}
+        }
+      },
+      %{"messageStop" => %{"stopReason" => "tool_use"}}
+    ]
+  end
+
+  defp native_events(reason), do: [%{"messageStop" => %{"stopReason" => reason}}]
 
   defp context(invoke) do
     data = %{
