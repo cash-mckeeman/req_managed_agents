@@ -1,6 +1,15 @@
 defmodule ReqManagedAgents.Acceptance.Report do
   @moduledoc "Version-one acceptance results; provider evidence is stored separately."
-  alias ReqManagedAgents.Acceptance.{Assertion, Bounds, Cleanup, Config, Consumption, Coverage}
+  alias ReqManagedAgents.Acceptance.{
+    Assertion,
+    Bounds,
+    Cleanup,
+    Config,
+    Consumption,
+    Context,
+    Coverage
+  }
+
   alias ReqManagedAgents.Evidence.Artifact.Ref
 
   @enforce_keys [
@@ -29,6 +38,50 @@ defmodule ReqManagedAgents.Acceptance.Report do
           required_assertions: [String.t()],
           consumed: Consumption.t()
         }
+
+  @doc "Validate report identity and typed assessment values."
+  @spec new(map()) :: {:ok, t()} | {:error, :invalid_report}
+  def new(%{
+        context: %Context{} = context,
+        assertions: assertions,
+        coverage: %Coverage{} = coverage,
+        cleanup: %Cleanup{} = cleanup,
+        consumed: %Consumption{} = consumed,
+        artifacts: artifacts
+      })
+      when is_list(assertions) and is_list(artifacts) do
+    valid =
+      Enum.all?(assertions, fn
+        %Assertion{} = assertion ->
+          match?(
+            {:ok, ^assertion},
+            Assertion.new(assertion.name, assertion.outcome, assertion.evidence)
+          )
+
+        _ ->
+          false
+      end) and Enum.all?(artifacts, &match?(%Ref{}, &1))
+
+    if valid do
+      {:ok,
+       %__MODULE__{
+         config: context.config,
+         observed_source_revision: context.source.revision,
+         outcome: outcome(context.proposal.required_assertions, assertions),
+         required_assertions: context.proposal.required_assertions,
+         assertions: assertions,
+         coverage: coverage,
+         bounds: context.config.bounds,
+         artifacts: artifacts,
+         consumed: consumed,
+         cleanup: cleanup
+       }}
+    else
+      {:error, :invalid_report}
+    end
+  end
+
+  def new(_), do: {:error, :invalid_report}
 
   @doc "Missing, duplicate or unexpected predicates fail the assessment."
   @spec outcome([String.t()], [Assertion.t()]) :: Assertion.outcome()

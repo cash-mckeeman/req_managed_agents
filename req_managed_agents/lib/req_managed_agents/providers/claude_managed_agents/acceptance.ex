@@ -3,9 +3,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
   @behaviour ReqManagedAgents.Acceptance.Scenario
   alias ReqManagedAgents.Acceptance.{Basic, Config, Context, Observation, Proposal}
   alias ReqManagedAgents.{Budget, Providers.ClaudeManagedAgents}
+  alias ReqManagedAgents.Evidence.Options
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, History}
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request
-  alias ReqManagedAgents.Evidence.Options
 
   @impl true
   def propose(%Config{scenario: :basic, provider: :claude_managed_agents} = config) do
@@ -20,21 +20,26 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
     resource = config.resource
     inputs = config.inputs
 
-    valid =
-      Enum.sort(Map.keys(resource)) == ~w(environment_id reference) and
-        Enum.all?(
-          [resource["reference"], resource["environment_id"]],
-          &(is_binary(&1) and String.trim(&1) != "")
-        ) and
-        Enum.sort(Map.keys(inputs)) == ~w(history_pages max_list_cost_cents prompt) and
-        is_binary(inputs["prompt"]) and String.trim(inputs["prompt"]) != "" and
-        Enum.all?(
-          [inputs["max_list_cost_cents"], inputs["history_pages"]],
-          &(is_integer(&1) and &1 > 0)
-        ) and
-        config.bounds.calls == 1
+    valid = valid_resource?(resource) and valid_inputs?(inputs) and config.bounds.calls == 1
 
     if valid, do: :ok, else: {:error, :invalid_provider_config}
+  end
+
+  defp valid_resource?(resource) do
+    Enum.sort(Map.keys(resource)) == ~w(environment_id reference) and
+      Enum.all?(
+        [resource["reference"], resource["environment_id"]],
+        &(is_binary(&1) and String.trim(&1) != "")
+      )
+  end
+
+  defp valid_inputs?(inputs) do
+    Enum.sort(Map.keys(inputs)) == ~w(history_pages max_list_cost_cents prompt) and
+      is_binary(inputs["prompt"]) and String.trim(inputs["prompt"]) != "" and
+      Enum.all?(
+        [inputs["max_list_cost_cents"], inputs["history_pages"]],
+        &(is_integer(&1) and &1 > 0)
+      )
   end
 
   @impl true

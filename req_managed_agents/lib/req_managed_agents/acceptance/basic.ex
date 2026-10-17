@@ -116,7 +116,8 @@ defmodule ReqManagedAgents.Acceptance.Basic do
   defp complete?(
          %{"type" => "session.status_idle", "stop_reason" => %{"type" => reason}},
          :claude_managed_agents
-       ), do: reason in ["end_turn", "satisfied"]
+       ),
+       do: reason in ["end_turn", "satisfied"]
 
   defp complete?(_, _), do: false
 end

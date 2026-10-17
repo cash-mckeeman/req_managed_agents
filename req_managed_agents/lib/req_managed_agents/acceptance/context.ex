@@ -46,4 +46,6 @@ defmodule ReqManagedAgents.Acceptance.Context do
       {:error, :invalid_context}
     end
   end
+
+  def new(_, _, _, _, _, _), do: {:error, :invalid_context}
 end

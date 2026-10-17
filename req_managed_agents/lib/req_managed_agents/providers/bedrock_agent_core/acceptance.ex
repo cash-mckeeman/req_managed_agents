@@ -19,24 +19,34 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.Acceptance do
     inputs = config.inputs
 
     valid =
-      Enum.sort(Map.keys(resource)) == ~w(reference region runtime_session_id) and
-        resource["region"] == "us-east-1" and is_binary(resource["reference"]) and
-        Regex.match?(
-          ~r/\Aarn:aws:bedrock-agentcore:us-east-1:[0-9]{12}:harness\/[a-zA-Z0-9_-]+\z/,
-          resource["reference"]
-        ) and
-        is_binary(resource["runtime_session_id"]) and
-        Regex.match?(~r/\A[a-zA-Z0-9][a-zA-Z0-9_-]{32,99}\z/, resource["runtime_session_id"]) and
-        Enum.sort(Map.keys(inputs)) == ~w(max_tokens model prompt timeout_seconds) and
-        is_binary(inputs["prompt"]) and String.trim(inputs["prompt"]) != "" and
-        (is_nil(inputs["model"]) or
-           (is_binary(inputs["model"]) and String.starts_with?(inputs["model"], "bedrock:"))) and
-        is_integer(inputs["max_tokens"]) and inputs["max_tokens"] > 0 and
-        is_integer(inputs["timeout_seconds"]) and inputs["timeout_seconds"] > 0 and
-        inputs["timeout_seconds"] * 1000 <= config.bounds.timeout_ms and config.bounds.calls == 1
+      valid_resource?(resource) and valid_inputs?(inputs, config.bounds.timeout_ms) and
+        config.bounds.calls == 1
 
     if valid, do: :ok, else: {:error, :invalid_provider_config}
   end
+
+  defp valid_resource?(resource) do
+    Enum.sort(Map.keys(resource)) == ~w(reference region runtime_session_id) and
+      resource["region"] == "us-east-1" and is_binary(resource["reference"]) and
+      Regex.match?(
+        ~r/\Aarn:aws:bedrock-agentcore:us-east-1:[0-9]{12}:harness\/[a-zA-Z0-9_-]+\z/,
+        resource["reference"]
+      ) and
+      is_binary(resource["runtime_session_id"]) and
+      Regex.match?(~r/\A[a-zA-Z0-9][a-zA-Z0-9_-]{32,99}\z/, resource["runtime_session_id"])
+  end
+
+  defp valid_inputs?(inputs, timeout) do
+    Enum.sort(Map.keys(inputs)) == ~w(max_tokens model prompt timeout_seconds) and
+      is_binary(inputs["prompt"]) and String.trim(inputs["prompt"]) != "" and
+      valid_model?(inputs["model"]) and positive?(inputs["max_tokens"]) and
+      positive?(inputs["timeout_seconds"]) and inputs["timeout_seconds"] * 1000 <= timeout
+  end
+
+  defp valid_model?(nil), do: true
+  defp valid_model?("bedrock:" <> id), do: id != ""
+  defp valid_model?(_), do: false
+  defp positive?(value), do: is_integer(value) and value > 0
 
   @impl true
   def run(%Context{} = context) do
