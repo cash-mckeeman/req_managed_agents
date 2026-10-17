@@ -72,7 +72,7 @@ defmodule ReqManagedAgents.Acceptance do
     assertions = implementation.assess(context, observations)
     {:ok, coverage} = Coverage.new(context.config, nil, observations)
     {:ok, consumption} = Consumption.new(nil, 0)
-    {:ok, cleanup} = Cleanup.new(context.config, nil)
+    {:ok, cleanup} = Cleanup.from_observations(context.config, nil, observations)
 
     {:ok, report} =
       Report.new(%{
@@ -127,7 +127,7 @@ defmodule ReqManagedAgents.Acceptance do
          {:ok, %{size: bytes}} <- File.stat(Path.join(context.root, reference.relative_path)),
          {:ok, coverage} <- Coverage.new(context.config, capture, observations),
          {:ok, consumed} <- Consumption.new(capture, bytes),
-         {:ok, cleanup} <- Cleanup.new(context.config, capture) do
+         {:ok, cleanup} <- Cleanup.from_observations(context.config, capture, observations) do
       refs = MapSet.new(capture.records, &(&1.source_id <> ":" <> &1.id))
 
       valid =

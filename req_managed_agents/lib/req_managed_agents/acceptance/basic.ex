@@ -5,8 +5,10 @@ defmodule ReqManagedAgents.Acceptance.Basic do
   alias ReqManagedAgents.Session
 
   @doc false
+  @typedoc "Raw native failure is returned only to the provider acceptance edge for interpretation; it is never rendered."
+  @type native_failure :: {:execution_failed, term()}
   @spec session(Context.t(), module(), keyword()) ::
-          {:ok, [Observation.t()]} | {:error, atom(), [Observation.t()]}
+          {:ok, [Observation.t()]} | {:error, native_failure(), [Observation.t()]}
   def session(context, provider, native_options) do
     remaining = context.deadline - System.monotonic_time(:millisecond)
 
@@ -32,9 +34,9 @@ defmodule ReqManagedAgents.Acceptance.Basic do
   defp observed({:error, {:halted, :acceptance_first_turn}}, context),
     do: stopped("local_first_turn_halt", context)
 
-  defp observed({:error, _}, _context) do
+  defp observed({:error, reason}, _context) do
     {:ok, observation} = Observation.new("execution_failed", :failed, [])
-    {:error, :execution_failed, [observation]}
+    {:error, {:execution_failed, reason}, [observation]}
   end
 
   defp stopped(name, context) do

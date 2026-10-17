@@ -55,6 +55,7 @@ defmodule ReqManagedAgents.Acceptance.Proposal do
   defp actions(:claude_managed_agents),
     do: [
       "create_budgeted_session",
+      "archive_on_budget_mismatch",
       "send_selected_prompt",
       "record_bounded_evidence",
       "read_bounded_history",
