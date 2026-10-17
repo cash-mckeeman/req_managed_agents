@@ -144,6 +144,42 @@ defmodule ReqManagedAgents.CacheUsageTest do
     end
   end
 
+  test "Session keeps missing usage unknown before and after measured zero" do
+    zero = %{
+      "prompt_tokens" => 0,
+      "completion_tokens" => 0,
+      "prompt_tokens_details" => %{"cached_tokens" => 0, "cache_write_tokens" => 0}
+    }
+
+    assert {:ok, measured} = run_local(fn _ -> {:ok, response(zero, false)} end)
+    assert measured.usage.input_tokens == 0
+    assert measured.usage.output_tokens == 0
+    assert measured.usage.cache_read_input_tokens == 0
+    assert measured.usage.cache_creation_input_tokens == 0
+    assert measured.usage.input_token_basis == :inclusive
+    assert measured.usage.complete?
+
+    for reports <- [[nil, zero], [zero, nil]] do
+      script = start_supervised!({Agent, fn -> reports end}, id: make_ref())
+
+      chat = fn _request ->
+        Agent.get_and_update(script, fn [usage | rest] ->
+          {{:ok, response(usage, rest != [])}, rest}
+        end)
+      end
+
+      assert {:ok, result} = run_local(chat)
+      assert result.turns == 2
+      assert result.usage.input_tokens == 0
+      assert result.usage.output_tokens == 0
+      assert result.usage.cache_read_input_tokens == nil
+      assert result.usage.cache_creation_input_tokens == nil
+      assert result.usage.input_token_basis == :unknown
+      assert result.usage.raw == [zero]
+      refute result.usage.complete?
+    end
+  end
+
   test "Local live requests reset cache counts while one request accumulates them" do
     raw = native_usage(Local)
     chat = fn _ -> {:ok, response(raw, false)} end

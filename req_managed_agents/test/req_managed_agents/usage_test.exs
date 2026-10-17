@@ -137,6 +137,31 @@ defmodule ReqManagedAgents.UsageTest do
     end
   end
 
+  test "missing usage and measured zero stay incomplete in either order" do
+    assert {:ok, measured} =
+             Usage.new(
+               known(
+                 input_tokens: 0,
+                 output_tokens: 0,
+                 cache_read_input_tokens: 0,
+                 cache_creation_input_tokens: 0
+               )
+             )
+
+    assert Usage.add(Usage.zero(), measured) == measured
+    assert measured.complete?
+
+    for reports <- [[nil, measured], [measured, nil]] do
+      sum = Enum.reduce(reports, Usage.zero(), &Usage.add(&2, &1))
+      assert sum.input_tokens == 0
+      assert sum.output_tokens == 0
+      assert sum.cache_read_input_tokens == nil
+      assert sum.cache_creation_input_tokens == nil
+      assert sum.input_token_basis == :unknown
+      refute sum.complete?
+    end
+  end
+
   test "absent usage retains observed subtotals and raw but stays incomplete" do
     assert {:ok, usage} = Usage.new(known(raw: [%{"request" => 1}]))
     missing = Usage.add(usage, nil)
