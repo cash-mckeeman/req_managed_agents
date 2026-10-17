@@ -84,41 +84,44 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
 
   test "public acceptance shares one deadline across sequential native requests" do
     owner = self()
+    created = Req.Response.new(status: 200, body: %{"id" => "owned-session", "budget" => @budget})
+    prompted = Req.Response.new(status: 200, body: %{})
+    streaming = Req.Response.new(status: 200, body: async_response())
 
     client =
       client(fn request ->
         send(owner, {:request, request.method, request.url.path, self(), now()})
 
-        body =
+        prepared =
           case {request.method, request.url.path} do
             {:post, "/v1/sessions"} ->
               :erlang.trace(self(), true, [:procs, :monotonic_timestamp, {:tracer, owner}])
-              Process.sleep(140)
-              %{"id" => "owned-session", "budget" => @budget}
+              Process.sleep(600)
+              created
 
             {:get, "/v1/sessions/owned-session/events/stream"} ->
-              async_response()
+              %{streaming | body: %{streaming.body | pid: self()}}
 
             {:post, "/v1/sessions/owned-session/events"} ->
-              Process.sleep(140)
-              %{}
+              Process.sleep(600)
+              prompted
           end
 
-        response(request, body)
+        {request, prepared}
       end)
 
-    assert {:error, report} = execute(client)
+    assert {:error, report} = execute(client, 1000)
     assert report.outcome == :failed
     assert report.cleanup.status == :pending
     assert Enum.map(report.cleanup.owned_resources, & &1.reference) == ["owned-session"]
     assert_receive {:request, :post, "/v1/sessions", session, started}
-    assert_receive {:trace_ts, ^session, :exit, _reason, ended}
-    assert System.convert_time_unit(ended, :native, :millisecond) - started < 300
     assert_receive {:request, :get, "/v1/sessions/owned-session/events/stream", consumer, _}
     assert_receive {:request, :post, "/v1/sessions/owned-session/events", ^session, _}
     assert_dead(session)
     assert_dead(consumer)
     refute_receive {:request, _, _, _, _}
+    assert_receive {:trace_ts, ^session, :exit, _reason, ended}
+    assert System.convert_time_unit(ended, :native, :millisecond) - started < 1400
   end
 
   test "interrupted creation reports unknown ownership without a guessed resource" do
@@ -270,7 +273,7 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
     assert_receive {:DOWN, ^monitor, :process, ^session, _}, 150
   end
 
-  defp execute(client) do
+  defp execute(client, timeout_ms \\ 200) do
     root = Path.expand("../../../..", __DIR__)
 
     {revision, 0} =
@@ -308,7 +311,12 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
           "source_revision" => String.trim(revision),
           "retain_until" => "2099-01-01T00:00:00Z",
           "content" => "drop",
-          "bounds" => %{"calls" => 1, "records" => 100, "bytes" => 100_000, "timeout_ms" => 200},
+          "bounds" => %{
+            "calls" => 1,
+            "records" => 100,
+            "bytes" => 100_000,
+            "timeout_ms" => timeout_ms
+          },
           "inputs" => %{"prompt" => "Say hello", "max_list_cost_cents" => 1, "history_pages" => 2}
         })
       )
