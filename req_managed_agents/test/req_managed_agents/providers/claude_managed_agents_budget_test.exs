@@ -138,7 +138,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
              )
 
     assert is_pid(task)
-    assert {"GET", "/v1/sessions/s1/events/stream"} in requests()
+    assert_receive {:request, "GET", "/v1/sessions/s1/events/stream"}, 2_000
   end
 
   for {label, echo} <- [
