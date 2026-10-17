@@ -2,122 +2,119 @@ defmodule ReqManagedAgents.Acceptance.Basic do
   @moduledoc false
   alias ReqManagedAgents.Acceptance.{Assertion, Context, Observation}
   alias ReqManagedAgents.Evidence.{Capture, Recorder}
+  alias ReqManagedAgents.Session
 
   @doc false
   @spec session(Context.t(), module(), keyword()) ::
           {:ok, [Observation.t()]} | {:error, atom(), [Observation.t()]}
-  def session(%Context{} = context, provider, opts) do
-    common = [
+  def session(context, provider, native_options) do
+    policy = [
       handler: fn _, _, _ -> {:error, :tool_execution_not_permitted} end,
-      evidence_recorder: context.recorder,
-      timeout: context.config.bounds.timeout_ms,
+      turn_guard: fn _ -> {:halt, :acceptance_first_turn} end,
       max_turns: 1,
-      turn_guard: fn _ -> {:halt, :acceptance_first_turn} end
+      timeout: context.config.bounds.timeout_ms,
+      evidence_recorder: context.recorder
     ]
 
-    result = ReqManagedAgents.Session.run(provider, Keyword.merge(opts, common))
-
-    case result do
-      {:ok, _} ->
-        observe(context, :passed, "execution_finished")
-
-      {:error, {:halted, :acceptance_first_turn}} ->
-        observe(context, :passed, "local_first_turn_halt")
-
-      {:error, _} ->
-        {:error, :execution_failed, observation(:failed, "execution_failed", [])}
-    end
+    provider |> Session.run(Keyword.merge(native_options, policy)) |> observed(context)
   end
 
-  defp observe(context, outcome, name) do
-    references =
+  defp observed({:ok, _}, context), do: stopped("execution_finished", context)
+
+  defp observed({:error, {:halted, :acceptance_first_turn}}, context),
+    do: stopped("local_first_turn_halt", context)
+
+  defp observed({:error, _}, _context) do
+    {:ok, observation} = Observation.new("execution_failed", :failed, [])
+    {:error, :execution_failed, [observation]}
+  end
+
+  defp stopped(name, context) do
+    refs =
       case Recorder.snapshot(context.recorder) do
-        {:ok, capture} -> Enum.map(capture.records, &(&1.source_id <> ":" <> &1.id))
+        {:ok, evidence} -> references(evidence.records)
         _ -> []
       end
 
-    {:ok, observation(outcome, name, references)}
-  end
-
-  defp observation(outcome, name, references) do
-    {:ok, observation} = Observation.new(name, outcome, references)
-    [observation]
-  end
-
-  @doc false
-  @spec assess(Context.t(), [Observation.t()], atom()) :: [Assertion.t()]
-  def assess(context, observations, provider) do
-    case capture(context, observations) do
-      {:ok, capture} -> predicates(capture, observations, provider)
-      _ -> assertions([], [], [], :failed)
-    end
+    {:ok, observation} = Observation.new(name, :passed, refs)
+    {:ok, [observation]}
   end
 
   @doc false
   @spec capture(Context.t(), [Observation.t()]) :: {:ok, Capture.t()} | {:error, term()}
   def capture(context, observations) do
-    case Enum.find(Enum.reverse(observations), &match?(%Capture{}, &1.capture)) do
+    observations
+    |> Enum.map(& &1.capture)
+    |> Enum.reject(&is_nil/1)
+    |> List.last()
+    |> case do
+      %Capture{} = evidence -> {:ok, evidence}
       nil -> Recorder.snapshot(context.recorder)
-      observation -> {:ok, observation.capture}
     end
   end
 
-  defp predicates(%Capture{} = capture, observations, provider) do
-    kinds = Map.new(capture.sources, &{&1.id, &1.kind})
+  @doc false
+  @spec assess(Context.t(), [Observation.t()], :agentcore | :claude_managed_agents) :: [
+          Assertion.t()
+        ]
+  def assess(context, observations, provider) do
+    case capture(context, observations) do
+      {:ok, evidence} ->
+        assess_capture(evidence, observations, provider)
+
+      _ ->
+        [
+          predicate("native_activity", :inconclusive, []),
+          predicate("native_completion", :inconclusive, []),
+          predicate("bounded_capture", :failed, [])
+        ]
+    end
+  end
+
+  defp assess_capture(evidence, observations, provider) do
+    kinds = Map.new(evidence.sources, &{&1.id, &1.kind})
 
     native =
-      Enum.filter(
-        capture.records,
-        &(&1.kind == :native and
-            Map.get(kinds, &1.source_id) in [:agentcore_stream, :claude_session])
-      )
+      Enum.filter(evidence.records, fn record ->
+        record.kind == :native and
+          Map.get(kinds, record.source_id) in [:agentcore_stream, :claude_session]
+      end)
 
-    completed = Enum.filter(native, &complete?(&1.payload, provider))
-    execution = if Enum.any?(observations, &(&1.outcome == :failed)), do: :failed, else: :passed
+    complete = Enum.filter(native, &terminal?(&1.payload, provider))
 
-    coverage =
-      if capture.diagnostics == [] and Enum.all?(capture.sources, &(&1.status == :complete)),
-        do: :passed,
-        else: :inconclusive
-
-    assertions(
-      native,
-      completed,
-      capture.records,
-      if(execution == :failed, do: :failed, else: coverage)
-    )
+    [
+      predicate("native_activity", presence(native), native),
+      predicate("native_completion", presence(complete), complete),
+      predicate("bounded_capture", capture_status(evidence, observations), evidence.records)
+    ]
   end
 
-  defp assertions(native, completed, records, coverage) do
-    for {name, outcome, evidence} <- [
-          {"native_activity", present(native), native},
-          {"native_completion", present(completed), completed},
-          {"bounded_capture", coverage, records}
-        ] do
-      refs = Enum.map(evidence, &(&1.source_id <> ":" <> &1.id))
-
-      {:ok, assertion} =
-        Assertion.new(
-          name,
-          if(outcome == :passed and refs == [], do: :inconclusive, else: outcome),
-          refs
-        )
-
-      assertion
+  defp capture_status(evidence, observations) do
+    cond do
+      Enum.any?(observations, &(&1.outcome == :failed)) -> :failed
+      evidence.diagnostics != [] -> :inconclusive
+      Enum.any?(evidence.sources, &(&1.status != :complete)) -> :inconclusive
+      evidence.records == [] -> :inconclusive
+      true -> :passed
     end
   end
 
-  defp present([]), do: :inconclusive
-  defp present(_), do: :passed
+  defp predicate(name, outcome, records) do
+    {:ok, assertion} = Assertion.new(name, outcome, references(records))
+    assertion
+  end
 
-  defp complete?(%{"messageStop" => %{"stopReason" => reason}}, :agentcore),
+  defp references(records), do: Enum.map(records, &(&1.source_id <> ":" <> &1.id))
+  defp presence([]), do: :inconclusive
+  defp presence(_), do: :passed
+
+  defp terminal?(%{"messageStop" => %{"stopReason" => reason}}, :agentcore),
     do: reason in ["end_turn", "stop_sequence"]
 
-  defp complete?(
+  defp terminal?(
          %{"type" => "session.status_idle", "stop_reason" => %{"type" => reason}},
          :claude_managed_agents
-       ),
-       do: reason in ["end_turn", "satisfied"]
+       ), do: reason in ["end_turn", "satisfied"]
 
-  defp complete?(_, _), do: false
+  defp terminal?(_, _), do: false
 end
