@@ -52,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Local's default chat function uses the OpenAI-compatible chat-completions wire
+  for an explicit `model_config.base_url`, preserving the complete model ID and
+  base path and sending the API key as a bearer credential. Model prefixes no
+  longer select another wire or create atoms.
 - Keep tool, model-request and session failure status in dropped-content
   Claude Managed Agents evidence: `is_error` on result events, and the error
   type and retry status of `session.error`. Error messages stay dropped.
