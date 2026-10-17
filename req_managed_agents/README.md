@@ -162,6 +162,22 @@ result.transcript # client-held history (Local) for reattach, else nil (server-h
     prompt: "…", handler: MyHandler)
 ```
 
+`Usage` exposes `input_tokens`, `output_tokens`, `cache_read_input_tokens` and
+`cache_creation_input_tokens`. Cache counts are `nil` when unobserved; measured
+zero remains zero. `input_token_basis` is `:uncached`, `:inclusive` or `:unknown`;
+`:none` identifies an empty accumulator. Input counts retain their provider's
+meaning. When `complete?` is false, numeric counts are observed subtotals and
+must not be treated as a complete usage measurement. Missing reports keep the
+aggregate incomplete, and a missing cache contribution keeps that cache total nil.
+
+CMA and AgentCore expose uncached input; ordinary Local chat-completions usage
+includes cached tokens in its prompt count. Default Local preserves available
+positive ReqLLM cache counts, but reports unknown where its decoder has erased
+cache presence or input-basis information. `Usage.raw` retains usage objects at
+the provider boundary. These token counts do not establish total billed cost or
+usage from unfinished remote work.
+
+
 `terminal` is the **uniform** signal to branch on. `stop_reason` is each provider's **raw native value** (a map for Claude, e.g.
 `%{"type" => "end_turn"}`; a string for Bedrock, e.g. `"end_turn"`) — preserved verbatim, never
 flattened. The raw events are always in `events`.
