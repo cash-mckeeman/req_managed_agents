@@ -23,6 +23,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   alias ReqManagedAgents.Evidence.Recorder
   alias ReqManagedAgents.Providers.BedrockAgentCore.{Client, Converse}
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
+  alias ReqManagedAgents.Providers.BedrockAgentCore.InvocationLimit
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatus
   alias ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget
   alias ReqManagedAgents.Providers.BedrockAgentCore.WaitContext
@@ -851,7 +852,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     # session_id: wins and runtime_session_id: is ignored.
     sid = opts[:session_id] || Keyword.fetch!(opts, :runtime_session_id)
 
-    with {:ok, model} <- invocation_model(opts) do
+    with {:ok, invocation_limit} <- InvocationLimit.new(opts[:max_invocation_attempts]),
+         {:ok, model} <- invocation_model(opts) do
       {:ok,
        %{
          harness_arn: Keyword.fetch!(opts, :harness_arn),
@@ -870,6 +872,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
          endpoint_name: opts[:endpoint_name],
          model: model,
          retries: opts[:invoke_retries] || 2,
+         invocation_limit: invocation_limit,
          subscriber: subscriber,
          idle_timeout: opts[:idle_timeout],
          timeout_seconds: opts[:timeout_seconds],
@@ -927,55 +930,63 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   end
 
   @impl true
-  def poll_turn(conn, messages), do: invoke(conn, messages, conn.retries)
+  def poll_turn(conn, messages), do: invoke(conn, messages, conn.retries, nil)
 
   # One turn with bounded retry on a transport error or a truncated stream (stop_reason == nil).
   # A surfaced AWS exception/error frame is never retried.
-  defp invoke(conn, messages, retries_left) do
-    evidence = Recorder.attempt(Map.get(conn, :evidence))
-    conn = Map.put(conn, :evidence, evidence)
-    observation_key = make_ref()
-    forward = live_forward(conn.subscriber)
-
-    inv = %{
-      harness_arn: conn.harness_arn,
-      runtime_session_id: conn.sid,
-      qualifier: conn.endpoint_name,
-      messages: messages,
-      model: conn.model,
-      idle_timeout: conn.idle_timeout,
-      timeout_seconds: conn.timeout_seconds,
-      max_iterations: conn.max_iterations,
-      max_tokens: conn.max_tokens,
-      on_event: fn event ->
-        Process.put(observation_key, Process.get(observation_key, 0) + 1)
-        Recorder.native(evidence, event)
-        if forward, do: forward.(event)
+  defp invoke(conn, messages, retries_left, retry_reason) do
+    with :ok <- InvocationLimit.take(conn.invocation_limit) do
+      if retry_reason != nil do
+        Recorder.observe(Map.get(conn, :evidence), :retry,
+          error_code: Recorder.code(retry_reason)
+        )
       end
-    }
 
-    result = invoke_observed(conn, inv, evidence, observation_key)
+      evidence = Recorder.attempt(Map.get(conn, :evidence))
+      conn = Map.put(conn, :evidence, evidence)
+      observation_key = make_ref()
+      forward = live_forward(conn.subscriber)
 
-    case result do
-      {:ok, events} ->
-        case stream_error(events) do
-          {type, message} ->
-            failed_attempt(evidence, "harness_stream_error")
-            {:error, {:harness_stream_error, type, message}}
-
-          nil ->
-            if normalize(events).stop_reason != nil do
-              Recorder.observe(evidence, :attempt_end, result: :ok)
-              {:ok, events, conn}
-            else
-              failed_attempt(evidence, "early_termination")
-              retry_invoke(conn, messages, retries_left, :early_termination)
-            end
+      inv = %{
+        harness_arn: conn.harness_arn,
+        runtime_session_id: conn.sid,
+        qualifier: conn.endpoint_name,
+        messages: messages,
+        model: conn.model,
+        idle_timeout: conn.idle_timeout,
+        timeout_seconds: conn.timeout_seconds,
+        max_iterations: conn.max_iterations,
+        max_tokens: conn.max_tokens,
+        on_event: fn event ->
+          Process.put(observation_key, Process.get(observation_key, 0) + 1)
+          Recorder.native(evidence, event)
+          if forward, do: forward.(event)
         end
+      }
 
-      {:error, reason} ->
-        failed_attempt(evidence, Recorder.code(reason))
-        retry_invoke(conn, messages, retries_left, reason)
+      result = invoke_observed(conn, inv, evidence, observation_key)
+
+      case result do
+        {:ok, events} ->
+          case stream_error(events) do
+            {type, message} ->
+              failed_attempt(evidence, "harness_stream_error")
+              {:error, {:harness_stream_error, type, message}}
+
+            nil ->
+              if normalize(events).stop_reason != nil do
+                Recorder.observe(evidence, :attempt_end, result: :ok)
+                {:ok, events, conn}
+              else
+                failed_attempt(evidence, "early_termination")
+                retry_invoke(conn, messages, retries_left, :early_termination)
+              end
+          end
+
+        {:error, reason} ->
+          failed_attempt(evidence, Recorder.code(reason))
+          retry_invoke(conn, messages, retries_left, reason)
+      end
     end
   end
 
@@ -1007,8 +1018,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   end
 
   defp retry_invoke(conn, messages, retries_left, reason) when retries_left > 0 do
-    Recorder.observe(Map.get(conn, :evidence), :retry, error_code: Recorder.code(reason))
-    invoke(conn, messages, retries_left - 1)
+    invoke(conn, messages, retries_left - 1, reason)
   end
 
   defp retry_invoke(_conn, _messages, _retries_left, reason), do: {:error, reason}
