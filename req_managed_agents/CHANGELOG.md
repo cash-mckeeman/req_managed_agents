@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Native AgentCore CloudWatch log association through a typed message matcher,
+  with explicit session and trace metadata validation. Standard OTLP matching
+  remains the default; unsupported records keep coverage partial.
+
 - `ReqManagedAgents.ModelConfig`, the typed `:model_config` session option:
   `:model`, `:api_key`, `:bearer_token_file`, `:base_url` and `:metadata`.
 - `ReqManagedAgents.Provider.supports?/2`, `ReqManagedAgents.Provider.data_plane/1`
