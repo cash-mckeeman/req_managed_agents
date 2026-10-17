@@ -384,11 +384,11 @@ defmodule ReqManagedAgents.Providers.Local do
   def terminal("tool_calls", _, _), do: :requires_action
   def terminal(_other, _, _), do: :terminated
 
-  defp to_usage(%{"prompt_tokens" => input} = usage) when is_integer(input) do
+  defp to_usage(%{} = usage) do
     details = cache_details(usage["prompt_tokens_details"])
 
     case Usage.new(%{
-           input_tokens: input,
+           input_tokens: usage["prompt_tokens"],
            output_tokens: usage["completion_tokens"],
            cache_read_input_tokens: details["cached_tokens"],
            cache_creation_input_tokens: details["cache_write_tokens"],

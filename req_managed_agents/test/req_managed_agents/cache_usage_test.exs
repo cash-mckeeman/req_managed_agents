@@ -78,6 +78,34 @@ defmodule ReqManagedAgents.CacheUsageTest do
     assert ClaudeManagedAgents.normalize([event]).usage.input_tokens == 12
   end
 
+  test "Local retains observed output and cache counts when input is absent" do
+    for raw <- [
+          Map.delete(native_usage(Local), "prompt_tokens"),
+          Map.put(native_usage(Local), "prompt_tokens", nil)
+        ] do
+      assert {:ok, result} = run_local(fn _ -> {:ok, response(raw, false)} end)
+      assert result.usage.input_tokens == 0
+      assert result.usage.output_tokens == 4
+      assert result.usage.cache_read_input_tokens == 3
+      assert result.usage.cache_creation_input_tokens == 2
+      assert result.usage.input_token_basis == :inclusive
+      assert result.usage.raw == [raw]
+      refute result.usage.complete?
+    end
+  end
+
+  test "Local rejects invalid supplied input counts instead of certifying partial usage" do
+    for input <- [-1, 1.5, "12"] do
+      raw = Map.put(native_usage(Local), "prompt_tokens", input)
+      assert normalize(Local, raw) == nil
+      assert {:ok, result} = run_local(fn _ -> {:ok, response(raw, false)} end)
+      assert result.usage.output_tokens == 0
+      assert result.usage.cache_read_input_tokens == nil
+      assert result.usage.cache_creation_input_tokens == nil
+      refute result.usage.complete?
+    end
+  end
+
   test "Local parses only the closed basis extension without changing input counts" do
     for {wire, basis} <- [
           {"inclusive", :inclusive},
