@@ -53,6 +53,11 @@ defmodule ReqManagedAgents.Providers.Local.ReqLLMChatWireTest do
       reply =
         if Enum.any?(body["messages"], &(&1["role"] == "tool")) do
           response(body["model"], "after lookup")
+          |> Map.put("usage", %{
+            "prompt_tokens" => 11,
+            "completion_tokens" => 5,
+            "total_tokens" => 16
+          })
         else
           response(body["model"], nil)
           |> put_in(["choices", Access.at(0), "finish_reason"], "tool_calls")
@@ -108,7 +113,7 @@ defmodule ReqManagedAgents.Providers.Local.ReqLLMChatWireTest do
             %SessionResult{
               terminal: :end_turn,
               text: "after lookup",
-              usage: %Usage{input_tokens: 14, output_tokens: 6}
+              usage: %Usage{input_tokens: 18, output_tokens: 8}
             }} = result
 
     refute_received {:request, _, _, _, _}
