@@ -1775,7 +1775,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCoreTest do
           region: "us-east-1",
           security_token: nil
         },
-        base_url: "http://localhost:#{bypass.port}"
+        control_base_url: "http://localhost:#{bypass.port}"
       )
 
     Bypass.expect_once(bypass, "POST", "/harnesses", fn conn ->
