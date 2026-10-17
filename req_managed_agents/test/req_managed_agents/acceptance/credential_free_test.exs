@@ -136,6 +136,40 @@ defmodule ReqManagedAgents.Acceptance.CredentialFreeTest do
           assert :ok = Command.run(cma_args)
           File.write!(path, Jason.encode!(put_in(cma, ["inputs", "history_pages"], 0)))
           assert_raise Mix.Error, fn -> Command.run(cma_args) end
+
+          recovery =
+            cma
+            |> Map.put("scenario", "tool-recovery")
+            |> put_in(["inputs", "expected_tool"], %{
+              "family" => "builtin",
+              "target" => "lookup",
+              "arguments" => %{"key" => "value"}
+            })
+
+          recovery_args = List.replace_at(cma_args, 3, "tool-recovery")
+          File.write!(path, Jason.encode!(recovery))
+          assert :ok = Command.run(recovery_args)
+
+          for expectation <- [
+                nil,
+                %{},
+                %{"family" => "custom", "target" => "lookup", "arguments" => %{}},
+                %{"family" => "builtin", "target" => "", "arguments" => %{}},
+                %{"family" => "builtin", "target" => "lookup", "arguments" => "{}"},
+                %{
+                  "family" => "builtin",
+                  "target" => "lookup",
+                  "arguments" => %{},
+                  "module" => "Unknown"
+                }
+              ] do
+            File.write!(
+              path,
+              Jason.encode!(put_in(recovery, ["inputs", "expected_tool"], expectation))
+            )
+
+            assert_raise Mix.Error, fn -> Command.run(recovery_args) end
+          end
         end)
 
       assert counts == %{}

@@ -2,6 +2,7 @@ defmodule ReqManagedAgents.Acceptance.Proposal do
   @moduledoc "Credential-free description of an explicitly selected acceptance run."
   alias ReqManagedAgents.Acceptance.{Bounds, Config}
   alias ReqManagedAgents.CloudWatch.Query
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.RecoveryExpectation
   @enforce_keys [:config_digest, :config, :resource, :actions, :required_assertions]
   defstruct @enforce_keys ++ [selection: nil]
 
@@ -12,15 +13,17 @@ defmodule ReqManagedAgents.Acceptance.Proposal do
           resource: %{String.t() => Jason.Encoder.t()},
           actions: [String.t()],
           required_assertions: [String.t()],
-          selection: Query.t() | nil
+          selection: Query.t() | RecoveryExpectation.t() | nil
         }
 
   @doc "Construct a proposal without resolving credentials or discovering resources."
-  @spec new(Config.t(), Query.t() | nil) :: {:ok, t()} | {:error, Config.error()}
+  @spec new(Config.t(), Query.t() | RecoveryExpectation.t() | nil) ::
+          {:ok, t()} | {:error, Config.error()}
   def new(candidate, selection \\ nil)
 
   def new(%Config{} = candidate, selection)
-      when is_nil(selection) or is_struct(selection, Query) do
+      when is_nil(selection) or is_struct(selection, Query) or
+             is_struct(selection, RecoveryExpectation) do
     with {:ok, config} <- Config.new(candidate), {:ok, required} <- required(config.scenario) do
       {:ok,
        %__MODULE__{
@@ -51,11 +54,13 @@ defmodule ReqManagedAgents.Acceptance.Proposal do
       "bounds" => Bounds.to_wire(proposal.config.bounds),
       "retain_until" => DateTime.to_iso8601(proposal.config.retain_until),
       "content" => Atom.to_string(proposal.config.content),
-      "prerequisites" => [
-        "selected_resource",
-        "externally_supplied_credentials",
-        "external_authorization"
-      ]
+      "prerequisites" =>
+        prerequisites(proposal.config) ++
+          [
+            "selected_resource",
+            "externally_supplied_credentials",
+            "external_authorization"
+          ]
     }
   end
 
@@ -64,7 +69,17 @@ defmodule ReqManagedAgents.Acceptance.Proposal do
   defp required(:evidence),
     do: {:ok, ~w(native_activity native_completion bounded_capture stored_evidence)}
 
+  defp required(:tool_recovery),
+    do:
+      {:ok,
+       ~w(native_activity native_completion bounded_capture stored_evidence native_tool_recovery)}
+
   defp required(_), do: {:error, :invalid_config}
+
+  defp prerequisites(%Config{provider: :claude_managed_agents, scenario: :tool_recovery}),
+    do: ["selected_agent_builtin_tool_capability"]
+
+  defp prerequisites(_), do: []
 
   defp evidence_actions(%Config{provider: :agentcore, scenario: :evidence}),
     do: ["read_selected_isolated_log_group"]
