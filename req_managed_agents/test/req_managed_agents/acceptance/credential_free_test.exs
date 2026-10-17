@@ -89,6 +89,30 @@ defmodule ReqManagedAgents.Acceptance.CredentialFreeTest do
           end
 
           assert_raise Mix.Error, fn -> Command.run(args ++ ["--out", path]) end
+          evidence = bytes |> Jason.decode!() |> Map.put("scenario", "evidence")
+
+          evidence =
+            update_in(
+              evidence,
+              ["inputs"],
+              &Map.merge(&1, %{
+                "history_pages" => 1,
+                "cloudwatch" => %{
+                  "log_group" => "/synthetic/isolated",
+                  "from" => "2026-01-01T00:00:00Z",
+                  "to" => "2026-01-01T00:01:00Z",
+                  "trace_ids" => [],
+                  "isolated_destination" => true
+                }
+              })
+            )
+
+          File.write!(path, Jason.encode!(evidence))
+          evidence_args = List.replace_at(args, 3, "evidence")
+          assert :ok = Command.run(evidence_args)
+          refused = put_in(evidence, ["inputs", "cloudwatch", "isolated_destination"], false)
+          File.write!(path, Jason.encode!(refused))
+          assert_raise Mix.Error, fn -> Command.run(evidence_args) end
         end)
 
       assert counts == %{}

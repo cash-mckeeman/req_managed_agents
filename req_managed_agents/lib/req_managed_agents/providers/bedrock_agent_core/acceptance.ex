@@ -4,12 +4,16 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.Acceptance do
   alias ReqManagedAgents.Acceptance.{Basic, Config, Context, Proposal}
   alias ReqManagedAgents.ModelConfig
   alias ReqManagedAgents.Providers.BedrockAgentCore
+  alias ReqManagedAgents.Providers.BedrockAgentCore.Acceptance.Evidence
   alias ReqManagedAgents.Providers.BedrockAgentCore.Client
 
   @impl true
   def propose(%Config{provider: :agentcore, scenario: :basic} = config) do
     with :ok <- validate(config), do: Proposal.new(config)
   end
+
+  def propose(%Config{provider: :agentcore, scenario: :evidence} = config),
+    do: Evidence.propose(config)
 
   def propose(_), do: {:error, :unsupported_scenario}
 
@@ -71,9 +75,18 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.Acceptance do
       idle_timeout: config.bounds.timeout_ms
     ]
 
-    case Basic.session(context, BedrockAgentCore, native ++ transport(context)) do
-      {:error, _, observations} -> {:error, :execution_failed, observations}
-      result -> result
+    transport = transport(context)
+    result = Basic.session(context, BedrockAgentCore, native ++ transport)
+
+    case context.config.scenario do
+      :evidence ->
+        Evidence.acquire(context, result, transport)
+
+      :basic ->
+        case result do
+          {:error, _, observations} -> {:error, :execution_failed, observations}
+          other -> other
+        end
     end
   end
 
@@ -100,5 +113,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.Acceptance do
   end
 
   @impl true
+  def assess(%Context{config: %Config{scenario: :evidence}} = context, observations),
+    do: Evidence.assess(context, observations)
+
   def assess(context, observations), do: Basic.assess(context, observations, :agentcore)
 end

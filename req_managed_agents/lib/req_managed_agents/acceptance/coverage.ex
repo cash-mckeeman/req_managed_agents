@@ -60,6 +60,13 @@ defmodule ReqManagedAgents.Acceptance.Coverage do
       "response_buffer_not_capture_byte_bound"
     ]
 
+    limitations =
+      if config.provider == :agentcore and config.scenario == :evidence,
+        do:
+          limitations ++
+            ["sessionassociation_not_tracejoin", "isolated_destination_is_caller_selected"],
+        else: limitations
+
     {:ok,
      %__MODULE__{
        sources: sources,
