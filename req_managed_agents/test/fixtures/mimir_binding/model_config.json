@@ -1,0 +1,37 @@
+{
+  "cases": {
+    "agentcore_control_plane": {
+      "metadata": {
+        "decision_id": "rd_fixture",
+        "workflow_id": "wf_fixture",
+        "step_id": "s_fixture",
+        "mimir_request_id": "rd_fixture"
+      },
+      "model": "bedrock:us.anthropic.claude-sonnet-4-6"
+    },
+    "cma_data_plane": {
+      "metadata": {
+        "decision_id": "rd_fixture",
+        "workflow_id": "wf_fixture",
+        "step_id": "s_fixture",
+        "mimir_request_id": "rd_fixture"
+      },
+      "api_key": "vk-fixture",
+      "base_url": "http://bypass.invalid"
+    },
+    "local_data_plane": {
+      "metadata": {
+        "decision_id": "rd_fixture",
+        "workflow_id": "wf_fixture",
+        "step_id": "s_fixture",
+        "mimir_request_id": "rd_fixture"
+      },
+      "api_key": "vk-fixture",
+      "base_url": "http://bypass.invalid/v1",
+      "model": "anthropic:claude-sonnet-4-6"
+    }
+  },
+  "provenance": {
+    "mimir_commit": "78f1f76982ebe5d0fb7e6fd95ddcca4f8bc0982f"
+  }
+}
