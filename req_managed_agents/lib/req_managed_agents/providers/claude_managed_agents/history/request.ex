@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request do
   @moduledoc "Validated inputs for bounded Claude history retrieval."
   alias ReqManagedAgents.Evidence.{Capture, Error, Options}
-  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Auth, Client}
 
   @enforce_keys [:client, :options]
   defstruct [:client, :options, :prior]
@@ -11,7 +11,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request do
   Accepts a canonical or legacy Claude `:client`, `:options` (an Options struct or keyword list),
   and optional `:prior` capture. Prior evidence must belong to Claude; fetch
   additionally requires its session identity to match. Content defaults to drop
-  for both prior and newly retrieved records.
+  for both prior and newly retrieved records. Authentication accepts the client's
+  selected API-key or bearer-file source; credential files are read only at dispatch.
   """
   @spec new(keyword() | t()) :: {:ok, t()} | {:error, Error.t()}
   def new(%__MODULE__{} = input) do
@@ -45,11 +46,18 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request do
   defp canonical_client(_), do: nil
 
   defp valid_client?(%Client{} = client) do
-    is_binary(client.api_key) and client.api_key != "" and is_binary(client.base_url) and
+    valid_auth?(client) and is_binary(client.base_url) and
       is_binary(client.beta) and is_binary(client.anthropic_version) and
       Keyword.keyword?(client.req_options) and
       (client.receive_timeout == :infinity or
          (is_integer(client.receive_timeout) and client.receive_timeout > 0))
+  end
+
+  defp valid_auth?(client) do
+    match?(
+      {:ok, _},
+      Auth.resolve(api_key: client.api_key, bearer_token_file: client.bearer_token_file)
+    )
   end
 
   defp prior(nil), do: {:ok, nil}
