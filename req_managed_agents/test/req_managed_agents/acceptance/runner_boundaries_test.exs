@@ -457,6 +457,9 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
        when mode in [:recovery, :recovery_incomplete_inline],
        do: {200, %{"data" => recovery_events(), "has_more" => false}}
 
+  defp cma_response(%{method: :get}, _, _, :empty),
+    do: {200, %{"data" => [], "has_more" => false}}
+
   defp recovery_events do
     Enum.flat_map([{1, true}, {2, false}], fn {index, failed} ->
       start = (index - 1) * 2
@@ -481,9 +484,6 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
       ]
     end)
   end
-
-  defp cma_response(%{method: :get}, _, _, :empty),
-    do: {200, %{"data" => [], "has_more" => false}}
 
   defp context(data, transport) do
     {:ok, config} = Config.parse(Jason.encode!(data))
