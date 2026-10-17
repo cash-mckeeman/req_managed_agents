@@ -7,6 +7,12 @@ defmodule ReqManagedAgents.Acceptance.SourceTest do
     File.mkdir!(root)
     on_exit(fn -> File.rm_rf!(root) end)
     git(root, ["init", "--quiet"])
+    hooks = Path.join(root, ".git/acceptance-hooks")
+    File.mkdir!(hooks)
+    File.write!(Path.join(hooks, "pre-commit"), "#!/bin/sh\nexit 77\n")
+    File.chmod!(Path.join(hooks, "pre-commit"), 0o700)
+    git(root, ["config", "core.hooksPath", hooks])
+    git(root, ["config", "commit.gpgsign", "true"])
     File.mkdir!(Path.join(root, "lib"))
     file = Path.join(root, "lib/example.ex")
     original = "defmodule Example do\nend\n"
@@ -50,7 +56,13 @@ defmodule ReqManagedAgents.Acceptance.SourceTest do
   end
 
   defp git(root, args) do
-    {output, 0} = System.cmd("git", ["-C", root | args], stderr_to_stdout: true)
+    {output, 0} =
+      System.cmd(
+        "git",
+        ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-C", root | args],
+        stderr_to_stdout: true
+      )
+
     output
   end
 end
