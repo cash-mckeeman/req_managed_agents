@@ -5,8 +5,8 @@ defmodule ReqManagedAgents.Acceptance.Coverage.Source do
 
   @type t :: %__MODULE__{
           source_id: String.t(),
-          kind: atom(),
-          status: atom(),
+          kind: ReqManagedAgents.Evidence.Source.kind(),
+          status: ReqManagedAgents.Evidence.Source.status(),
           pages: non_neg_integer(),
           records_seen: non_neg_integer(),
           session_id: String.t() | nil
