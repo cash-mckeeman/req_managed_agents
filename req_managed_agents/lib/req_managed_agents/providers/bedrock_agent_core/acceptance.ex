@@ -71,7 +71,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.Acceptance do
       idle_timeout: config.bounds.timeout_ms
     ]
 
-    Basic.session(context, BedrockAgentCore, native ++ transport(context))
+    case Basic.session(context, BedrockAgentCore, native ++ transport(context)) do
+      {:error, _, observations} -> {:error, :execution_failed, observations}
+      result -> result
+    end
   end
 
   defp transport(%Context{transport: opts, config: config}) do

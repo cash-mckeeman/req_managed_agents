@@ -1,7 +1,17 @@
 defmodule ReqManagedAgents.Acceptance.ClaudeBasicTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.Acceptance
-  alias ReqManagedAgents.Acceptance.{Config, Context, Source}
+
+  alias ReqManagedAgents.Acceptance.{
+    Cleanup,
+    Config,
+    Consumption,
+    Context,
+    Coverage,
+    Report,
+    Source
+  }
+
   alias ReqManagedAgents.Evidence.{Options, Recorder}
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance, as: CMA
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client
@@ -81,6 +91,73 @@ defmodule ReqManagedAgents.Acceptance.ClaudeBasicTest do
     assert Enum.any?(capture.sources, &(&1.pages > 0))
     assert Enum.any?(capture.records, &(&1.source_id == "native"))
     assert Enum.any?(capture.records, &(&1.source_id != "native" and &1.kind == :native))
+  end
+
+  test "budget mismatch retains exact owned session cleanup without echoed private bodies" do
+    owner = self()
+
+    for {status, expected} <- [{200, :complete}, {500, :pending}] do
+      adapter = fn request ->
+        send(owner, {:budget_request, request.url.path})
+
+        case request.url.path do
+          "/v1/sessions" ->
+            {request,
+             Req.Response.new(
+               status: 200,
+               body: %{
+                 "id" => "created-session",
+                 "budget" => %{"private" => "PRIVATE_ECHO_SENTINEL"}
+               }
+             )}
+
+          "/v1/sessions/created-session/archive" ->
+            {request, Req.Response.new(status: status, body: %{})}
+        end
+      end
+
+      client =
+        Client.new(
+          api_key: "invented",
+          req_options: [
+            adapter: AcceptanceAdapter,
+            finch_private: %{acceptance_adapter: adapter},
+            retry: false
+          ]
+        )
+
+      context = context(client)
+      assert {:error, :execution_failed, observations} = CMA.run(context)
+      cleanup = List.last(observations).cleanup
+      assert cleanup.status == expected
+      assert Enum.map(cleanup.owned_resources, & &1.reference) == ["created-session"]
+      refute inspect(observations) =~ "PRIVATE_ECHO_SENTINEL"
+      {:ok, capture} = Recorder.snapshot(context.recorder)
+      {:ok, coverage} = Coverage.new(context.config, capture, observations)
+      {:ok, consumed} = Consumption.new(capture, 0)
+      {:ok, cleanup} = Cleanup.from_observations(context.config, capture, observations)
+
+      {:ok, report} =
+        Report.new(%{
+          context: context,
+          assertions: CMA.assess(context, observations),
+          coverage: coverage,
+          consumed: consumed,
+          cleanup: cleanup,
+          artifacts: []
+        })
+
+      wire = report |> Report.to_wire() |> Jason.encode!()
+      assert wire =~ "created-session"
+      refute wire =~ "PRIVATE_ECHO_SENTINEL"
+      output = ExUnit.CaptureIO.capture_io(fn -> Mix.shell().info(wire) end)
+      assert output =~ "created-session"
+      refute output =~ "PRIVATE_ECHO_SENTINEL"
+      assert_receive {:budget_request, "/v1/sessions"}
+      assert_receive {:budget_request, "/v1/sessions/created-session/archive"}
+      refute_receive {:budget_request, _}
+      stop_supervised(Recorder)
+    end
   end
 
   defp context(client) do

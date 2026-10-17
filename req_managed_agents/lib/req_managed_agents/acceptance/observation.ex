@@ -1,13 +1,14 @@
 defmodule ReqManagedAgents.Acceptance.Observation do
   @moduledoc "A bounded source-qualified execution observation; native content stays in evidence."
   @enforce_keys [:name, :outcome, :references]
-  defstruct @enforce_keys ++ [capture: nil]
+  defstruct @enforce_keys ++ [capture: nil, cleanup: nil]
 
   @type t :: %__MODULE__{
           name: String.t(),
           outcome: :passed | :failed | :inconclusive,
           references: [String.t()],
-          capture: ReqManagedAgents.Evidence.Capture.t() | nil
+          capture: ReqManagedAgents.Evidence.Capture.t() | nil,
+          cleanup: ReqManagedAgents.Acceptance.Cleanup.t() | nil
         }
 
   @doc "Construct an observation without exposing provider failure bodies."

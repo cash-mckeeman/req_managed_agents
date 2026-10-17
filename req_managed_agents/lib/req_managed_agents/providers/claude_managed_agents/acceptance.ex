@@ -1,9 +1,9 @@
 defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
   @moduledoc "One fresh budgeted CMA session followed by bounded persisted history."
   @behaviour ReqManagedAgents.Acceptance.Scenario
-  alias ReqManagedAgents.Acceptance.{Basic, Config, Context, Observation, Proposal}
+  alias ReqManagedAgents.Acceptance.{Basic, Cleanup, Config, Context, Observation, Proposal}
   alias ReqManagedAgents.Budget
-  alias ReqManagedAgents.Evidence.Options
+  alias ReqManagedAgents.Evidence.{Options, Validation}
   alias ReqManagedAgents.Providers.ClaudeManagedAgents
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, History}
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request
@@ -53,10 +53,30 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
     ]
 
     case Basic.session(context, ClaudeManagedAgents, native) do
-      {:ok, observations} -> acquire_history(context, client, observations)
-      error -> error
+      {:ok, observations} ->
+        acquire_history(context, client, observations)
+
+      {:error, {:execution_failed, native_reason}, observations} ->
+        {:error, :execution_failed, attach_cleanup(observations, native_reason)}
     end
   end
+
+  defp attach_cleanup(
+         observations,
+         {:budget_not_confirmed, %{session_id: id, archived: archived}}
+       ) do
+    with {:ok, id} <- Validation.safe_id(id),
+         {:ok, cleanup} <- Cleanup.owned_session(id, archive_status(archived)) do
+      Enum.map(observations, &%{&1 | cleanup: cleanup})
+    else
+      _ -> observations
+    end
+  end
+
+  defp attach_cleanup(observations, _), do: observations
+  defp archive_status(:ok), do: :complete
+  defp archive_status({:error, _}), do: :pending
+  defp archive_status(_), do: :unknown
 
   defp native_client(context) do
     client = context.transport[:client] || Client.new()
