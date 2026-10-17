@@ -4,7 +4,7 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
   alias ReqManagedAgents.Acceptance.{Config, Context, Output, Runner, Source}
   alias ReqManagedAgents.Evidence
   alias ReqManagedAgents.Evidence.{Options, Recorder}
-  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Client
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, Recovery}
   alias ReqManagedAgents.Test.AcceptanceAdapter
 
   test "record and byte ceilings preserve explicit incomplete coverage and bounded artifacts" do
@@ -150,6 +150,54 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
     assert length(Agent.get(state, & &1.requests)) == 5
   end
 
+  for mode <- [:recognized, :empty, :denied, :malformed, :capped, :unknown, :metadata_only] do
+    @mode mode
+    test "CMA evidence #{@mode} verifies persisted activity separately from live completion" do
+      {context, state} = cma_context(@mode, "evidence")
+      assert context.proposal.selection == nil
+
+      assert context.proposal.required_assertions ==
+               ~w(native_activity native_completion bounded_capture stored_evidence)
+
+      result = Runner.run(context)
+      report = elem(result, 1)
+      stored = predicate(report, "stored_evidence")
+
+      if @mode in [:recognized, :metadata_only] do
+        assert {:ok, _} = result
+        assert stored.outcome == :passed
+        assert stored.evidence != []
+        refute Enum.any?(stored.evidence, &String.starts_with?(&1, "native:"))
+      else
+        assert {:error, _} = result
+        assert stored.outcome == :inconclusive
+      end
+
+      capture = artifact(context, report)
+
+      assert Enum.any?(
+               capture.records,
+               &(&1.source_id == "native" and &1.native_id == "live-terminal")
+             )
+
+      requests = Agent.get(state, & &1.requests)
+      assert Enum.count(requests, &(&1 == {:post, "/v1/sessions"})) == 1
+      assert Enum.count(requests, &(&1 == {:get, "/v1/sessions/owned-session/events"})) == 1
+      assert length(requests) == if(@mode == :capped, do: 4, else: 5)
+
+      assert "stored_activity_does_not_verify_tool_arguments_or_recovery" in report.coverage.limitations
+
+      refute "tool_recovery" in report.required_assertions
+
+      if @mode == :metadata_only do
+        assert Enum.any?(capture.records, &(&1.native_id == "stored-use"))
+
+        assert {:error, :inconclusive} =
+                 Recovery.attempts(capture)
+      end
+    end
+  end
+
   defp predicate(report, name), do: Enum.find(report.assertions, &(&1.name == name))
 
   defp artifact(context, report) do
@@ -167,7 +215,7 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
     context(data, invoke_fun: invoke)
   end
 
-  defp cma_context(mode) do
+  defp cma_context(mode, scenario \\ "basic") do
     state = start_supervised!({Agent, fn -> %{stream: nil, requests: []} end})
 
     terminal = %{
@@ -192,7 +240,7 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
         ]
       )
 
-    data = base("claude-managed-agents")
+    data = base("claude-managed-agents") |> Map.put("scenario", scenario)
     data = if mode == :capped, do: put_in(data, ["inputs", "history_pages"], 1), else: data
     {context(data, client: client), state}
   end
@@ -274,6 +322,61 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
 
   defp cma_response(%{method: :get, url: %{path: "/v1/sessions/owned-session/threads"}}, _, _, _),
     do: {200, %{"data" => [], "has_more" => false}}
+
+  defp cma_response(
+         %{method: :get, url: %{path: "/v1/sessions/owned-session/events"}},
+         _,
+         _,
+         :recognized
+       ),
+       do:
+         {200,
+          %{
+            "data" => [%{"id" => "stored-message", "type" => "agent.message"}],
+            "has_more" => false
+          }}
+
+  defp cma_response(
+         %{method: :get, url: %{path: "/v1/sessions/owned-session/events"}},
+         _,
+         _,
+         :unknown
+       ),
+       do:
+         {200,
+          %{
+            "data" => [%{"id" => "future-native", "type" => "future-provider-event"}],
+            "has_more" => false
+          }}
+
+  defp cma_response(
+         %{method: :get, url: %{path: "/v1/sessions/owned-session/events"}},
+         _,
+         _,
+         :metadata_only
+       ),
+       do:
+         {200,
+          %{
+            "data" => [
+              %{
+                "id" => "stored-use",
+                "type" => "agent.custom_tool_use",
+                "name" => "synthetic",
+                "session_thread_id" => "thread",
+                "processed_at" => "2026-01-01T00:00:00Z"
+              },
+              %{
+                "id" => "stored-result",
+                "type" => "user.custom_tool_result",
+                "custom_tool_use_id" => "stored-use",
+                "is_error" => false,
+                "session_thread_id" => "thread",
+                "processed_at" => "2026-01-01T00:00:01Z"
+              }
+            ],
+            "has_more" => false
+          }}
 
   defp cma_response(%{method: :get}, _, _, :empty),
     do: {200, %{"data" => [], "has_more" => false}}

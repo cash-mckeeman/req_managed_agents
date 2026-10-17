@@ -113,6 +113,29 @@ defmodule ReqManagedAgents.Acceptance.CredentialFreeTest do
           refused = put_in(evidence, ["inputs", "cloudwatch", "isolated_destination"], false)
           File.write!(path, Jason.encode!(refused))
           assert_raise Mix.Error, fn -> Command.run(evidence_args) end
+
+          cma =
+            bytes
+            |> Jason.decode!()
+            |> Map.merge(%{
+              "provider" => "claude-managed-agents",
+              "scenario" => "evidence",
+              "resource" => %{
+                "reference" => "synthetic-agent",
+                "environment_id" => "synthetic-env"
+              },
+              "inputs" => %{
+                "prompt" => "Say hello",
+                "max_list_cost_cents" => 1,
+                "history_pages" => 1
+              }
+            })
+
+          File.write!(path, Jason.encode!(cma))
+          cma_args = List.replace_at(evidence_args, 1, "claude-managed-agents")
+          assert :ok = Command.run(cma_args)
+          File.write!(path, Jason.encode!(put_in(cma, ["inputs", "history_pages"], 0)))
+          assert_raise Mix.Error, fn -> Command.run(cma_args) end
         end)
 
       assert counts == %{}
