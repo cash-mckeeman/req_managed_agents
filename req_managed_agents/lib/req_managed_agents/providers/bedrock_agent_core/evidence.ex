@@ -35,7 +35,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.Evidence do
   @trace_strings ~w(traceId spanId parentSpanId name)
   @trace_times ~w(startTimeUnixNano endTimeUnixNano)
   @usage ~w(input_tokens output_tokens cache_read_input_tokens cache_creation_input_tokens total_tokens
-    inputTokens outputTokens totalTokens)
+    inputTokens outputTokens totalTokens cacheReadInputTokens cacheWriteInputTokens)
 
   defp supported?(%{"messageStart" => value}) when is_map(value), do: true
   defp supported?(%{"messageStop" => value}) when is_map(value), do: true

@@ -205,6 +205,29 @@ defmodule ReqManagedAgents.Evidence.AdapterTest do
     refute Claude.interpret(%{"messageStop" => %{}}).supported?
   end
 
+  test "Bedrock drop projection preserves cache metadata without content" do
+    payload = %{
+      "metadata" => %{
+        "usage" => %{
+          "inputTokens" => 12,
+          "outputTokens" => 4,
+          "cacheReadInputTokens" => 3,
+          "cacheWriteInputTokens" => 2
+        }
+      },
+      "contentBlockDelta" => %{"delta" => %{"text" => "PRIVATE_SENTINEL"}}
+    }
+
+    observation = Bedrock.interpret(payload)
+    assert observation.supported?
+    refute observation.malformed_metadata?
+    assert get_in(observation.safe_payload, ["metadata", "usage", "cacheReadInputTokens"]) == 3
+    assert get_in(observation.safe_payload, ["metadata", "usage", "cacheWriteInputTokens"]) == 2
+    refute Jason.encode!(observation.safe_payload) =~ "PRIVATE_SENTINEL"
+    malformed = put_in(payload, ["metadata", "usage", "cacheReadInputTokens"], "3")
+    assert Bedrock.interpret(malformed).malformed_metadata?
+  end
+
   test "unknown payload retain stays exact while standalone drop is conservative" do
     payload = %{"type" => "future.private", "content" => "private"}
     attrs = record(payload)
