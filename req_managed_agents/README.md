@@ -12,9 +12,10 @@ One loop, three backends behind a single `Provider` behaviour:
 
 ### Local + routing
 
-Point Local's `chat_fun` at an OpenAI-compatible gateway lane (`base_url` + per-run `api_key`
-via `model_config`) and you get hard data-plane budget enforcement with no coupling to the
-gateway's internals. Direct-to-provider `chat_fun`s remain available for dev and tests.
+With an explicit `model_config.base_url`, Local's default `chat_fun` uses OpenAI-compatible
+chat completions, sends the complete model string unchanged, and authenticates with the
+per-run `api_key` as a bearer credential. A gateway can use that key to enforce a data-plane
+budget. Without a base URL, ReqLLM resolves the model's native provider.
 
 ```elixir
 {:ok, result} =

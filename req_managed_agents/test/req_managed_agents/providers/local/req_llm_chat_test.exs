@@ -46,11 +46,29 @@ defmodule ReqManagedAgents.Providers.Local.ReqLLMChatTest do
     assert [%ReqLLM.Tool{name: "lookup", description: "d"}] = ReqLLMChat.to_tools(@request.tools)
   end
 
-  test "model_term/2 threads base_url through the model map" do
+  test "model_term/2 preserves provider-native inputs without an explicit base URL" do
     assert "openai:gpt-test" = ReqLLMChat.model_term("openai:gpt-test", %{})
+    native = %{provider: :anthropic, id: "native-model"}
+    assert ReqLLMChat.model_term(native, %{base_url: nil}) == native
+  end
 
-    assert %{provider: :openai, id: "m", base_url: "http://lane/v1"} =
-             ReqLLMChat.model_term("openai:m", %{base_url: "http://lane/v1"})
+  test "model_term/2 pins the chat wire and preserves the routed ID and base path" do
+    assert ReqLLMChat.model_term("anthropic:claude-test", %{base_url: "http://lane/tenant/v1/"}) ==
+             %{
+               provider: :openai,
+               id: "anthropic:claude-test",
+               base_url: "http://lane/tenant/v1/",
+               extra: %{wire: %{protocol: "openai_chat"}}
+             }
+  end
+
+  test "model_term/2 does not create an atom from an unseen model prefix" do
+    prefix = "local_model_prefix_#{System.unique_integer([:positive])}"
+    assert_raise ArgumentError, fn -> String.to_existing_atom(prefix) end
+
+    ReqLLMChat.model_term(prefix <> ":opaque", %{base_url: "http://lane/v1"})
+
+    assert_raise ArgumentError, fn -> String.to_existing_atom(prefix) end
   end
 
   test "generate_opts/2 threads api_key and tools" do

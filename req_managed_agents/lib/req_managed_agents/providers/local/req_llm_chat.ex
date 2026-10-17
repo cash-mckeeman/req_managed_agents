@@ -40,10 +40,12 @@ defmodule ReqManagedAgents.Providers.Local.ReqLLMChat do
 
   @doc false
   def model_term(model, %{base_url: base_url}) when is_binary(base_url) do
-    case String.split(to_string(model), ":", parts: 2) do
-      [provider, id] -> %{provider: String.to_atom(provider), id: id, base_url: base_url}
-      [id] -> %{provider: :openai, id: id, base_url: base_url}
-    end
+    %{
+      provider: :openai,
+      id: to_string(model),
+      base_url: base_url,
+      extra: %{wire: %{protocol: "openai_chat"}}
+    }
   end
 
   def model_term(model, _model_config), do: model
