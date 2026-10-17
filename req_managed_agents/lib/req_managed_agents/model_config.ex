@@ -12,7 +12,7 @@ defmodule ReqManagedAgents.ModelConfig do
   models are treated as native values. Providers receive the map from `to_map/1`.
 
   This differs from `ReqManagedAgents.Agent.Spec`'s `model_config`, the
-  provider-native model object sent verbatim when a resource is provisioned.
+  provider-specific configuration interpreted by the selected provider at provisioning.
   """
 
   @keys [:model, :api_key, :bearer_token_file, :base_url, :metadata]
