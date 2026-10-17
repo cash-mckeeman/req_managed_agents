@@ -74,8 +74,6 @@ defmodule ReqManagedAgents.Acceptance.Proposal do
       {:ok,
        ~w(native_activity native_completion bounded_capture stored_evidence native_tool_recovery)}
 
-  defp required(_), do: {:error, :invalid_config}
-
   defp prerequisites(%Config{provider: :claude_managed_agents, scenario: :tool_recovery}),
     do: ["selected_agent_builtin_tool_capability"]
 
