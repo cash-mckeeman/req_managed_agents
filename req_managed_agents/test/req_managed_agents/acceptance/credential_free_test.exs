@@ -97,6 +97,14 @@ defmodule ReqManagedAgents.Acceptance.CredentialFreeTest do
     end
   end
 
+  test "a dead traced subject preserves the original assertion failure" do
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert_raise ExUnit.AssertionError, ~r/traced subject failed/, fn ->
+        traced(fn -> raise "synthetic subject failure" end)
+      end
+    end)
+  end
+
   defp respond(conn), do: Plug.Conn.send_resp(conn, 200, "{}")
 
   defp traced(fun) do
@@ -118,9 +126,26 @@ defmodule ReqManagedAgents.Acceptance.CredentialFreeTest do
     try do
       collect(subject, monitor, %{}, nil)
     after
-      :erlang.trace(subject, false, [:call])
-      send(subject, :stop)
+      stop_subject(subject, monitor)
       Process.demonitor(monitor, [:flush])
+    end
+  end
+
+  defp stop_subject(subject, monitor) do
+    if Process.alive?(subject) do
+      try do
+        :erlang.trace(subject, false, [:call])
+      rescue
+        ArgumentError -> :ok
+      after
+        Process.exit(subject, :kill)
+      end
+
+      receive do
+        {:DOWN, ^monitor, :process, ^subject, _} -> :ok
+      after
+        1000 -> flunk("owned traced subject did not stop")
+      end
     end
   end
 
