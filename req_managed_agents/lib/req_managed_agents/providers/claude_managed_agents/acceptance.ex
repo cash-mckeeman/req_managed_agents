@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
   @moduledoc "One fresh budgeted CMA session followed by bounded persisted history."
   @behaviour ReqManagedAgents.Acceptance.Scenario
-  alias ReqManagedAgents.Acceptance.{Basic, Cleanup, Config, Context, Observation, Proposal}
+  alias ReqManagedAgents.Acceptance.{Basic, Cleanup, Config, Observation, Proposal}
   alias ReqManagedAgents.Budget
   alias ReqManagedAgents.Evidence.{Options, Validation}
   alias ReqManagedAgents.Providers.ClaudeManagedAgents
