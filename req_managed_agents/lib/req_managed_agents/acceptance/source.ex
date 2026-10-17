@@ -102,8 +102,14 @@ defmodule ReqManagedAgents.Acceptance.Source do
     end
   end
 
+  defp command_root("jj", args) do
+    index = Enum.find_index(args, &(&1 == "-R"))
+    if index, do: Enum.at(args, index + 1), else: @root
+  end
+  defp command_root(_, _), do: @root
+
   defp command(command, args) do
-    case System.cmd(command, args, stderr_to_stdout: true) do
+    case System.cmd(command, args, stderr_to_stdout: true, cd: command_root(command, args)) do
       {output, 0} -> {:ok, output}
       _ -> :error
     end
