@@ -33,24 +33,20 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Recovery do
   @spec source_attempts(Capture.t(), Source.t()) ::
           {:ok, [RecoveryAttempt.t()], [String.t()]} | {:error, :inconclusive}
   def source_attempts(%Capture{provider: :managed} = capture, %Source{} = source) do
-    with true <- clean_source?(capture, source) do
-      scoped = %{capture | sources: [source], records: source_records(capture, source)}
+    scoped = %{capture | sources: [source], records: source_records(capture, source)}
 
-      case source.kind do
-        :claude_session ->
-          with {:ok, attempts} <- attempts(scoped), do: {:ok, attempts, []}
+    case {source.kind, clean_source?(capture, source)} do
+      {:claude_session, true} ->
+        with {:ok, attempts} <- attempts(scoped), do: {:ok, attempts, []}
 
-        :claude_thread ->
-          with {:ok, context} <- qualification(capture, source),
-               {:ok, attempts} <- interpret(scoped, context) do
-            {:ok, attempts, [context.descriptor_reference]}
-          end
+      {:claude_thread, true} ->
+        with {:ok, context} <- qualification(capture, source),
+             {:ok, attempts} <- interpret(scoped, context) do
+          {:ok, attempts, [context.descriptor_reference]}
+        end
 
-        _ ->
-          {:error, :inconclusive}
-      end
-    else
-      _ -> {:error, :inconclusive}
+      _ ->
+        {:error, :inconclusive}
     end
   end
 
