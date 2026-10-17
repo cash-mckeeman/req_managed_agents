@@ -14,7 +14,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   the response echoes it back; see `ReqManagedAgents.Budget`. It cannot be combined with
   `:session_id`.
 
-  The `model_config` keys `:api_key`, `:bearer_token_file` and `:base_url` build the client when no `:client` is injected.
+  The `model_config` keys `:api_key`, `:bearer_token_file` and `:base_url` build the client
+  when no `:client` is injected. Combining a non-nil field with an injected runtime client
+  returns `{:error, :data_plane_unsupported}`, including on reattach.
   """
   @behaviour ReqManagedAgents.Provider
 

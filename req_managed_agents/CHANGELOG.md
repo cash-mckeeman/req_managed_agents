@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- CMA rejects an injected `:client`, and Local an injected `:chat_fun`, when the
+  effective runtime `model_config` contains a non-nil credential or destination,
+  returning `{:error, :data_plane_unsupported}` before provider work. Explicit nil
+  fields and model/metadata-only configurations remain valid where supported.
+
 - AgentCore client constructors derive invocation and control endpoint defaults
   from the credential signing region. `:base_url` now overrides invocation only;
   set `:control_base_url` explicitly when both planes share an endpoint.
