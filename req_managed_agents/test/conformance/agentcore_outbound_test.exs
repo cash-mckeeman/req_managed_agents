@@ -88,7 +88,7 @@ defmodule ReqManagedAgents.Conformance.AgentcoreOutboundTest do
   defp capture_create_harness(spec, opts) do
     test_pid = self()
     bypass = Bypass.open()
-    client = Client.new(credentials: @creds, base_url: "http://localhost:#{bypass.port}")
+    client = Client.new(credentials: @creds, control_base_url: "http://localhost:#{bypass.port}")
 
     Bypass.expect_once(bypass, "POST", "/harnesses", fn conn ->
       {:ok, raw, conn} = Plug.Conn.read_body(conn)

@@ -11,7 +11,14 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.ClientTest do
 
   setup do
     bypass = Bypass.open()
-    client = Client.new(credentials: @creds, base_url: "http://localhost:#{bypass.port}")
+
+    client =
+      Client.new(
+        credentials: @creds,
+        base_url: "http://localhost:#{bypass.port}",
+        control_base_url: "http://localhost:#{bypass.port}"
+      )
+
     {:ok, bypass: bypass, client: client}
   end
 
@@ -327,7 +334,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.ClientTest do
     client =
       Client.new(
         credentials: @creds,
-        base_url: "http://localhost:#{bypass.port}",
+        control_base_url: "http://localhost:#{bypass.port}",
         req_options: [retry_delay: 0]
       )
 

@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- AgentCore client constructors derive invocation and control endpoint defaults
+  from the credential signing region. `:base_url` now overrides invocation only;
+  set `:control_base_url` explicitly when both planes share an endpoint.
+
 - `Session` validates `:model_config` at start. Keys outside the canonical set,
   including string keys, and wrongly typed credentials, destinations or metadata
   return `{:error, {:invalid_opts, {:model_config, reason}}}` instead of being
