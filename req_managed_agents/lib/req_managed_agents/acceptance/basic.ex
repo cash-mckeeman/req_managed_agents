@@ -8,15 +8,23 @@ defmodule ReqManagedAgents.Acceptance.Basic do
   @spec session(Context.t(), module(), keyword()) ::
           {:ok, [Observation.t()]} | {:error, atom(), [Observation.t()]}
   def session(context, provider, native_options) do
-    policy = [
-      handler: fn _, _, _ -> {:error, :tool_execution_not_permitted} end,
-      turn_guard: fn _ -> {:halt, :acceptance_first_turn} end,
-      max_turns: 1,
-      timeout: context.config.bounds.timeout_ms,
-      evidence_recorder: context.recorder
-    ]
+    remaining = context.deadline - System.monotonic_time(:millisecond)
 
-    provider |> Session.run(Keyword.merge(native_options, policy)) |> observed(context)
+    if remaining > 0 do
+      policy = [
+        handler: fn _, _, _ -> {:error, :tool_execution_not_permitted} end,
+        turn_guard: fn _ -> {:halt, :acceptance_first_turn} end,
+        max_turns: 1,
+        timeout: remaining,
+        evidence_recorder: context.recorder
+      ]
+
+      provider |> Session.run(Keyword.merge(native_options, policy)) |> observed(context)
+    else
+      evidence = Recorder.begin(context.recorder, provider)
+      Recorder.observe(evidence, :invocation_end, result: :error, error_code: "deadline_exceeded")
+      observed({:error, :deadline_exceeded}, context)
+    end
   end
 
   defp observed({:ok, _}, context), do: stopped("execution_finished", context)
@@ -114,7 +122,8 @@ defmodule ReqManagedAgents.Acceptance.Basic do
   defp terminal?(
          %{"type" => "session.status_idle", "stop_reason" => %{"type" => reason}},
          :claude_managed_agents
-       ), do: reason in ["end_turn", "satisfied"]
+       ),
+       do: reason in ["end_turn", "satisfied"]
 
   defp terminal?(_, _), do: false
 end

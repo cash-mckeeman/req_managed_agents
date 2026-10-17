@@ -70,6 +70,20 @@ defmodule ReqManagedAgents.Acceptance.BasicTest do
     assert Enum.any?(capture.records, &(&1.kind == :local))
   end
 
+  test "an expired aggregate deadline refuses the first native call" do
+    owner = self()
+
+    context =
+      context(fn _ ->
+        send(owner, :invoked)
+        {:ok, []}
+      end)
+
+    expired = %{context | deadline: System.monotonic_time(:millisecond) - 1}
+    assert {:error, :execution_failed, _} = AgentCore.run(expired)
+    refute_receive :invoked
+  end
+
   defp context(invoke) do
     data = %{
       "schema_version" => 1,
