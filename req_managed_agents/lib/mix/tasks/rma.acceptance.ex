@@ -7,6 +7,7 @@ defmodule Mix.Tasks.Rma.Acceptance do
   `--approval-ref TEXT`; a reference does not grant external authorization.
   """
   use Mix.Task
+  @requirements ["compile"]
   alias ReqManagedAgents.Acceptance
   alias ReqManagedAgents.Acceptance.{Config, Output, Proposal, Report}
 
