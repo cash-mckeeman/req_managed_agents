@@ -76,7 +76,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
              max_pages: context.config.inputs["history_pages"],
              max_records: context.config.bounds.records,
              max_bytes: context.config.bounds.bytes,
-             timeout_ms: max(context.deadline - System.monotonic_time(:millisecond), 1),
+             timeout_ms: context.deadline - System.monotonic_time(:millisecond),
              content: :retain
            ),
          {:ok, request} <- Request.new(client: client, options: options, prior: capture),
