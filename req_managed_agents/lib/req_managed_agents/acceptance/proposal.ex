@@ -1,31 +1,40 @@
 defmodule ReqManagedAgents.Acceptance.Proposal do
   @moduledoc "Credential-free description of an explicitly selected acceptance run."
   alias ReqManagedAgents.Acceptance.{Bounds, Config}
+  alias ReqManagedAgents.CloudWatch.Query
   @enforce_keys [:config_digest, :config, :resource, :actions, :required_assertions]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [selection: nil]
 
+  @typedoc "Selection is an opaque validated provider-owned handle, interpreted only by its scenario edge. Native references are never rendered."
   @type t :: %__MODULE__{
           config_digest: String.t(),
           config: Config.t(),
           resource: %{String.t() => Jason.Encoder.t()},
           actions: [String.t()],
-          required_assertions: [String.t()]
+          required_assertions: [String.t()],
+          selection: Query.t() | nil
         }
 
   @doc "Construct a proposal without resolving credentials or discovering resources."
-  @spec new(Config.t()) :: {:ok, t()} | {:error, Config.error()}
-  def new(%Config{} = candidate) do
-    with {:ok, config} <- Config.new(candidate) do
+  @spec new(Config.t(), Query.t() | nil) :: {:ok, t()} | {:error, Config.error()}
+  def new(candidate, selection \\ nil)
+
+  def new(%Config{} = candidate, selection)
+      when is_nil(selection) or is_struct(selection, Query) do
+    with {:ok, config} <- Config.new(candidate), {:ok, required} <- required(config.scenario) do
       {:ok,
        %__MODULE__{
          config_digest: config.digest,
          config: config,
          resource: config.resource,
-         actions: actions(config.provider),
-         required_assertions: ~w(native_activity native_completion bounded_capture)
+         actions: actions(config.provider) ++ evidence_actions(config),
+         required_assertions: required,
+         selection: selection
        }}
     end
   end
+
+  def new(_, _), do: {:error, :invalid_config}
 
   @doc "Render proposal metadata without native resource references or scenario payloads."
   @spec to_wire(t()) :: %{String.t() => Jason.Encoder.t()}
@@ -49,6 +58,18 @@ defmodule ReqManagedAgents.Acceptance.Proposal do
       ]
     }
   end
+
+  defp required(:basic), do: {:ok, ~w(native_activity native_completion bounded_capture)}
+
+  defp required(:evidence),
+    do: {:ok, ~w(native_activity native_completion bounded_capture stored_evidence)}
+
+  defp required(_), do: {:error, :invalid_config}
+
+  defp evidence_actions(%Config{provider: :agentcore, scenario: :evidence}),
+    do: ["read_selected_isolated_log_group"]
+
+  defp evidence_actions(_), do: []
 
   defp actions(:agentcore), do: ["invoke_selected_resource", "record_bounded_evidence"]
 
