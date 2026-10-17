@@ -59,12 +59,21 @@ defmodule ReqManagedAgents.Acceptance.CredentialFreeTest do
           "schema_version" => 1,
           "provider" => "agentcore",
           "scenario" => "basic",
-          "resource" => %{"reference" => "selected-resource"},
+          "resource" => %{
+            "reference" => "arn:aws:bedrock-agentcore:us-east-1:000000000000:harness/invented",
+            "region" => "us-east-1",
+            "runtime_session_id" => String.duplicate("a", 33)
+          },
           "source_revision" => String.duplicate("a", 40),
           "retain_until" => "2099-01-01T00:00:00Z",
           "content" => "drop",
           "bounds" => %{"calls" => 1, "records" => 100, "bytes" => 1000, "timeout_ms" => 1000},
-          "inputs" => %{"prompt" => "Say hello"}
+          "inputs" => %{
+            "prompt" => "Say hello",
+            "model" => nil,
+            "max_tokens" => 16,
+            "timeout_seconds" => 1
+          }
         })
 
       File.write!(path, bytes)
