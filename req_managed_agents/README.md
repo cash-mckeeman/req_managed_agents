@@ -106,6 +106,21 @@ with 30 seconds or less remaining fail before dispatch with
 resolves the AWS keys (it still works called with no args — `opts` just gives
 you an override point without touching the environment).
 
+Build an AgentCore client with credentials whose region selects both the signing
+region and the default invocation and control hosts:
+
+```elixir
+credentials = ReqManagedAgents.AWS.SigV4.from_env(aws_region: "us-west-2")
+client = ReqManagedAgents.Providers.BedrockAgentCore.Client.new(credentials: credentials)
+```
+
+Omitting `:credentials` uses `AWS.SigV4.from_env/0`. `:base_url` overrides only
+invocation; `:control_base_url` overrides only control. Supply both for a shared
+local endpoint. Explicit URLs keep the credential signing region. These defaults
+apply through `new/1`; direct struct literals retain their declared defaults.
+Use explicit URLs for nonstandard endpoints or AWS partitions; generated hosts
+do not establish service availability in a region.
+
 ## The core: one loop, the loop host is a parameter
 
 `ReqManagedAgents.Session` is the unified loop — invoke a turn → run your return-of-control tools

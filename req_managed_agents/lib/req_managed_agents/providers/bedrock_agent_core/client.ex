@@ -50,12 +50,18 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.Client do
           req_options: keyword()
         }
 
+  @doc "Build a client with independent endpoints defaulting to the credential region."
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
+    credentials = opts[:credentials] || SigV4.from_env()
+
     %__MODULE__{
-      credentials: opts[:credentials] || SigV4.from_env(),
-      base_url: opts[:base_url] || @default_base,
-      control_base_url: opts[:control_base_url] || opts[:base_url] || @default_control_base,
+      credentials: credentials,
+      base_url:
+        opts[:base_url] || "https://bedrock-agentcore.#{credentials.region}.amazonaws.com",
+      control_base_url:
+        opts[:control_base_url] ||
+          "https://bedrock-agentcore-control.#{credentials.region}.amazonaws.com",
       service: opts[:service] || "bedrock-agentcore",
       receive_timeout: opts[:receive_timeout] || @default_receive_timeout,
       req_options: opts[:req_options] || []
