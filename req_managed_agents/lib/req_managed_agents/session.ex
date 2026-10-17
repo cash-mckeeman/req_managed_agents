@@ -450,7 +450,7 @@ defmodule ReqManagedAgents.Session do
           max_turns: opts[:max_turns] || 50,
           custom_tool_uses: [],
           server_tool_uses: [],
-          usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []},
+          usage: Usage.zero(),
           turn_guard: opts[:turn_guard],
           enforced_terminal_tool: if(opts[:require_terminal_tool], do: opts[:terminal_tool]),
           max_reprompts: opts[:max_reprompts] || 2,
@@ -710,7 +710,7 @@ defmodule ReqManagedAgents.Session do
         custom_tool_uses: [],
         server_tool_uses: [],
         reprompts_left: s.max_reprompts,
-        usage: %Usage{input_tokens: 0, output_tokens: 0, raw: []}
+        usage: Usage.zero()
     }
 
   defp kickoff(s), do: drive(%{s | kicked_off: true}, s.provider.kickoff_input(s.opts))
@@ -942,14 +942,7 @@ defmodule ReqManagedAgents.Session do
     }
   end
 
-  defp add_usage(acc, nil), do: acc
-
-  defp add_usage(acc, %Usage{} = u),
-    do: %Usage{
-      input_tokens: acc.input_tokens + u.input_tokens,
-      output_tokens: acc.output_tokens + u.output_tokens,
-      raw: acc.raw ++ u.raw
-    }
+  defp add_usage(acc, usage), do: Usage.add(acc, usage)
 
   # Per-turn observability + a duplicate-id regression sentinel: custom_tool_uses are unique by id by
   # construction, so a duplicate reaching here is a regression (a duplicate id in the resume makes
