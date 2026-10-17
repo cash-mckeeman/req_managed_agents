@@ -2,8 +2,8 @@ defmodule Mix.Tasks.Rma.Acceptance do
   @shortdoc "Propose a bounded managed-provider acceptance run"
   @moduledoc """
   Proposes one selected scenario without resolving credentials or calling providers.
-  Requires `--provider`, `--scenario` and `--config`. Optional `--out` writes a
-  new private run root. Live execution requires `--execute DIGEST` and
+  Requires `--provider`, `--scenario` and `--config`. Optional `--out` validates a
+  nonexisting private run root; proposal mode creates and reserves nothing. Live execution requires `--execute DIGEST` and
   `--approval-ref TEXT`; a reference does not grant external authorization.
   """
   use Mix.Task
