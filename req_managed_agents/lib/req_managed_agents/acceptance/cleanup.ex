@@ -23,13 +23,13 @@ defmodule ReqManagedAgents.Acceptance.Cleanup do
   def new(%Config{provider: :agentcore}, _),
     do: {:ok, %__MODULE__{status: :not_owned, owned_resources: []}}
 
-  def new(%Config{provider: :claude_managed_agents}, %Capture{session_id: id}) when is_binary(id),
-    do:
-      {:ok,
-       %__MODULE__{
-         status: :pending,
-         owned_resources: [%Resource{kind: :claude_session, reference: id}]
-       }}
+  def new(%Config{provider: :claude_managed_agents}, %Capture{session_id: id})
+      when is_binary(id) do
+    case owned_session(id, :pending) do
+      {:ok, cleanup} -> {:ok, cleanup}
+      _ -> {:ok, %__MODULE__{status: :unknown, owned_resources: []}}
+    end
+  end
 
   def new(_, _), do: {:ok, %__MODULE__{status: :unknown, owned_resources: []}}
 
