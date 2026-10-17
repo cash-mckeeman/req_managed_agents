@@ -2,6 +2,7 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.Acceptance
   alias ReqManagedAgents.Acceptance.{Config, Context, Output, Runner, Source}
+  alias ReqManagedAgents.Acceptance.Proposal
   alias ReqManagedAgents.Acceptance.Recovery, as: RecoveryAssessment
   alias ReqManagedAgents.Evidence
   alias ReqManagedAgents.Evidence.{Diagnostic, Options, Recorder}
@@ -246,6 +247,79 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
     end
   end
 
+  for mode <- [
+        :recovery,
+        :recovery_incomplete_inline,
+        :recovery_changed_arguments,
+        :recovery_overlap,
+        :recovery_missing_link,
+        :recovery_cross_session,
+        :recovery_cross_thread,
+        :recovery_custom,
+        :recovery_missing_input,
+        :recovery_unknown,
+        :empty
+      ] do
+    @mode mode
+    test "CMA tool recovery #{@mode} uses one budgeted session and bounded native history" do
+      {context, state} = cma_context(@mode, "tool-recovery")
+
+      assert context.proposal.required_assertions ==
+               ~w(native_activity native_completion bounded_capture stored_evidence native_tool_recovery)
+
+      proposal_json =
+        context.proposal |> Proposal.to_wire() |> Jason.encode!()
+
+      refute proposal_json =~ "lookup"
+      refute proposal_json =~ "value"
+      assert proposal_json =~ "selected_agent_builtin_tool_capability"
+      result = Runner.run(context)
+      report = elem(result, 1)
+      recovery = predicate(report, "native_tool_recovery")
+      capture = artifact(context, report)
+
+      if @mode in [:recovery, :recovery_incomplete_inline] do
+        assert {:ok, _} = result
+        assert recovery.outcome == :passed
+        assert length(recovery.evidence) == 4
+        refs = MapSet.new(capture.records, &(&1.source_id <> ":" <> &1.id))
+        assert Enum.all?(recovery.evidence, &MapSet.member?(refs, &1))
+      else
+        assert {:error, _} = result
+        assert recovery.outcome == :inconclusive
+      end
+
+      assert report.cleanup.status == :pending
+      assert "server_budget_may_overshoot_inflight_requests" in report.coverage.limitations
+      assert "builtin_tool_count_is_not_client_bounded" in report.coverage.limitations
+
+      assert "final_content_policy_does_not_attest_argument_availability" in report.coverage.limitations
+
+      requests = Agent.get(state, & &1.requests)
+      assert length(requests) == 5
+      assert Enum.count(requests, &(&1 == {:post, "/v1/sessions"})) == 1
+      assert Enum.count(requests, &(&1 == {:post, "/v1/sessions/owned-session/events"})) == 1
+    end
+  end
+
+  test "CMA recovery assessment precedes final content dropping without claiming argument availability" do
+    {context, state} = cma_context(:recovery, "tool-recovery", "drop")
+    assert {:ok, report} = Runner.run(context)
+    assert predicate(report, "native_tool_recovery").outcome == :passed
+    capture = artifact(context, report)
+
+    assert Enum.all?(
+             capture.records,
+             &(not is_map(&1.payload) or not Map.has_key?(&1.payload, "input"))
+           )
+
+    assert {:ok, reassessed} =
+             RecoveryAssessment.assess(capture, "lookup", %{"key" => "value"}, :builtin)
+
+    assert reassessed.outcome == :inconclusive
+    assert length(Agent.get(state, & &1.requests)) == 5
+  end
+
   defp predicate(report, name), do: Enum.find(report.assertions, &(&1.name == name))
 
   defp artifact(context, report) do
@@ -263,7 +337,7 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
     context(data, invoke_fun: invoke)
   end
 
-  defp cma_context(mode, scenario \\ "basic") do
+  defp cma_context(mode, scenario \\ "basic", content \\ nil) do
     state = start_supervised!({Agent, fn -> %{stream: nil, requests: []} end})
 
     terminal = %{
@@ -291,10 +365,21 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
     data = base("claude-managed-agents") |> Map.put("scenario", scenario)
 
     data =
+      if scenario == "tool-recovery",
+        do:
+          put_in(data, ["inputs", "expected_tool"], %{
+            "family" => "builtin",
+            "target" => "lookup",
+            "arguments" => %{"key" => "value"}
+          }),
+        else: data
+
+    data =
       if mode in [:recovery, :recovery_incomplete_inline],
         do: Map.put(data, "content", "retain"),
         else: data
 
+    data = if content, do: Map.put(data, "content", content), else: data
     data = if mode == :capped, do: put_in(data, ["inputs", "history_pages"], 1), else: data
     {context(data, client: client), state}
   end
@@ -454,11 +539,56 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
          _,
          mode
        )
-       when mode in [:recovery, :recovery_incomplete_inline],
-       do: {200, %{"data" => recovery_events(), "has_more" => false}}
+       when mode in [
+              :recovery,
+              :recovery_incomplete_inline,
+              :recovery_changed_arguments,
+              :recovery_overlap,
+              :recovery_missing_link,
+              :recovery_cross_session,
+              :recovery_cross_thread,
+              :recovery_custom,
+              :recovery_missing_input,
+              :recovery_unknown
+            ],
+       do: {200, %{"data" => recovery_events(mode), "has_more" => false}}
 
   defp cma_response(%{method: :get}, _, _, :empty),
     do: {200, %{"data" => [], "has_more" => false}}
+
+  defp recovery_events(:recovery_changed_arguments),
+    do: List.update_at(recovery_events(), 2, &Map.put(&1, "input", %{"key" => "other"}))
+
+  defp recovery_events(:recovery_overlap),
+    do: List.update_at(recovery_events(), 2, &Map.put(&1, "processed_at", "2026-01-01T00:00:01Z"))
+
+  defp recovery_events(:recovery_missing_link),
+    do: List.update_at(recovery_events(), 1, &Map.delete(&1, "tool_use_id"))
+
+  defp recovery_events(:recovery_cross_session),
+    do: List.update_at(recovery_events(), 3, &Map.put(&1, "session_id", "other-session"))
+
+  defp recovery_events(:recovery_cross_thread),
+    do: List.update_at(recovery_events(), 3, &Map.put(&1, "session_thread_id", "other-thread"))
+
+  defp recovery_events(:recovery_custom), do: Enum.map(recovery_events(), &custom_event/1)
+
+  defp recovery_events(:recovery_missing_input),
+    do: List.update_at(recovery_events(), 0, &Map.delete(&1, "input"))
+
+  defp recovery_events(:recovery_unknown),
+    do: List.update_at(recovery_events(), 0, &Map.put(&1, "type", "future.tool_use"))
+
+  defp recovery_events(_), do: recovery_events()
+
+  defp custom_event(%{"tool_use_id" => id} = event),
+    do:
+      event
+      |> Map.put("custom_tool_use_id", id)
+      |> Map.delete("tool_use_id")
+      |> Map.put("type", "user.custom_tool_result")
+
+  defp custom_event(event), do: Map.put(event, "type", "agent.custom_tool_use")
 
   defp recovery_events do
     Enum.flat_map([{1, true}, {2, false}], fn {index, failed} ->

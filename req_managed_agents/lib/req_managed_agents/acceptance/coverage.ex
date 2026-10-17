@@ -72,6 +72,17 @@ defmodule ReqManagedAgents.Acceptance.Coverage do
         do: limitations ++ ["stored_activity_does_not_verify_tool_arguments_or_recovery"],
         else: limitations
 
+    limitations =
+      if config.provider == :claude_managed_agents and config.scenario == :tool_recovery,
+        do:
+          limitations ++
+            [
+              "server_budget_may_overshoot_inflight_requests",
+              "builtin_tool_count_is_not_client_bounded",
+              "final_content_policy_does_not_attest_argument_availability"
+            ],
+        else: limitations
+
     {:ok,
      %__MODULE__{
        sources: sources,

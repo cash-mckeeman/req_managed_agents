@@ -1,7 +1,10 @@
 defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
   @moduledoc "One fresh budgeted CMA session followed by bounded persisted history."
   @behaviour ReqManagedAgents.Acceptance.Scenario
+  alias ReqManagedAgents.Acceptance.Recovery
+
   alias ReqManagedAgents.Acceptance.{
+    Assertion,
     Basic,
     Cleanup,
     Config,
@@ -13,7 +16,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
   alias ReqManagedAgents.Budget
   alias ReqManagedAgents.Evidence.{Options, Validation}
   alias ReqManagedAgents.Providers.ClaudeManagedAgents
-  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, History}
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, History, RecoveryExpectation}
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request
 
   @impl true
@@ -22,12 +25,18 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
     with :ok <- validate(config), do: Proposal.new(config)
   end
 
+  def propose(%Config{provider: :claude_managed_agents, scenario: :tool_recovery} = config) do
+    with :ok <- validate(config),
+         {:ok, expectation} <- RecoveryExpectation.new(config.inputs["expected_tool"]),
+         do: Proposal.new(config, expectation)
+  end
+
   def propose(_), do: {:error, :unsupported_scenario}
 
   @doc false
   @spec validate(Config.t()) :: :ok | {:error, :invalid_provider_config}
   def validate(config) do
-    if resource?(config.resource) and inputs?(config.inputs) and config.bounds.calls == 1,
+    if resource?(config.resource) and inputs?(config) and config.bounds.calls == 1,
       do: :ok,
       else: {:error, :invalid_provider_config}
   end
@@ -38,14 +47,25 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
 
   defp resource?(_), do: false
 
-  defp inputs?(
-         %{"prompt" => prompt, "max_list_cost_cents" => cents, "history_pages" => pages} = inputs
-       )
+  defp inputs?(%Config{
+         scenario: scenario,
+         inputs:
+           %{"prompt" => prompt, "max_list_cost_cents" => cents, "history_pages" => pages} =
+             inputs
+       })
        when is_binary(prompt) and is_integer(cents) and cents > 0 and is_integer(pages) and
               pages > 0,
-       do: map_size(inputs) == 3 and String.trim(prompt) != ""
+       do: String.trim(prompt) != "" and scenario_inputs?(scenario, inputs)
 
   defp inputs?(_), do: false
+
+  defp scenario_inputs?(scenario, inputs) when scenario in [:basic, :evidence],
+    do: map_size(inputs) == 3
+
+  defp scenario_inputs?(:tool_recovery, inputs),
+    do: map_size(inputs) == 4 and Map.has_key?(inputs, "expected_tool")
+
+  defp scenario_inputs?(_, _), do: false
 
   @impl true
   def run(context) do
@@ -125,7 +145,40 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
   end
 
   @impl true
-  def assess(%{config: %Config{scenario: :evidence}} = context, observations) do
+  def assess(%{config: %Config{scenario: :tool_recovery}} = context, observations) do
+    expectation = context.proposal.selection
+    assertions = stored_assessment(context, observations)
+
+    recovery =
+      case Basic.capture(context, observations) do
+        {:ok, capture} ->
+          {:ok, assertion} =
+            Recovery.assess(
+              capture,
+              expectation.target,
+              expectation.arguments,
+              expectation.family
+            )
+
+          assertion
+
+        _ ->
+          {:ok, assertion} =
+            Assertion.new("native_tool_recovery", :inconclusive, [])
+
+          assertion
+      end
+
+    assertions ++ [recovery]
+  end
+
+  def assess(%{config: %Config{scenario: :evidence}} = context, observations),
+    do: stored_assessment(context, observations)
+
+  def assess(context, observations),
+    do: Basic.assess(context, observations, :claude_managed_agents)
+
+  defp stored_assessment(context, observations) do
     stored =
       case Basic.capture(context, observations) do
         {:ok, capture} ->
@@ -142,7 +195,4 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
 
     Basic.assess(context, observations, :claude_managed_agents) ++ [stored]
   end
-
-  def assess(context, observations),
-    do: Basic.assess(context, observations, :claude_managed_agents)
 end
