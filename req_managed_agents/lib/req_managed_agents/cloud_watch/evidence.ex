@@ -148,8 +148,6 @@ defmodule ReqManagedAgents.CloudWatch.Evidence do
     end
   end
 
-  defp client(_, _), do: Error.error(:invalid_options)
-
   defp build_client(_query, client: %Client{} = client),
     do: Client.new(client)
 
