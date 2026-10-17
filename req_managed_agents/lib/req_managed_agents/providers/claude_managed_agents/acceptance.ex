@@ -1,14 +1,15 @@
 defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
-  @moduledoc "Fresh bounded CMA acceptance; selected agents and environments are never modified."
+  @moduledoc "One fresh budgeted CMA session followed by bounded persisted history."
   @behaviour ReqManagedAgents.Acceptance.Scenario
   alias ReqManagedAgents.Acceptance.{Basic, Config, Context, Observation, Proposal}
-  alias ReqManagedAgents.{Budget, Providers.ClaudeManagedAgents}
+  alias ReqManagedAgents.Budget
   alias ReqManagedAgents.Evidence.Options
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, History}
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request
 
   @impl true
-  def propose(%Config{scenario: :basic, provider: :claude_managed_agents} = config) do
+  def propose(%Config{provider: :claude_managed_agents, scenario: :basic} = config) do
     with :ok <- validate(config), do: Proposal.new(config)
   end
 
@@ -17,38 +18,33 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
   @doc false
   @spec validate(Config.t()) :: :ok | {:error, :invalid_provider_config}
   def validate(config) do
-    resource = config.resource
-    inputs = config.inputs
-
-    valid = valid_resource?(resource) and valid_inputs?(inputs) and config.bounds.calls == 1
-
-    if valid, do: :ok, else: {:error, :invalid_provider_config}
+    if resource?(config.resource) and inputs?(config.inputs) and config.bounds.calls == 1,
+      do: :ok,
+      else: {:error, :invalid_provider_config}
   end
 
-  defp valid_resource?(resource) do
-    Enum.sort(Map.keys(resource)) == ~w(environment_id reference) and
-      Enum.all?(
-        [resource["reference"], resource["environment_id"]],
-        &(is_binary(&1) and String.trim(&1) != "")
-      )
-  end
+  defp resource?(%{"reference" => agent, "environment_id" => environment} = resource)
+       when is_binary(agent) and is_binary(environment),
+       do: map_size(resource) == 2 and String.trim(agent) != "" and String.trim(environment) != ""
 
-  defp valid_inputs?(inputs) do
-    Enum.sort(Map.keys(inputs)) == ~w(history_pages max_list_cost_cents prompt) and
-      is_binary(inputs["prompt"]) and String.trim(inputs["prompt"]) != "" and
-      Enum.all?(
-        [inputs["max_list_cost_cents"], inputs["history_pages"]],
-        &(is_integer(&1) and &1 > 0)
-      )
-  end
+  defp resource?(_), do: false
+
+  defp inputs?(
+         %{"prompt" => prompt, "max_list_cost_cents" => cents, "history_pages" => pages} = inputs
+       )
+       when is_binary(prompt) and is_integer(cents) and cents > 0 and is_integer(pages) and
+              pages > 0,
+       do: map_size(inputs) == 3 and String.trim(prompt) != ""
+
+  defp inputs?(_), do: false
 
   @impl true
-  def run(%Context{} = context) do
+  def run(context) do
     config = context.config
-    client = client(context)
+    client = native_client(context)
     {:ok, budget} = Budget.new(%{max_list_cost_cents: config.inputs["max_list_cost_cents"]})
 
-    opts = [
+    native = [
       client: client,
       agent_id: config.resource["reference"],
       environment_id: config.resource["environment_id"],
@@ -56,25 +52,25 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
       budget: budget
     ]
 
-    case Basic.session(context, ClaudeManagedAgents, opts) do
-      {:ok, observations} -> history(context, client, observations)
+    case Basic.session(context, ClaudeManagedAgents, native) do
+      {:ok, observations} -> acquire_history(context, client, observations)
       error -> error
     end
   end
 
-  defp client(context) do
-    candidate = context.transport[:client] || Client.new()
+  defp native_client(context) do
+    client = context.transport[:client] || Client.new()
 
     %{
-      candidate
-      | req_options: Keyword.put(candidate.req_options, :retry, false),
+      client
+      | req_options: Keyword.put(client.req_options, :retry, false),
         receive_timeout: context.config.bounds.timeout_ms
     }
   end
 
-  defp history(context, client, observations) do
-    with {:ok, prior} <- Basic.capture(context, observations),
-         true <- is_binary(prior.session_id),
+  defp acquire_history(context, client, observations) do
+    with {:ok, capture} <- Basic.capture(context, observations),
+         true <- is_binary(capture.session_id),
          {:ok, options} <-
            Options.new(
              max_pages: context.config.inputs["history_pages"],
@@ -83,19 +79,19 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
              timeout_ms: max(context.deadline - System.monotonic_time(:millisecond), 1),
              content: :retain
            ),
-         {:ok, request} <- Request.new(client: client, options: options, prior: prior),
-         {:ok, capture} <- History.fetch(prior.session_id, request),
+         {:ok, request} <- Request.new(client: client, options: options, prior: capture),
+         {:ok, history} <- History.fetch(capture.session_id, request),
          {:ok, observation} <-
            Observation.new(
              "bounded_history",
              :passed,
-             Enum.map(capture.records, &(&1.source_id <> ":" <> &1.id))
+             Enum.map(history.records, &(&1.source_id <> ":" <> &1.id))
            ) do
-      {:ok, observations ++ [%{observation | capture: capture}]}
+      {:ok, observations ++ [%{observation | capture: history}]}
     else
       _ ->
-        {:ok, observation} = Observation.new("history_unavailable", :failed, [])
-        {:error, :history_failed, observations ++ [observation]}
+        {:ok, failure} = Observation.new("history_unavailable", :failed, [])
+        {:error, :history_failed, observations ++ [failure]}
     end
   end
 
