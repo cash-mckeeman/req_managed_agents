@@ -203,6 +203,7 @@ defmodule ReqManagedAgents.Evidence.Recorder do
   @spec code(term()) :: String.t()
   def code(:early_termination), do: "early_termination"
   def code(:timeout), do: "timeout"
+  def code({:max_invocation_attempts_exceeded, _}), do: "max_invocation_attempts_exceeded"
   def code({:harness_stream_error, _, _}), do: "harness_stream_error"
   def code(_), do: "transport_error"
 

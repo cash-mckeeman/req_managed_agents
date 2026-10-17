@@ -23,8 +23,8 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   alias ReqManagedAgents.Evidence.Recorder
   alias ReqManagedAgents.Providers.BedrockAgentCore.{Client, Converse}
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessSpec
-  alias ReqManagedAgents.Providers.BedrockAgentCore.InvocationLimit
   alias ReqManagedAgents.Providers.BedrockAgentCore.HarnessStatus
+  alias ReqManagedAgents.Providers.BedrockAgentCore.InvocationLimit
   alias ReqManagedAgents.Providers.BedrockAgentCore.WaitBudget
   alias ReqManagedAgents.Providers.BedrockAgentCore.WaitContext
   alias ReqManagedAgents.Provisioner.Name
@@ -901,6 +901,14 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
   defp default_invoke_fun(opts) do
     client = opts[:client] || Client.new()
+
+    client =
+      if opts[:max_invocation_attempts] do
+        %{client | req_options: Keyword.merge(client.req_options, retry: false, redirect: false)}
+      else
+        client
+      end
+
     fn inv -> Client.invoke_harness(client, inv) end
   end
 
