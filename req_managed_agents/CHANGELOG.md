@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- AgentCore `:max_invocation_attempts` caps invocations across retries and turns on
+  one provider connection, with a distinct exhaustion error. Bounded client calls
+  disable automatic HTTP retries and redirects.
+
 - `ReqManagedAgents.ModelConfig`, the typed `:model_config` session option:
   `:model`, `:api_key`, `:bearer_token_file`, `:base_url` and `:metadata`.
 - `ReqManagedAgents.Provider.supports?/2`, `ReqManagedAgents.Provider.data_plane/1`
