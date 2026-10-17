@@ -1,14 +1,108 @@
 defmodule ReqManagedAgents.Acceptance.Source do
-  @moduledoc "Attests immutable source against the actual tracked checkout before credentials are read."
+  @moduledoc """
+  Attests checkout identity and the active Mix build before credential resolution.
+
+  Compiled input fingerprints and loaded BEAM identities detect stale local builds.
+  This assumes trusted local code and build files; it does not authenticate them.
+  """
   import Bitwise, only: [band: 2]
   @root Path.expand("../../../..", __DIR__)
+  @package Path.join(@root, "req_managed_agents")
+  @source_dirs Enum.map(
+                 Mix.Project.config()[:elixirc_paths] || ["lib"],
+                 &Path.expand(&1, @package)
+               )
+  @config_dirs [Path.join(@root, "config"), Path.join(@package, "config")]
+  @config_paths Enum.flat_map(
+                  @config_dirs,
+                  &Path.wildcard(Path.join(&1, "**/*.{ex,exs}"), match_dot: true)
+                )
+  @metadata_paths for base <- [@root, @package, Path.join(@root, "req_managed_agents_host")],
+                      name <- ["mix.exs", "mix.lock"],
+                      do: Path.join(base, name)
+  @input_paths (Enum.flat_map(
+                  @source_dirs,
+                  &Path.wildcard(Path.join(&1, "**/*.ex"), match_dot: true)
+                ) ++
+                  @config_paths ++
+                  Enum.filter(@metadata_paths, &File.regular?/1))
+               |> Enum.uniq()
+               |> Enum.sort()
+  @compiled_inputs Map.new(@input_paths, &{&1, :crypto.hash(:sha256, File.read!(&1))})
+  for path <- @input_paths, do: @external_resource(path)
+
   @enforce_keys [:revision, :tree, :root]
   defstruct @enforce_keys
   @type t :: %__MODULE__{revision: String.t(), tree: String.t(), root: String.t()}
 
   @doc "Verify this task's compiled source checkout, never a caller-selected checkout."
   @spec attest(String.t()) :: {:ok, t()} | {:error, :source_mismatch}
-  def attest(revision), do: verify(@root, revision)
+  def attest(revision) do
+    case current_build?() do
+      true -> verify(@root, revision)
+      false -> {:error, :source_mismatch}
+    end
+  rescue
+    _ -> {:error, :source_mismatch}
+  catch
+    :exit, _ -> {:error, :source_mismatch}
+  end
+
+  @doc false
+  def __mix_recompile__?, do: input_paths() != @input_paths
+
+  defp input_paths do
+    (Enum.flat_map(@source_dirs, &Path.wildcard(Path.join(&1, "**/*.ex"), match_dot: true)) ++
+       Enum.flat_map(
+         @config_dirs,
+         &Path.wildcard(Path.join(&1, "**/*.{ex,exs}"), match_dot: true)
+       ) ++
+       Enum.filter(@metadata_paths, &File.regular?/1))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp current_build? do
+    Path.expand(Mix.Project.project_file()) == Path.join(@package, "mix.exs") and
+      Enum.map(Mix.Project.config()[:elixirc_paths] || ["lib"], &Path.expand(&1, @package)) ==
+        @source_dirs and
+      input_paths() == @input_paths and Enum.all?(@compiled_inputs, &current_input?/1) and
+      current_modules?()
+  end
+
+  defp current_input?({path, digest}) do
+    case File.read(path) do
+      {:ok, bytes} -> :crypto.hash(:sha256, bytes) == digest
+      _ -> false
+    end
+  end
+
+  defp current_modules? do
+    compile_path = Path.expand(Mix.Project.compile_path())
+    app_file = Path.join(compile_path, "req_managed_agents.app")
+
+    with {:ok, [{:application, :req_managed_agents, properties}]} <-
+           :file.consult(String.to_charlist(app_file)),
+         modules when is_list(modules) <- Keyword.get(properties, :modules),
+         true <- __MODULE__ in modules do
+      Enum.all?(modules, &current_module?(&1, compile_path))
+    else
+      _ -> false
+    end
+  end
+
+  defp current_module?(module, compile_path) do
+    expected = Path.join(compile_path, Atom.to_string(module) <> ".beam")
+
+    with {:module, ^module} <- Code.ensure_loaded(module),
+         path when is_list(path) <- :code.which(module),
+         true <- Path.expand(List.to_string(path)) == expected,
+         {:ok, {^module, digest}} <- :beam_lib.md5(String.to_charlist(expected)) do
+      module.module_info(:md5) == digest
+    else
+      _ -> false
+    end
+  end
 
   @doc false
   @spec verify(String.t(), String.t()) :: {:ok, t()} | {:error, :source_mismatch}
