@@ -17,6 +17,7 @@ defmodule ReqManagedAgents.Acceptance do
     with {:ok, proposal} <- propose(config),
          :ok <- confirmation(config, opts),
          {:ok, source} <- Source.attest(config.source_revision),
+         :ok <- start_applications(),
          :ok <- Output.create(opts[:out]),
          {:ok, options} <-
            Options.new(
@@ -40,6 +41,13 @@ defmodule ReqManagedAgents.Acceptance do
       after
         if Process.alive?(recorder), do: GenServer.stop(recorder)
       end
+    end
+  end
+
+  defp start_applications do
+    case Application.ensure_all_started(:req_managed_agents) do
+      {:ok, _applications} -> :ok
+      {:error, _reason} -> {:error, :application_start_failed}
     end
   end
 
