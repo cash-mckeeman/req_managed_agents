@@ -2,8 +2,9 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
   use ExUnit.Case, async: true
   alias ReqManagedAgents.Acceptance
   alias ReqManagedAgents.Acceptance.{Config, Context, Output, Runner, Source}
+  alias ReqManagedAgents.Acceptance.Recovery, as: RecoveryAssessment
   alias ReqManagedAgents.Evidence
-  alias ReqManagedAgents.Evidence.{Options, Recorder}
+  alias ReqManagedAgents.Evidence.{Diagnostic, Options, Recorder}
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, Recovery}
   alias ReqManagedAgents.Test.AcceptanceAdapter
 
@@ -198,6 +199,53 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
     end
   end
 
+  for mode <- [:recovery, :recovery_incomplete_inline] do
+    @mode mode
+    test "complete persisted recovery survives #{@mode} acquisition overlap" do
+      {context, state} = cma_context(@mode, "evidence")
+      assert {:ok, report} = Runner.run(context)
+      capture = artifact(context, report)
+      assert capture.diagnostics == []
+
+      assert {:ok, recovery} =
+               RecoveryAssessment.assess(capture, "lookup", %{"key" => "value"})
+
+      assert recovery.outcome == :passed
+
+      [source] =
+        Enum.filter(capture.sources, fn source ->
+          Enum.all?(recovery.evidence, &String.starts_with?(&1, source.id <> ":"))
+        end)
+
+      if @mode == :recovery_incomplete_inline, do: refute(source.id == "native")
+      assert source.status == :complete
+      assert length(recovery.evidence) == 4
+      assert Enum.all?(recovery.evidence, &String.starts_with?(&1, source.id <> ":"))
+      refs = MapSet.new(capture.records, &(&1.source_id <> ":" <> &1.id))
+      assert Enum.all?(recovery.evidence, &MapSet.member?(refs, &1))
+      assert length(Agent.get(state, & &1.requests)) == 5
+
+      for scope <- [nil, source.id] do
+        {:ok, diagnostic} =
+          Diagnostic.new(%{code: :capture_gap, source_id: scope})
+
+        assert {:ok, blocked} =
+                 RecoveryAssessment.assess(
+                   %{
+                     capture
+                     | sources: [source],
+                       records: Enum.filter(capture.records, &(&1.source_id == source.id)),
+                       diagnostics: [diagnostic]
+                   },
+                   "lookup",
+                   %{"key" => "value"}
+                 )
+
+        assert blocked.outcome == :inconclusive
+      end
+    end
+  end
+
   defp predicate(report, name), do: Enum.find(report.assertions, &(&1.name == name))
 
   defp artifact(context, report) do
@@ -241,6 +289,12 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
       )
 
     data = base("claude-managed-agents") |> Map.put("scenario", scenario)
+
+    data =
+      if mode in [:recovery, :recovery_incomplete_inline],
+        do: Map.put(data, "content", "retain"),
+        else: data
+
     data = if mode == :capped, do: put_in(data, ["inputs", "history_pages"], 1), else: data
     {context(data, client: client), state}
   end
@@ -278,10 +332,26 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
          %{method: :post, url: %{path: "/v1/sessions/owned-session/events"}},
          state,
          terminal,
-         _
+         mode
        ) do
     {pid, ref} = Agent.get(state, & &1.stream)
-    send(pid, {ref, {:data, "data: " <> Jason.encode!(terminal) <> "\n\n"}})
+
+    events =
+      case mode do
+        :recovery ->
+          recovery_events()
+
+        :recovery_incomplete_inline ->
+          List.update_at(recovery_events(), 0, &Map.delete(&1, "input"))
+
+        _ ->
+          []
+      end
+
+    for event <- events ++ [terminal] do
+      send(pid, {ref, {:data, "data: " <> Jason.encode!(event) <> "\n\n"}})
+    end
+
     {200, %{"data" => []}}
   end
 
@@ -377,6 +447,40 @@ defmodule ReqManagedAgents.Acceptance.RunnerBoundariesTest do
             ],
             "has_more" => false
           }}
+
+  defp cma_response(
+         %{method: :get, url: %{path: "/v1/sessions/owned-session/events"}},
+         _,
+         _,
+         mode
+       )
+       when mode in [:recovery, :recovery_incomplete_inline],
+       do: {200, %{"data" => recovery_events(), "has_more" => false}}
+
+  defp recovery_events do
+    Enum.flat_map([{1, true}, {2, false}], fn {index, failed} ->
+      start = (index - 1) * 2
+
+      [
+        %{
+          "id" => "use-#{index}",
+          "type" => "agent.tool_use",
+          "name" => "lookup",
+          "input" => %{"key" => "value"},
+          "session_thread_id" => "explicit-thread",
+          "processed_at" => "2026-01-01T00:00:0#{start}Z"
+        },
+        %{
+          "id" => "result-#{index}",
+          "type" => "agent.tool_result",
+          "tool_use_id" => "use-#{index}",
+          "is_error" => failed,
+          "session_thread_id" => "explicit-thread",
+          "processed_at" => "2026-01-01T00:00:0#{start + 1}Z"
+        }
+      ]
+    end)
+  end
 
   defp cma_response(%{method: :get}, _, _, :empty),
     do: {200, %{"data" => [], "has_more" => false}}
