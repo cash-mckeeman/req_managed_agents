@@ -233,7 +233,7 @@ What actually differs between the two providers is only this:
 
 | | Claude Managed Agents | Bedrock AgentCore |
 |---|---|---|
-| **mode** | `:streaming` — long-lived SSE, events pushed | `:request_response` — one synchronous signed invoke per turn |
+| **mode** | `:streaming` — long-lived SSE, events pushed | `:request_response` — synchronous signed invokes with provider retries |
 | **credentials** | `ANTHROPIC_API_KEY` + beta header | AWS SigV4 (`AWS_*`) + an execution-role ARN |
 | **`model_config` wire** | plain model-id string (`"claude-haiku-4-5"`) | `%{"bedrockModelConfig" => %{"modelId" => "us.…"}}` (cross-region inference profile) |
 | **provision creates** | a versioned agent **and** an environment (two resources) | one harness folding in model + tools + environment |
@@ -245,13 +245,26 @@ What actually differs between the two providers is only this:
 `agent_id:`/`environment_id:` keys) and unpack to the raw ids before the provider opens the
 session; an explicit `:agent_id`/`:environment_id` still works and wins if both are given.
 
-Each AgentCore turn is one signed invoke; resume re-sends the assistant `toolUse` + your
+Each AgentCore turn invokes the harness, with retries for transport errors or truncated streams;
+resume re-sends the assistant `toolUse` + your
 `toolResult` delta. Long runs stream incrementally with **no client wall clock** — only silence
 fails a turn (`idle_timeout:`, inter-chunk guard, default 300s); cost is bounded server-side via
 `timeout_seconds:`/`max_iterations:`/`max_tokens:` (per-invocation overrides of the harness
 defaults). `Session.run/2`'s own `:timeout` must be ≥ the server budget — a client timeout returns
 `{:error, :timeout}` but does NOT cancel the in-flight invoke; the harness keeps executing (and
 billing) up to its `timeoutSeconds`. Events reach `Handler.handle_event/2` live either way.
+
+Set `max_invocation_attempts: n` to cap admitted AgentCore invocations at a positive integer.
+Omitted or `nil` leaves the aggregate unbounded; other values return
+`{:error, {:invalid_opts, :max_invocation_attempts}}`. Exhaustion returns
+`{:error, {:max_invocation_attempts_exceeded, n}}`. The cap spans retries, successful
+turns, tool continuations and follow-up messages on one provider connection. A new
+`open/2` or `Session.run/2` starts fresh, even with the same AWS session ID; Host starts
+a new run for each submitted turn. An admitted call consumes a slot even if its transport
+crashes or is interrupted. Bounded client calls disable Req retries and redirects so
+RMA owns retries. A custom `:invoke_fun` must make one external attempt per callback;
+the cap counts callbacks and cannot limit work hidden inside them. This local admission
+limit does not cancel remote work or establish a total cost ceiling.
 
 **Reattach (0.10):** pass `session_id:` (the id from a prior `SessionResult.session_id`) instead
 of `runtime_session_id:` to resume an existing AgentCore runtime session within its session
