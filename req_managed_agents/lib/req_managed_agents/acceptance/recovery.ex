@@ -76,7 +76,6 @@ defmodule ReqManagedAgents.Acceptance.Recovery do
     end
   end
 
-  # Providers without acquisition-context qualification retain the scoped callback.
   defp source_attempts(interpreter, capture, source) do
     if Code.ensure_loaded?(interpreter) and
          function_exported?(interpreter, :source_attempts, 2) do
