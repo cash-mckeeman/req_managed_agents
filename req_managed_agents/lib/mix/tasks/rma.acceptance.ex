@@ -8,7 +8,7 @@ defmodule Mix.Tasks.Rma.Acceptance do
   """
   use Mix.Task
   alias ReqManagedAgents.Acceptance
-  alias ReqManagedAgents.Acceptance.{Config, Proposal}
+  alias ReqManagedAgents.Acceptance.{Config, Output, Proposal, Report}
 
   @switches [
     provider: :string,
@@ -21,27 +21,46 @@ defmodule Mix.Tasks.Rma.Acceptance do
 
   @impl Mix.Task
   def run(argv) do
-    with {:ok, proposal, :proposal, out} <- prepare(argv),
-         :ok <- emit(proposal, out) do
-      :ok
-    else
-      {:error, reason} -> Mix.raise("acceptance refused: #{reason}")
+    case prepare(argv) do
+      {:ok, proposal, :proposal, _out} ->
+        emit(proposal)
+
+      {:ok, proposal, {:execute, approval}, out} ->
+        case Acceptance.run(proposal.config,
+               out: out,
+               execute: proposal.config_digest,
+               approval_ref: approval
+             ) do
+          {:ok, report} ->
+            report |> Report.to_wire() |> Jason.encode!() |> Mix.shell().info()
+
+          {:error, %Report{} = report} ->
+            report |> Report.to_wire() |> Jason.encode!() |> Mix.shell().info()
+            Mix.raise("acceptance did not pass")
+
+          {:error, reason} ->
+            Mix.raise("acceptance refused: #{reason}")
+        end
+
+      {:error, reason} ->
+        Mix.raise("acceptance refused: #{reason}")
     end
   end
 
   @doc "Validate the complete command before any credential or provider activity."
   @spec prepare([String.t()]) ::
-          {:ok, Proposal.t(), :proposal, String.t() | nil} | {:error, atom()}
+          {:ok, Proposal.t(), :proposal | {:execute, String.t()}, String.t() | nil}
+          | {:error, atom()}
   def prepare(argv) do
     with {:ok, opts} <- options(argv),
          {:ok, provider, scenario} <- Config.selectors(opts[:provider], opts[:scenario]),
          {:ok, bytes} <- read_config(opts[:config]),
          {:ok, config} <- Config.parse(bytes),
          true <- config.provider == provider and config.scenario == scenario,
-         :ok <- output(opts[:out]),
-         :ok <- execution(opts, config),
+         :ok <- Output.validate(opts[:out]),
+         {:ok, mode} <- execution(opts, config),
          {:ok, proposal} <- Acceptance.propose(config) do
-      {:ok, proposal, :proposal, opts[:out]}
+      {:ok, proposal, mode, opts[:out]}
     else
       false -> {:error, :selector_mismatch}
       {:error, reason} -> {:error, reason}
@@ -69,51 +88,20 @@ defmodule Mix.Tasks.Rma.Acceptance do
   end
 
   defp read_config(_), do: {:error, :config_required}
-  defp output(nil), do: :ok
-
-  defp output(path) do
-    case {File.lstat(path), File.lstat(Path.dirname(path))} do
-      {{:error, :enoent}, {:ok, %File.Stat{type: :directory, mode: mode}}} ->
-        if Bitwise.band(mode, 0o077) == 0 and safe_ancestors?(Path.dirname(path)) and
-             owned?(Path.dirname(path)),
-           do: :ok,
-           else: {:error, :output_ownership}
-
-      _ ->
-        {:error, :output_collision}
-    end
-  end
-
-  defp safe_ancestors?(path) do
-    expanded = Path.expand(path)
-    parts = Path.split(expanded)
-
-    Enum.reduce_while(parts, "", fn part, prefix ->
-      next = if prefix == "", do: part, else: Path.join(prefix, part)
-
-      case File.lstat(next) do
-        {:ok, %File.Stat{type: :directory}} -> {:cont, next}
-        _ -> {:halt, false}
-      end
-    end) != false and not Enum.member?(Path.split(path), "..")
-  end
-
-  defp owned?(path) do
-    case {System.cmd("id", ["-u"]), File.lstat(path)} do
-      {{uid, 0}, {:ok, %File.Stat{uid: owner}}} -> String.trim(uid) == Integer.to_string(owner)
-      _ -> false
-    end
-  end
 
   defp execution(opts, %Config{digest: digest}) do
     case {opts[:execute], opts[:approval_ref]} do
       {nil, nil} ->
-        :ok
+        {:ok, :proposal}
 
       {^digest, approval} when is_binary(approval) ->
         if String.trim(approval) == "",
           do: {:error, :approval_required},
-          else: {:error, :runner_unavailable}
+          else:
+            if(is_binary(opts[:out]),
+              do: {:ok, {:execute, approval}},
+              else: {:error, :output_required}
+            )
 
       {nil, _} ->
         {:error, :execute_required}
@@ -123,7 +111,7 @@ defmodule Mix.Tasks.Rma.Acceptance do
     end
   end
 
-  defp emit(proposal, _out) do
+  defp emit(proposal) do
     proposal |> Proposal.to_wire() |> Jason.encode!() |> Mix.shell().info()
     :ok
   end
