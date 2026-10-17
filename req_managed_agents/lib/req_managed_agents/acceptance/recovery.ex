@@ -1,11 +1,16 @@
 defmodule ReqManagedAgents.Acceptance.Recovery do
   @moduledoc "Assesses recovery only from explicitly linked, source-scoped native attempts from a complete qualifying acquisition in one capture."
   alias ReqManagedAgents.Acceptance.{Assertion, RecoveryAttempt}
-  alias ReqManagedAgents.Evidence.{Capture, Validation}
+  alias ReqManagedAgents.Evidence.{Capture, Source, Validation}
   alias ReqManagedAgents.Providers.BedrockAgentCore.Recovery, as: AgentCore
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.Recovery, as: ClaudeManagedAgents
 
   @callback attempts(Capture.t()) :: {:ok, [RecoveryAttempt.t()]} | {:error, :inconclusive}
+
+  @doc "Qualifies attempts from one selected source using full acquisition context; absent implementations use scoped attempts/1 with no support references."
+  @callback source_attempts(Capture.t(), Source.t()) ::
+              {:ok, [RecoveryAttempt.t()], [String.t()]} | {:error, :inconclusive}
+  @optional_callbacks source_attempts: 2
 
   @doc "Arguments are decoded expected native JSON; absent or ambiguous native facts remain inconclusive."
   @spec assess(Capture.t(), String.t(), map()) ::
@@ -46,23 +51,17 @@ defmodule ReqManagedAgents.Acceptance.Recovery do
   defp recovered(_, _, _, _), do: []
 
   defp qualifying_evidence(capture, source, target, arguments, family) do
-    scoped = %{
-      capture
-      | sources: [source],
-        records: Enum.filter(capture.records, &(&1.source_id == source.id)),
-        diagnostics: Enum.filter(capture.diagnostics, &(&1.source_id == source.id))
-    }
-
-    case source_recovery(scoped, target, arguments, family) do
+    case source_recovery(capture, source, target, arguments, family) do
       [] -> nil
       evidence -> evidence
     end
   end
 
-  defp source_recovery(%Capture{diagnostics: []} = capture, target, arguments, family) do
+  defp source_recovery(capture, source, target, arguments, family) do
     interpreter = if capture.provider == :managed, do: ClaudeManagedAgents, else: AgentCore
 
-    with {:ok, attempts} <- interpreter.attempts(capture),
+    with false <- Enum.any?(capture.diagnostics, &(&1.source_id == source.id)),
+         {:ok, attempts, support} <- source_attempts(interpreter, capture, source),
          matching =
            Enum.filter(
              attempts,
@@ -71,13 +70,32 @@ defmodule ReqManagedAgents.Acceptance.Recovery do
            ),
          [first, second] <- Enum.sort_by(matching, &DateTime.to_unix(&1.started_at, :microsecond)),
          true <- pair?(first, second) do
-      first.evidence ++ second.evidence
+      first.evidence ++ second.evidence ++ support
     else
       _ -> []
     end
   end
 
-  defp source_recovery(_, _, _, _), do: []
+  defp source_attempts(interpreter, capture, source) do
+    if Code.ensure_loaded?(interpreter) and
+         function_exported?(interpreter, :source_attempts, 2) do
+      interpreter.source_attempts(capture, source)
+    else
+      scoped = %{
+        capture
+        | sources: [source],
+          records: Enum.filter(capture.records, &(&1.source_id == source.id)),
+          diagnostics: Enum.filter(capture.diagnostics, &(&1.source_id == source.id))
+      }
+
+      with [] <- scoped.diagnostics,
+           {:ok, attempts} <- interpreter.attempts(scoped) do
+        {:ok, attempts, []}
+      else
+        _ -> {:error, :inconclusive}
+      end
+    end
+  end
 
   defp pair?(%RecoveryAttempt{} = first, %RecoveryAttempt{} = second) do
     first.session_id == second.session_id and first.source_id == second.source_id and

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Qualify Claude Managed Agents recovery from a uniquely enumerated primary
+  thread's complete event history, preserving native payloads and descriptor
+  evidence references. Conflicting identities or incomplete supporting sources
+  remain inconclusive.
+
 - Native AgentCore CloudWatch log association through a typed message matcher,
   with explicit session and trace metadata validation. Standard OTLP matching
   remains the default; unsupported records keep coverage partial.

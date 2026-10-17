@@ -188,7 +188,11 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.History do
   defp scope(session, :session, _), do: session
   defp scope(_session, :thread, thread), do: thread
 
-  defp scope(session, :threads, _) do
+  defp scope(session, :threads, _), do: thread_enumeration_scope(session)
+
+  @doc "The source locator for the session's thread enumeration, hashed when necessary."
+  @spec thread_enumeration_scope(String.t()) :: String.t()
+  def thread_enumeration_scope(session) do
     locator = "sessions/#{session}/threads"
 
     if byte_size(locator) <= 1024,
