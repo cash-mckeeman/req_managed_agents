@@ -99,6 +99,26 @@ defmodule ReqManagedAgents.SessionAgentCoreAttemptLimitTest do
     assert {2, _} = Agent.get(agent, & &1)
   end
 
+  test "a nil transport error still records an admitted retry" do
+    {:ok, options} = Options.new([])
+    recorder = start_supervised!({Recorder, options})
+    {agent, fun} = script([{:error, nil}, done()])
+
+    assert {:ok, %SessionResult{terminal: :end_turn}} =
+             Session.run(P, opts(fun, 2) ++ [evidence_recorder: recorder])
+
+    assert {2, []} = Agent.get(agent, & &1)
+    assert {:ok, capture} = Recorder.snapshot(recorder)
+    local = Enum.filter(capture.records, &(&1.kind == :local))
+    assert [first, second] = Enum.filter(local, &(&1.payload.type == :attempt_started))
+    refute first.attempt_id == second.attempt_id
+
+    assert [%{attempt_id: previous, payload: %{error_code: "transport_error"}}] =
+             Enum.filter(local, &(&1.payload.type == :retry_decided))
+
+    assert previous == first.attempt_id
+  end
+
   test "evidence records only admitted work and a distinct invocation refusal" do
     {:ok, options} = Options.new([])
     recorder = start_supervised!({Recorder, options})
