@@ -938,16 +938,18 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   end
 
   @impl true
-  def poll_turn(conn, messages), do: invoke(conn, messages, conn.retries, nil)
+  def poll_turn(conn, messages), do: invoke(conn, messages, conn.retries, :initial)
 
   # One turn with bounded retry on a transport error or a truncated stream (stop_reason == nil).
   # A surfaced AWS exception/error frame is never retried.
-  defp invoke(conn, messages, retries_left, retry_reason) do
+  defp invoke(conn, messages, retries_left, retry_context) do
     with :ok <- InvocationLimit.take(conn.invocation_limit) do
-      if retry_reason != nil do
-        Recorder.observe(Map.get(conn, :evidence), :retry,
-          error_code: Recorder.code(retry_reason)
-        )
+      case retry_context do
+        :initial ->
+          :ok
+
+        {:retry, reason} ->
+          Recorder.observe(Map.get(conn, :evidence), :retry, error_code: Recorder.code(reason))
       end
 
       evidence = Recorder.attempt(Map.get(conn, :evidence))
@@ -1026,7 +1028,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
   end
 
   defp retry_invoke(conn, messages, retries_left, reason) when retries_left > 0 do
-    invoke(conn, messages, retries_left - 1, reason)
+    invoke(conn, messages, retries_left - 1, {:retry, reason})
   end
 
   defp retry_invoke(_conn, _messages, _retries_left, reason), do: {:error, reason}
