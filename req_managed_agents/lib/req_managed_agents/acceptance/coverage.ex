@@ -1,5 +1,5 @@
 defmodule ReqManagedAgents.Acceptance.Coverage.Source do
-  @moduledoc false
+  @moduledoc "Acquisition status and counts for one captured native source."
   @enforce_keys [:source_id, :kind, :status, :pages, :records_seen, :session_id]
   defstruct @enforce_keys
 
@@ -14,7 +14,7 @@ defmodule ReqManagedAgents.Acceptance.Coverage.Source do
 end
 
 defmodule ReqManagedAgents.Acceptance.Coverage.Limits do
-  @moduledoc false
+  @moduledoc "Configured native session and persisted-history acquisition limits."
   @enforce_keys [:invocations, :history_pages]
   defstruct @enforce_keys
   @type t :: %__MODULE__{invocations: pos_integer(), history_pages: non_neg_integer()}

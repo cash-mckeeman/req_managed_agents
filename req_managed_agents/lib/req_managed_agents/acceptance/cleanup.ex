@@ -1,5 +1,5 @@
 defmodule ReqManagedAgents.Acceptance.Cleanup.Resource do
-  @moduledoc false
+  @moduledoc "A session created by acceptance that requires an explicit cleanup receipt."
   @enforce_keys [:kind, :reference]
   defstruct @enforce_keys
   @type t :: %__MODULE__{kind: :claude_session, reference: String.t()}
