@@ -1,5 +1,5 @@
 defmodule ReqManagedAgents.Acceptance.Recovery do
-  @moduledoc "Assesses recovery only from explicitly linked, source-scoped native attempts in one capture."
+  @moduledoc "Assesses recovery only from explicitly linked, source-scoped native attempts from a complete qualifying acquisition in one capture."
   alias ReqManagedAgents.Acceptance.{Assertion, RecoveryAttempt}
   alias ReqManagedAgents.Evidence.{Capture, Validation}
   alias ReqManagedAgents.Providers.BedrockAgentCore.Recovery, as: AgentCore
@@ -34,7 +34,8 @@ defmodule ReqManagedAgents.Acceptance.Recovery do
     with {:ok, attempts} <- interpreter.attempts(capture),
          matching = Enum.filter(attempts, &(&1.target == target and &1.arguments === arguments)),
          [first, second] <- Enum.sort_by(matching, &DateTime.to_unix(&1.started_at, :microsecond)),
-         true <- pair?(first, second) do
+         true <- pair?(first, second),
+         true <- complete_source?(capture, first) do
       first.evidence ++ second.evidence
     else
       _ -> []
@@ -42,6 +43,10 @@ defmodule ReqManagedAgents.Acceptance.Recovery do
   end
 
   defp recovered(_, _, _), do: []
+
+  defp complete_source?(%Capture{} = capture, %RecoveryAttempt{} = attempt) do
+    Enum.any?(capture.sources, &(&1.id == attempt.source_id and &1.status == :complete))
+  end
 
   defp pair?(%RecoveryAttempt{} = first, %RecoveryAttempt{} = second) do
     first.session_id == second.session_id and first.source_id == second.source_id and
