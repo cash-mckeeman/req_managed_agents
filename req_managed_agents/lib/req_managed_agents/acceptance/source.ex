@@ -2,6 +2,7 @@ defmodule ReqManagedAgents.Acceptance.Source do
   @moduledoc """
   Attests checkout identity and the active Mix build before credential resolution.
 
+  Configured build inputs must belong to the requested immutable revision.
   Compiled input fingerprints and loaded BEAM identities detect stale local builds.
   This assumes trusted local code and build files; it does not authenticate them.
   """
@@ -38,9 +39,12 @@ defmodule ReqManagedAgents.Acceptance.Source do
   @doc "Verify this task's compiled source checkout, never a caller-selected checkout."
   @spec attest(String.t()) :: {:ok, t()} | {:error, :source_mismatch}
   def attest(revision) do
-    case current_build?() do
-      true -> verify(@root, revision)
-      false -> {:error, :source_mismatch}
+    with {:ok, source} <- verify(@root, revision),
+         true <- tracked_inputs?(source.revision),
+         true <- current_build?() do
+      {:ok, source}
+    else
+      _ -> {:error, :source_mismatch}
     end
   rescue
     _ -> {:error, :source_mismatch}
@@ -68,6 +72,17 @@ defmodule ReqManagedAgents.Acceptance.Source do
         @source_dirs and
       input_paths() == @input_paths and Enum.all?(@compiled_inputs, &current_input?/1) and
       current_modules?()
+  end
+
+  defp tracked_inputs?(revision) do
+    case command("git", ["-C", @root, "ls-tree", "-rz", "--full-tree", "--name-only", revision]) do
+      {:ok, listing} ->
+        paths = MapSet.new(String.split(listing, <<0>>, trim: true))
+        Enum.all?(@input_paths, &MapSet.member?(paths, Path.relative_to(&1, @root)))
+
+      _ ->
+        false
+    end
   end
 
   defp current_input?({path, digest}) do

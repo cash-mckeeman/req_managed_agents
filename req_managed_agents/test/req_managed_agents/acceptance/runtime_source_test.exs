@@ -134,6 +134,35 @@ defmodule ReqManagedAgents.Acceptance.RuntimeSourceTest do
     assert result["api_refused"]
     assert result["native_requests"] == 0
     assert probe(fixture, build, env, script, restored, "fresh")["attested"]
+
+    hidden = "req_managed_agents/test/support/qa_untracked_probe.ex"
+    exclude = Path.join(fixture, ".git/info/exclude")
+    File.write!(exclude, File.read!(exclude) <> "\n/" <> hidden <> "\n")
+
+    File.write!(
+      Path.join(fixture, hidden),
+      "defmodule AcceptanceUntrackedFixture do\n  def loaded?, do: true\nend\n"
+    )
+
+    assert git(fixture, ["status", "--porcelain"]) == ""
+    refute git(fixture, ["ls-tree", "-r", "--full-tree", "--name-only", restored]) =~ hidden
+
+    {output, status} =
+      System.cmd(System.find_executable("mix"), ["compile", "--warnings-as-errors"],
+        cd: Path.join(fixture, "req_managed_agents"),
+        env: env,
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+    ignored = probe(fixture, build, env, script, restored, "ignored_support")
+    assert ignored["helper_loaded"]
+
+    refute ignored["attested"],
+           "normally compiled ignored support input was accepted as immutable"
+
+    assert ignored["api_refused"]
+    assert ignored["native_requests"] == 0
   end
 
   defp copy_source(fixture) do
@@ -275,6 +304,7 @@ defmodule ReqManagedAgents.Acceptance.RuntimeSourceTest do
           send(Process.whereis(:runtime_test_probe), :native_request)
           {request, Req.Response.new(status: 503, body: %{})}
         end})
+      helper_loaded = mode == "ignored_support" and Code.ensure_loaded?(AcceptanceUntrackedFixture) and apply(AcceptanceUntrackedFixture, :loaded?, [])
       source = ReqManagedAgents.Acceptance.Source
       disk = match?({:ok, _}, source.verify(root, revision))
       attested = match?({:ok, _}, source.attest(revision))
@@ -287,7 +317,7 @@ defmodule ReqManagedAgents.Acceptance.RuntimeSourceTest do
       api_refused =
         if attested, do: false, else: ReqManagedAgents.Acceptance.run(config, out: Path.join(System.tmp_dir!(), "out-#{System.unique_integer([:positive])}"), execute: config.digest, approval_ref: "synthetic") == {:error, :source_mismatch}
       count = fn count, n -> receive do :native_request -> count.(count, n + 1) after 0 -> n end end
-      IO.puts("RUNTIME_SUMMARY=" <> Jason.encode!(%{disk_verified: disk, attested: attested, api_refused: api_refused, native_requests: count.(count, 0)}))
+      IO.puts("RUNTIME_SUMMARY=" <> Jason.encode!(%{disk_verified: disk, attested: attested, api_refused: api_refused, native_requests: count.(count, 0), helper_loaded: helper_loaded}))
     end)
     '''
   end
