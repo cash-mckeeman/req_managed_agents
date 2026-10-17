@@ -512,6 +512,10 @@ defmodule ReqManagedAgents.Session do
   def handle_info({:EXIT, pid, reason}, %{consumer: pid} = s), do: stop_error(s, reason)
   def handle_info({:EXIT, _pid, reason}, s), do: {:stop, reason, s}
 
+  def handle_info({:poll_task_failed, task, reason}, %State{poll_task: task} = s)
+      when is_pid(task),
+      do: {:stop, reason, s}
+
   def handle_info(_other, s), do: {:noreply, s}
 
   @impl true
@@ -534,6 +538,17 @@ defmodule ReqManagedAgents.Session do
   def terminate(_reason, s) do
     shutdown(s.poll_task)
     shutdown(s.consumer)
+  end
+
+  @impl true
+  def format_status(status) do
+    Map.new(status, fn
+      {:state, _state} -> {:state, :redacted}
+      {:message, _message} -> {:message, :redacted}
+      {:log, _log} -> {:log, []}
+      {:reason, _reason} -> {:reason, :redacted}
+      entry -> entry
+    end)
   end
 
   # Killing an already-dead pid is a harmless no-op — no liveness check needed.
@@ -573,16 +588,27 @@ defmodule ReqManagedAgents.Session do
 
     {:ok, task} =
       Task.start_link(fn ->
-        # Convert a provider raise into a surfaced error so it can't crash the Session (and, for a
-        # sync run/2, the caller) — the {:ok}|{:error} contract holds even on malformed data.
-        result =
-          try do
-            p.poll_turn(c, input)
-          rescue
-            e -> {:error, {:provider_error, e}}
-          end
+        # Preserve the caller's failure without emitting a second Task crash report
+        # containing provider payloads before the Session can redact its diagnostics.
+        try do
+          result =
+            try do
+              p.poll_turn(c, input)
+            rescue
+              e -> {:error, {:provider_error, e}}
+            end
 
-        send(parent, {:turn, result})
+          send(parent, {:turn, result})
+        catch
+          :exit, :normal ->
+            :ok
+
+          :exit, reason ->
+            send(parent, {:poll_task_failed, self(), reason})
+
+          :throw, reason ->
+            send(parent, {:poll_task_failed, self(), {{:nocatch, reason}, __STACKTRACE__}})
+        end
       end)
 
     {:noreply, %{s | poll_task: task}}
@@ -1044,4 +1070,27 @@ defmodule ReqManagedAgents.Session do
     do: send(pid, {:managed_agents_session, payload})
 
   defp notify(_s, _payload), do: :ok
+  defoverridable handle_info: 2, handle_call: 3, handle_cast: 2
+
+  @impl true
+  def handle_info(message, state),
+    do: diagnostic_boundary(fn -> super(message, state) end, state)
+
+  @impl true
+  def handle_call(message, from, state),
+    do: diagnostic_boundary(fn -> super(message, from, state) end, state)
+
+  @impl true
+  def handle_cast(message, state),
+    do: diagnostic_boundary(fn -> super(message, state) end, state)
+
+  # OTP appends callback exception stacks after format_status; argument-bearing
+  # frames must remain in the caller's reason rather than its diagnostic stack.
+  defp diagnostic_boundary(callback, state) do
+    callback.()
+  catch
+    :error, reason -> {:stop, {reason, __STACKTRACE__}, state}
+    :exit, reason -> {:stop, reason, state}
+    :throw, reason -> {:stop, {{:nocatch, reason}, __STACKTRACE__}, state}
+  end
 end
