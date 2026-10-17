@@ -19,4 +19,6 @@ defmodule ReqManagedAgents.Acceptance.Observation do
        do: {:ok, %__MODULE__{name: name, outcome: outcome, references: references}},
        else: {:error, :invalid_observation}
   end
+
+  def new(_, _, _), do: {:error, :invalid_observation}
 end

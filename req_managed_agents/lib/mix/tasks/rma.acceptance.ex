@@ -95,19 +95,21 @@ defmodule Mix.Tasks.Rma.Acceptance do
         {:ok, :proposal}
 
       {^digest, approval} when is_binary(approval) ->
-        if String.trim(approval) == "",
-          do: {:error, :approval_required},
-          else:
-            if(is_binary(opts[:out]),
-              do: {:ok, {:execute, approval}},
-              else: {:error, :output_required}
-            )
+        execution_approval(approval, opts[:out])
 
       {nil, _} ->
         {:error, :execute_required}
 
       _ ->
         {:error, :digest_mismatch}
+    end
+  end
+
+  defp execution_approval(approval, out) do
+    cond do
+      String.trim(approval) == "" -> {:error, :approval_required}
+      not is_binary(out) -> {:error, :output_required}
+      true -> {:ok, {:execute, approval}}
     end
   end
 

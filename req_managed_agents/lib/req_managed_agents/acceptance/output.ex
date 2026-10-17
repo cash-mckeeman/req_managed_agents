@@ -23,7 +23,7 @@ defmodule ReqManagedAgents.Acceptance.Output do
   @doc false
   @spec create(String.t()) :: :ok | {:error, atom()}
   def create(path) when is_binary(path) do
-    with :ok <- validate(path), :ok <- File.mkdir(path), :ok <- File.chmod(path, 0o700), do: :ok
+    with :ok <- validate(path), :ok <- File.mkdir(path), do: File.chmod(path, 0o700)
   end
 
   def create(_), do: {:error, :output_required}
@@ -37,8 +37,7 @@ defmodule ReqManagedAgents.Acceptance.Output do
       try do
         with :ok <- File.chmod(target, 0o600),
              :ok <- IO.binwrite(file, Jason.encode!(Report.to_wire(report))),
-             :ok <- :file.sync(file),
-             do: :ok
+             do: :file.sync(file)
       after
         File.close(file)
       end

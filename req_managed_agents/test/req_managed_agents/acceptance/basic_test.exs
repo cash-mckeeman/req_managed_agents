@@ -1,7 +1,7 @@
 defmodule ReqManagedAgents.Acceptance.BasicTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.Acceptance.{Config, Context, Source}
   alias ReqManagedAgents.Acceptance
+  alias ReqManagedAgents.Acceptance.{Config, Context, Source}
   alias ReqManagedAgents.Evidence.{Artifact, Options, Recorder}
   alias ReqManagedAgents.Providers.BedrockAgentCore.Acceptance, as: AgentCore
 

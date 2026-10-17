@@ -70,23 +70,19 @@ defmodule ReqManagedAgents.Acceptance do
     implementation = scenario(context.config.provider)
     observations = run_scenario(implementation, context)
     assertions = implementation.assess(context, observations)
-    required = context.proposal.required_assertions
     {:ok, coverage} = Coverage.new(context.config, nil, observations)
     {:ok, consumption} = Consumption.new(nil, 0)
     {:ok, cleanup} = Cleanup.new(context.config, nil)
 
-    report = %Report{
-      config: context.config,
-      observed_source_revision: context.source.revision,
-      outcome: Report.outcome(required, assertions),
-      required_assertions: required,
-      assertions: assertions,
-      coverage: coverage,
-      bounds: context.config.bounds,
-      artifacts: [],
-      consumed: consumption,
-      cleanup: cleanup
-    }
+    {:ok, report} =
+      Report.new(%{
+        context: context,
+        assertions: assertions,
+        coverage: coverage,
+        consumed: consumption,
+        cleanup: cleanup,
+        artifacts: []
+      })
 
     report = finalize(context, observations, report)
 
