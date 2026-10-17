@@ -14,7 +14,8 @@ An injected CMA `:client` or Local `:chat_fun` owns its credentials and destinat
 Combining it with a non-nil `model_config.api_key`, `:bearer_token_file` or
 `:base_url` returns `{:error, :data_plane_unsupported}` before provider work,
 including on reattach. Omit those fields or use the default transport to apply
-them. Explicit nil fields and metadata remain valid; Local also accepts a model.
+them where supported. Bearer-token files are supported only by CMA. Explicit nil
+fields and metadata remain valid; Local also accepts a model.
 This runtime rule is separate from provider-specific provisioning configuration.
 
 ### Local + routing
