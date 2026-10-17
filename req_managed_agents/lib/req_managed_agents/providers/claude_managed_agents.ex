@@ -19,7 +19,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.Agent.Spec
-  alias ReqManagedAgents.Evidence.Recorder
+  alias ReqManagedAgents.Evidence.{OwnedRequest, Recorder, Validation}
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, Consolidate, Event, Stream}
 
   alias ReqManagedAgents.{
@@ -134,11 +134,14 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   defp observed_open_fresh(client, body, budget, subscriber, opts, evidence) do
     with {:ok, %{"id" => sid} = created} <- create_session(client, body),
-         :ok <- confirm_budget(client, sid, budget, created) do
+         :ok <- remember_created_session(evidence, sid, opts[:deadline]),
+         :ok <- confirm_budget(client, sid, budget, created, opts) do
       ref = make_ref()
 
       {:ok, task} =
         Task.start_link(fn ->
+          register_deadline_worker(opts[:deadline_own_worker])
+
           Stream.stream(client, sid, subscriber,
             ref: ref,
             telemetry_metadata: opts[:telemetry_metadata] || %{}
@@ -220,19 +223,28 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   defp budget_body(%Budget{} = budget),
     do: %{budget: ReqManagedAgents.Providers.ClaudeManagedAgents.Budget.to_wire(budget)}
 
+  defp remember_created_session(%{recorder: recorder}, sid, deadline) when is_integer(deadline) do
+    case Validation.safe_id(sid) do
+      {:ok, id} -> Recorder.context(recorder, :managed, id)
+      _ -> :ok
+    end
+  end
+
+  defp remember_created_session(_evidence, _sid, _deadline), do: :ok
+
   # Fail closed: a requested budget the provider did not echo back means the session is
   # uncapped, so it is archived (best effort, as provision/2 rolls back an orphaned agent)
   # before anything can be sent to it. The error carries the session id and the archive's
   # outcome so a caller can clean up if the archive did not land.
-  defp confirm_budget(_client, _sid, nil, _created), do: :ok
+  defp confirm_budget(_client, _sid, nil, _created, _deadline), do: :ok
 
-  defp confirm_budget(client, sid, %Budget{} = budget, created) do
+  defp confirm_budget(client, sid, %Budget{} = budget, created, opts) do
     echoed = Map.get(created, "budget")
 
     if ReqManagedAgents.Providers.ClaudeManagedAgents.Budget.confirmed?(budget, echoed) do
       :ok
     else
-      archived = archive_once(client, sid)
+      archived = archive_once(client, sid, opts[:deadline], opts[:deadline_own_worker])
       {:error, {:budget_not_confirmed, %{session_id: sid, echoed: echoed, archived: archived}}}
     end
   end
@@ -246,6 +258,41 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   # provider limit.
   @archive_deadline_ms 5_000
   @worker_grace_ms 250
+
+  defp archive_once(client, sid, nil, _register_worker), do: archive_once(client, sid)
+
+  defp archive_once(%ReqManagedAgents.Client{} = client, sid, deadline, register_worker),
+    do: archive_once(struct!(Client, Map.from_struct(client)), sid, deadline, register_worker)
+
+  defp archive_once(%Client{} = client, sid, deadline, register_worker) do
+    now = System.monotonic_time(:millisecond)
+    deadline = min(deadline, now + min(client.receive_timeout, @archive_deadline_ms))
+    timeout = max(0, deadline - now)
+
+    bounded = %{
+      client
+      | receive_timeout: timeout,
+        req_options: Keyword.merge(client.req_options, retry: false, receive_timeout: timeout)
+    }
+
+    request = fn ->
+      register_deadline_worker(register_worker)
+
+      if System.monotonic_time(:millisecond) < deadline,
+        do: Client.archive_session(bounded, sid),
+        else: {:error, :archive_timeout}
+    end
+
+    case OwnedRequest.run(request, deadline) do
+      {:ok, {:ok, _}} -> :ok
+      {:ok, {:error, _} = error} -> error
+      {:error, :deadline} -> {:error, :archive_timeout}
+      {:error, :request_failed} -> {:error, {:archive_failed, :request_failed}}
+    end
+  end
+
+  defp register_deadline_worker(nil), do: :ok
+  defp register_deadline_worker(register_worker), do: register_worker.()
 
   defp archive_once(%ReqManagedAgents.Client{} = client, sid),
     do: archive_once(struct!(Client, Map.from_struct(client)), sid)

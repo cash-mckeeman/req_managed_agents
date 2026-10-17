@@ -18,6 +18,7 @@ defmodule ReqManagedAgents.Acceptance.Basic do
         turn_guard: fn _ -> {:halt, :acceptance_first_turn} end,
         max_turns: 1,
         timeout: remaining,
+        deadline: context.deadline,
         evidence_recorder: context.recorder
       ]
 

@@ -62,6 +62,11 @@ defmodule ReqManagedAgents.Session do
   `:base_url` it cannot use returns `{:error, :data_plane_unsupported}`; see
   `ReqManagedAgents.Provider.supports?/2`.
 
+  `run/2` also accepts `:deadline`, an absolute `System.monotonic_time(:millisecond)`
+  value bounding local initialization, execution waits and owned-process teardown.
+  Deadline runs terminate their session and workers if their caller dies; absent
+  `:deadline`, `:timeout` retains its existing semantics.
+
   Provider-specific opts (e.g. `:agent_id`/`:environment_id`, `:harness_arn`/`:runtime_session_id`,
   `:session_id` to resume) are forwarded to the provider's `open/2`. `:agent`/`:environment` accept
   the handle returned by `ReqManagedAgents.ensure_agent/3` / `ensure_environment/3`
@@ -92,6 +97,145 @@ defmodule ReqManagedAgents.Session do
 
   @spec run(module(), keyword()) :: {:ok, ReqManagedAgents.SessionResult.t()} | {:error, term()}
   def run(provider, opts) do
+    case Keyword.fetch(opts, :deadline) do
+      :error -> run_without_deadline(provider, opts)
+      {:ok, deadline} when is_integer(deadline) -> run_with_deadline(provider, opts, deadline)
+      {:ok, _invalid} -> {:error, {:invalid_opts, :deadline}}
+    end
+  end
+
+  defp run_with_deadline(provider, opts, deadline) do
+    if remaining(deadline) == 0 do
+      {:error, :timeout}
+    else
+      caller = self()
+      token = make_ref()
+      {guard, monitor} = spawn_monitor(fn -> deadline_guard(caller, token, deadline) end)
+
+      register_worker = fn ->
+        own_deadline_process([deadline_owner: {guard, token}], :own_worker, self())
+      end
+
+      opts =
+        opts
+        |> Keyword.put(:caller, caller)
+        |> Keyword.put(:deadline_owner, {guard, token})
+        |> Keyword.put(:deadline_own_worker, register_worker)
+
+      try do
+        case GenServer.start(__MODULE__, {provider, opts}, timeout: remaining(deadline)) do
+          {:ok, pid} ->
+            await_deadline_result(pid, deadline)
+
+          {:error, reason} ->
+            if remaining(deadline) == 0, do: {:error, :timeout}, else: {:error, reason}
+        end
+      after
+        send(guard, {:stop, token})
+        receive do: ({:DOWN, ^monitor, :process, ^guard, _} -> :ok)
+      end
+    end
+  end
+
+  defp await_deadline_result(pid, deadline) do
+    monitor = Process.monitor(pid)
+
+    try do
+      receive do
+        {:session_result, ^pid, result} ->
+          if remaining(deadline) == 0, do: {:error, :timeout}, else: result
+
+        {:DOWN, ^monitor, :process, ^pid, reason} ->
+          if remaining(deadline) == 0, do: {:error, :timeout}, else: {:error, reason}
+      after
+        remaining(deadline) -> {:error, :timeout}
+      end
+    after
+      Process.demonitor(monitor, [:flush])
+    end
+  end
+
+  defp deadline_guard(caller, token, deadline) do
+    monitor = Process.monitor(caller)
+    guard_deadline(monitor, token, deadline, nil, [])
+  end
+
+  defp guard_deadline(caller_monitor, token, deadline, session, workers) do
+    receive do
+      {:own_session, ^token, pid, registering} ->
+        monitor = Process.monitor(pid)
+
+        if remaining(deadline) == 0 do
+          reap_deadline_processes({pid, monitor}, workers)
+        else
+          send(registering, {:owned, token, pid})
+          guard_deadline(caller_monitor, token, deadline, {pid, monitor}, workers)
+        end
+
+      {:own_worker, ^token, pid, registering} ->
+        workers =
+          if List.keymember?(workers, pid, 0),
+            do: workers,
+            else: [{pid, Process.monitor(pid)} | workers]
+
+        if remaining(deadline) == 0 do
+          reap_deadline_processes(session, workers)
+        else
+          send(registering, {:owned, token, pid})
+          guard_deadline(caller_monitor, token, deadline, session, workers)
+        end
+
+      {:DOWN, ^caller_monitor, :process, _pid, _reason} ->
+        reap_deadline_processes(session, workers)
+
+      {:DOWN, monitor, :process, pid, _reason} ->
+        if session == {pid, monitor},
+          do: reap_deadline_processes(nil, workers),
+          else:
+            guard_deadline(
+              caller_monitor,
+              token,
+              deadline,
+              session,
+              List.keydelete(workers, pid, 0)
+            )
+
+      {:stop, ^token} ->
+        reap_deadline_processes(session, workers)
+    after
+      remaining(deadline) -> reap_deadline_processes(session, workers)
+    end
+  end
+
+  defp reap_deadline_processes(session, workers) do
+    owned = if session, do: [session | workers], else: workers
+    Enum.each(owned, fn {pid, _} -> Process.exit(pid, :kill) end)
+
+    Enum.each(owned, fn {pid, monitor} ->
+      receive do: ({:DOWN, ^monitor, :process, ^pid, _} -> :ok)
+    end)
+  end
+
+  defp own_deadline_process(opts, kind, pid) when is_pid(pid) do
+    case opts[:deadline_owner] do
+      {guard, token} ->
+        monitor = Process.monitor(guard)
+        send(guard, {kind, token, pid, self()})
+
+        receive do
+          {:owned, ^token, ^pid} -> Process.demonitor(monitor, [:flush])
+          {:DOWN, ^monitor, :process, ^guard, _} -> Process.exit(self(), :kill)
+        end
+
+      nil ->
+        :ok
+    end
+  end
+
+  defp own_deadline_process(_opts, _kind, _pid), do: :ok
+  defp remaining(deadline), do: max(0, deadline - System.monotonic_time(:millisecond))
+
+  defp run_without_deadline(provider, opts) do
     # start (NOT start_link) + monitor: an open/init failure or an unexpected GenServer death
     # surfaces as a value here instead of a link exit that would kill the caller.
     case GenServer.start(__MODULE__, {provider, Keyword.put(opts, :caller, self())}) do
@@ -152,6 +296,7 @@ defmodule ReqManagedAgents.Session do
     # Trap exits so a crash in the linked stream-consumer / poll-turn Task arrives as {:EXIT,…}
     # (driving reconnect or a surfaced error) instead of killing this process and its caller.
     Process.flag(:trap_exit, true)
+    own_deadline_process(opts, :own_session, self())
 
     with {:ok, opts} <- coerce_model_config(opts),
          :ok <- validate_opts(provider, opts),
@@ -270,6 +415,7 @@ defmodule ReqManagedAgents.Session do
 
     case observed_open(provider, opts, evidence) do
       {:ok, conn} ->
+        own_deadline_process(opts, :own_worker, provider.consumer(conn))
         evidence_context(evidence, provider, conn)
 
         meta =
@@ -421,6 +567,8 @@ defmodule ReqManagedAgents.Session do
 
     case safe_reconnect(s) do
       {:ok, conn, pending, seen, recovered} ->
+        own_deadline_process(s.opts, :own_worker, s.provider.consumer(conn))
+
         # reconnect_attempts is NOT reset here — only a real terminal (finish/2) resets it — so a
         # connect→drop flap actually escalates the backoff instead of hammering at 500ms.
         resuming? = s.kicked_off == :resuming
@@ -588,6 +736,7 @@ defmodule ReqManagedAgents.Session do
 
     {:ok, task} =
       Task.start_link(fn ->
+        own_deadline_process(s.opts, :own_worker, self())
         # Preserve the caller's failure without emitting a second Task crash report
         # containing provider payloads before the Session can redact its diagnostics.
         try do
