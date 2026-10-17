@@ -124,6 +124,37 @@ defmodule ReqManagedAgents.Acceptance.RecoveryTest do
     end
   end
 
+  test "incomplete qualifying acquisition prevents recovery without requiring diagnostics" do
+    original = capture(events())
+    assert original.diagnostics == []
+
+    for status <- [:partial, :unavailable, :not_requested] do
+      sources =
+        Enum.map(original.sources, fn source ->
+          if source.id == "native", do: %{source | status: status}, else: source
+        end)
+
+      {:ok, changed} = Capture.new(%{original | sources: sources}, content: :retain)
+      assert changed.records != []
+      assert changed.diagnostics == []
+      assert {:ok, assertion} = Recovery.assess(changed, "lookup", %{"key" => "value"})
+      assert assertion.outcome == :inconclusive
+    end
+  end
+
+  test "an unrelated incomplete acquisition does not invalidate complete qualifying evidence" do
+    original = capture(events())
+
+    sources =
+      Enum.map(original.sources, fn source ->
+        if source.id == "local", do: %{source | status: :partial}, else: source
+      end)
+
+    {:ok, changed} = Capture.new(%{original | sources: sources}, content: :retain)
+    assert {:ok, assertion} = Recovery.assess(changed, "lookup", %{"key" => "value"})
+    assert assertion.outcome == :passed
+  end
+
   defp events do
     [
       %{
