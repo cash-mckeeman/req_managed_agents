@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Native AgentCore CloudWatch log association through a typed message matcher,
+  with explicit session and trace metadata validation. Standard OTLP matching
+  remains the default; unsupported records keep coverage partial.
+
 - AgentCore `:max_invocation_attempts` caps invocations across retries and turns on
   one provider connection, with a distinct exhaustion error. Bounded client calls
   disable automatic HTTP retries and redirects.

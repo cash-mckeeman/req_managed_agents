@@ -188,25 +188,14 @@ defmodule ReqManagedAgents.Acceptance.AgentCoreEvidenceTest do
     do: {200, %{"events" => [%{event() | "message" => "unknown-private-dialect"}]}}
 
   defp event do
-    span = %{
-      "traceId" => String.duplicate("a", 32),
-      "spanId" => String.duplicate("1", 16),
-      "name" => "synthetic operation",
-      "startTimeUnixNano" => "100",
-      "endTimeUnixNano" => "200",
-      "attributes" => [
-        %{"key" => "session.id", "value" => %{"stringValue" => String.duplicate("s", 33)}}
-      ]
-    }
+    [event | _] =
+      "test/fixtures/agentcore/cloudwatch_logs.json"
+      |> File.read!()
+      |> Jason.decode!()
 
-    %{
-      "eventId" => "stored-event",
-      "logStreamName" => "synthetic",
-      "timestamp" => 1_767_225_600_000,
-      "ingestionTime" => 1_767_225_601_000,
-      "message" =>
-        Jason.encode!(%{"resourceSpans" => [%{"scopeSpans" => [%{"spans" => [span]}]}]})
-    }
+    message = Jason.decode!(event["message"])
+    message = put_in(message, ["attributes", "sessionId"], String.duplicate("s", 33))
+    %{event | "message" => Jason.encode!(message)}
   end
 
   defp config do

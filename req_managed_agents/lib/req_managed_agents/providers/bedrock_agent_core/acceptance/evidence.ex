@@ -13,7 +13,7 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.Acceptance.Evidence do
   alias ReqManagedAgents.CloudWatch.Evidence, as: LogsEvidence
   alias ReqManagedAgents.CloudWatch.Query
   alias ReqManagedAgents.Evidence.Options
-  alias ReqManagedAgents.Providers.BedrockAgentCore.Acceptance
+  alias ReqManagedAgents.Providers.BedrockAgentCore.{Acceptance, CloudWatchLogs}
 
   @doc false
   @spec propose(Config.t()) :: {:ok, Proposal.t()} | {:error, atom()}
@@ -74,7 +74,10 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.Acceptance.Evidence do
            ),
          {:ok, client} <- logs_client(context, native_transport),
          {:ok, capture} <-
-           LogsEvidence.enrich(prior, context.proposal.selection, options, client: client),
+           LogsEvidence.enrich(prior, context.proposal.selection, options,
+             client: client,
+             message_association: CloudWatchLogs
+           ),
          {:ok, observation} <- Observation.new("bounded_cloudwatch_acquisition", :passed, []) do
       {:ok, observations ++ [%{observation | capture: capture}]}
     else

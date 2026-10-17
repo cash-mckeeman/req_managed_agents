@@ -1,0 +1,44 @@
+[
+  {
+    "eventId": "example-event-1",
+    "logStreamName": "example-stream",
+    "timestamp": 1767225600000,
+    "ingestionTime": 1767225601000,
+    "message": "{\"resource\":{\"attributes\":{\"aws.local.service\":\"synthetic-runtime\",\"aws.log.group.names\":\"/example/runtime\",\"aws.log.stream.names\":\"example-stream\",\"aws.service.type\":\"example\",\"cloud.platform\":\"example-platform\",\"cloud.provider\":\"example-cloud\",\"cloud.region\":\"us-east-1\",\"cloud.resource_id\":\"example-resource\",\"deployment.environment.name\":\"example-env\",\"service.instance.id\":\"example-instance\",\"service.name\":\"example-service\",\"telemetry.auto.version\":\"0.0.0\",\"telemetry.sdk.language\":\"example-language\",\"telemetry.sdk.name\":\"example-sdk\",\"telemetry.sdk.version\":\"0.0.0\"}},\"scope\":{\"name\":\"example.logger\"},\"timeUnixNano\":1767225600000000000,\"observedTimeUnixNano\":1767225600000500000,\"severityNumber\":9,\"severityText\":\"INFO\",\"body\":\"Synthetic private log message 1\",\"attributes\":{\"code.file.path\":\"/example/runtime/app.py\",\"code.function.name\":\"example_function\",\"code.line.number\":1,\"otelServiceName\":\"example-service\",\"otelSpanID\":\"000000000000000b\",\"otelTraceID\":\"00000000000000000000000000000001\",\"otelTraceSampled\":true,\"requestId\":\"example-request-1\",\"sessionId\":\"example-session\"},\"traceId\":\"00000000000000000000000000000001\",\"spanId\":\"000000000000000b\"}"
+  },
+  {
+    "eventId": "example-event-2",
+    "logStreamName": "example-stream",
+    "timestamp": 1767225600001,
+    "ingestionTime": 1767225601001,
+    "message": "{\"resource\":{\"attributes\":{\"aws.local.service\":\"synthetic-runtime\",\"aws.log.group.names\":\"/example/runtime\",\"aws.log.stream.names\":\"example-stream\",\"aws.service.type\":\"example\",\"cloud.platform\":\"example-platform\",\"cloud.provider\":\"example-cloud\",\"cloud.region\":\"us-east-1\",\"cloud.resource_id\":\"example-resource\",\"deployment.environment.name\":\"example-env\",\"service.instance.id\":\"example-instance\",\"service.name\":\"example-service\",\"telemetry.auto.version\":\"0.0.0\",\"telemetry.sdk.language\":\"example-language\",\"telemetry.sdk.name\":\"example-sdk\",\"telemetry.sdk.version\":\"0.0.0\"}},\"scope\":{\"name\":\"example.logger\"},\"timeUnixNano\":1767225600001000000,\"observedTimeUnixNano\":1767225600001500000,\"severityNumber\":9,\"severityText\":\"INFO\",\"body\":\"Synthetic private log message 2\",\"attributes\":{\"code.file.path\":\"/example/runtime/app.py\",\"code.function.name\":\"example_function\",\"code.line.number\":2,\"otelServiceName\":\"example-service\",\"otelSpanID\":\"000000000000000c\",\"otelTraceID\":\"00000000000000000000000000000002\",\"otelTraceSampled\":true,\"requestId\":\"example-request-2\",\"sessionId\":\"example-session\"},\"traceId\":\"00000000000000000000000000000002\",\"spanId\":\"000000000000000c\",\"flags\":1}"
+  },
+  {
+    "eventId": "example-event-3",
+    "logStreamName": "example-stream",
+    "timestamp": 1767225600002,
+    "ingestionTime": 1767225601002,
+    "message": "{\"resource\":{\"attributes\":{\"aws.local.service\":\"synthetic-runtime\",\"aws.log.group.names\":\"/example/runtime\",\"aws.log.stream.names\":\"example-stream\",\"aws.service.type\":\"example\",\"cloud.platform\":\"example-platform\",\"cloud.provider\":\"example-cloud\",\"cloud.region\":\"us-east-1\",\"cloud.resource_id\":\"example-resource\",\"deployment.environment.name\":\"example-env\",\"service.instance.id\":\"example-instance\",\"service.name\":\"example-service\",\"telemetry.auto.version\":\"0.0.0\",\"telemetry.sdk.language\":\"example-language\",\"telemetry.sdk.name\":\"example-sdk\",\"telemetry.sdk.version\":\"0.0.0\"}},\"scope\":{\"name\":\"example.logger\"},\"timeUnixNano\":1767225600002000000,\"observedTimeUnixNano\":1767225600002500000,\"severityNumber\":9,\"severityText\":\"INFO\",\"body\":\"Synthetic private log message 3\",\"attributes\":{\"code.file.path\":\"/example/runtime/app.py\",\"code.function.name\":\"example_function\",\"code.line.number\":3,\"otelServiceName\":\"example-service\",\"otelSpanID\":\"000000000000000d\",\"otelTraceID\":\"00000000000000000000000000000003\",\"otelTraceSampled\":true,\"requestId\":\"example-request-3\",\"sessionId\":\"example-session\"},\"traceId\":\"00000000000000000000000000000003\",\"spanId\":\"000000000000000d\",\"flags\":1}"
+  },
+  {
+    "eventId": "example-event-4",
+    "logStreamName": "example-stream",
+    "timestamp": 1767225600003,
+    "ingestionTime": 1767225601003,
+    "message": "{\"resource\":{\"attributes\":{\"aws.local.service\":\"synthetic-runtime\",\"aws.log.group.names\":\"/example/runtime\",\"aws.log.stream.names\":\"example-stream\",\"aws.service.type\":\"example\",\"cloud.platform\":\"example-platform\",\"cloud.provider\":\"example-cloud\",\"cloud.region\":\"us-east-1\",\"cloud.resource_id\":\"example-resource\",\"deployment.environment.name\":\"example-env\",\"service.instance.id\":\"example-instance\",\"service.name\":\"example-service\",\"telemetry.auto.version\":\"0.0.0\",\"telemetry.sdk.language\":\"example-language\",\"telemetry.sdk.name\":\"example-sdk\",\"telemetry.sdk.version\":\"0.0.0\"}},\"scope\":{\"name\":\"example.logger\"},\"timeUnixNano\":1767225600003000000,\"observedTimeUnixNano\":1767225600003500000,\"severityNumber\":9,\"severityText\":\"INFO\",\"body\":\"Synthetic private log message 4\",\"attributes\":{\"code.file.path\":\"/example/runtime/app.py\",\"code.function.name\":\"example_function\",\"code.line.number\":4,\"otelServiceName\":\"example-service\",\"otelSpanID\":\"000000000000000e\",\"otelTraceID\":\"00000000000000000000000000000004\",\"otelTraceSampled\":true,\"requestId\":\"example-request-4\",\"sessionId\":\"example-session\"},\"traceId\":\"00000000000000000000000000000004\",\"spanId\":\"000000000000000e\",\"flags\":1}"
+  },
+  {
+    "eventId": "example-event-5",
+    "logStreamName": "example-stream",
+    "timestamp": 1767225600004,
+    "ingestionTime": 1767225601004,
+    "message": "{\"resource\":{\"attributes\":{\"aws.local.service\":\"synthetic-runtime\",\"aws.log.group.names\":\"/example/runtime\",\"aws.log.stream.names\":\"example-stream\",\"aws.service.type\":\"example\",\"cloud.platform\":\"example-platform\",\"cloud.provider\":\"example-cloud\",\"cloud.region\":\"us-east-1\",\"cloud.resource_id\":\"example-resource\",\"deployment.environment.name\":\"example-env\",\"service.instance.id\":\"example-instance\",\"service.name\":\"example-service\",\"telemetry.auto.version\":\"0.0.0\",\"telemetry.sdk.language\":\"example-language\",\"telemetry.sdk.name\":\"example-sdk\",\"telemetry.sdk.version\":\"0.0.0\"}},\"scope\":{\"name\":\"example.logger\"},\"timeUnixNano\":1767225600004000000,\"observedTimeUnixNano\":1767225600004500000,\"severityNumber\":9,\"severityText\":\"INFO\",\"body\":\"Synthetic private log message 5\",\"attributes\":{\"code.file.path\":\"/example/runtime/app.py\",\"code.function.name\":\"example_function\",\"code.line.number\":5,\"otelServiceName\":\"example-service\",\"otelSpanID\":\"000000000000000f\",\"otelTraceID\":\"00000000000000000000000000000005\",\"otelTraceSampled\":true,\"requestId\":\"example-request-5\",\"sessionId\":\"example-session\"},\"traceId\":\"00000000000000000000000000000005\",\"spanId\":\"000000000000000f\",\"flags\":1}"
+  },
+  {
+    "eventId": "example-event-6",
+    "logStreamName": "example-stream",
+    "timestamp": 1767225600005,
+    "ingestionTime": 1767225601005,
+    "message": "{\"resource\":{\"attributes\":{\"aws.local.service\":\"synthetic-runtime\",\"aws.log.group.names\":\"/example/runtime\",\"aws.log.stream.names\":\"example-stream\",\"aws.service.type\":\"example\",\"cloud.platform\":\"example-platform\",\"cloud.provider\":\"example-cloud\",\"cloud.region\":\"us-east-1\",\"cloud.resource_id\":\"example-resource\",\"deployment.environment.name\":\"example-env\",\"service.instance.id\":\"example-instance\",\"service.name\":\"example-service\",\"telemetry.auto.version\":\"0.0.0\",\"telemetry.sdk.language\":\"example-language\",\"telemetry.sdk.name\":\"example-sdk\",\"telemetry.sdk.version\":\"0.0.0\"}},\"scope\":{\"name\":\"example.logger\"},\"timeUnixNano\":1767225600005000000,\"observedTimeUnixNano\":1767225600005500000,\"severityNumber\":9,\"severityText\":\"INFO\",\"body\":\"Synthetic private log message 6\",\"attributes\":{\"code.file.path\":\"/example/runtime/app.py\",\"code.function.name\":\"example_function\",\"code.line.number\":6,\"otelServiceName\":\"example-service\",\"otelSpanID\":\"invalid-span\",\"otelTraceID\":\"invalid-trace\",\"otelTraceSampled\":true,\"requestId\":\"example-request-6\",\"sessionId\":\"foreign-session\"},\"traceId\":\"\",\"spanId\":\"\",\"flags\":1}"
+  }
+]
