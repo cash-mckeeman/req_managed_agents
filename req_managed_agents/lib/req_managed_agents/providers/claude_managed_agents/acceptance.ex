@@ -1,7 +1,15 @@
 defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
   @moduledoc "One fresh budgeted CMA session followed by bounded persisted history."
   @behaviour ReqManagedAgents.Acceptance.Scenario
-  alias ReqManagedAgents.Acceptance.{Basic, Cleanup, Config, Observation, Proposal}
+  alias ReqManagedAgents.Acceptance.{
+    Basic,
+    Cleanup,
+    Config,
+    Observation,
+    Proposal,
+    StoredEvidence
+  }
+
   alias ReqManagedAgents.Budget
   alias ReqManagedAgents.Evidence.{Options, Validation}
   alias ReqManagedAgents.Providers.ClaudeManagedAgents
@@ -9,7 +17,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request
 
   @impl true
-  def propose(%Config{provider: :claude_managed_agents, scenario: :basic} = config) do
+  def propose(%Config{provider: :claude_managed_agents, scenario: scenario} = config)
+      when scenario in [:basic, :evidence] do
     with :ok <- validate(config), do: Proposal.new(config)
   end
 
@@ -116,6 +125,24 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance do
   end
 
   @impl true
+  def assess(%{config: %Config{scenario: :evidence}} = context, observations) do
+    stored =
+      case Basic.capture(context, observations) do
+        {:ok, capture} ->
+          sources =
+            Enum.filter(capture.sources, fn source ->
+              source.id != "native" and source.kind in [:claude_session, :claude_thread]
+            end)
+
+          StoredEvidence.assess(sources, capture.records)
+
+        _ ->
+          StoredEvidence.assess([], [])
+      end
+
+    Basic.assess(context, observations, :claude_managed_agents) ++ [stored]
+  end
+
   def assess(context, observations),
     do: Basic.assess(context, observations, :claude_managed_agents)
 end

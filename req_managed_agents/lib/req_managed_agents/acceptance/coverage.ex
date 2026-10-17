@@ -67,6 +67,11 @@ defmodule ReqManagedAgents.Acceptance.Coverage do
             ["sessionassociation_not_tracejoin", "isolated_destination_is_caller_selected"],
         else: limitations
 
+    limitations =
+      if config.provider == :claude_managed_agents and config.scenario == :evidence,
+        do: limitations ++ ["stored_activity_does_not_verify_tool_arguments_or_recovery"],
+        else: limitations
+
     {:ok,
      %__MODULE__{
        sources: sources,
