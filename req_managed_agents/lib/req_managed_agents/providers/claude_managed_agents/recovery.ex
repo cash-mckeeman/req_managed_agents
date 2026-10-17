@@ -1,8 +1,8 @@
 defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Recovery do
-  @moduledoc "Links native CMA tool results by their declared tool-use key within one acquisition source."
+  @moduledoc "Links native CMA tool results by their declared tool-use key within one acquisition source and explicit native thread. Missing thread identity is inconclusive."
   @behaviour ReqManagedAgents.Acceptance.Recovery
   alias ReqManagedAgents.Acceptance.RecoveryAttempt
-  alias ReqManagedAgents.Evidence.{Capture, Record}
+  alias ReqManagedAgents.Evidence.{Capture, Record, Validation}
 
   @uses %{
     "agent.tool_use" => :builtin,
@@ -66,10 +66,13 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Recovery do
 
     with [result] <- matching,
          true <- same_session?(use, session) and same_session?(result, session),
+         {:ok, thread} <- native_thread(use),
+         {:ok, ^thread} <- native_thread(result),
          flag when is_boolean(flag) <- result.payload["is_error"] do
       RecoveryAttempt.new(%{
         session_id: session,
         source_id: use.source_id,
+        thread_id: thread,
         use_id: use.payload["id"],
         result_id: result.payload["id"],
         family: family,
@@ -81,6 +84,19 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Recovery do
         evidence: [use.source_id <> ":" <> use.id, result.source_id <> ":" <> result.id]
       })
     else
+      _ -> {:error, :inconclusive}
+    end
+  end
+
+  defp native_thread(%Record{payload: payload}) do
+    identities =
+      payload
+      |> Map.take(~w(session_thread_id thread_id))
+      |> Map.values()
+      |> Enum.uniq()
+
+    case identities do
+      [thread] -> Validation.id(thread)
       _ -> {:error, :inconclusive}
     end
   end

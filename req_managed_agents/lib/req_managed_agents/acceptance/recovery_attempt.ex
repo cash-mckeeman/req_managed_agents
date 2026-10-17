@@ -5,6 +5,7 @@ defmodule ReqManagedAgents.Acceptance.RecoveryAttempt do
   @enforce_keys [
     :session_id,
     :source_id,
+    :thread_id,
     :use_id,
     :result_id,
     :family,
@@ -22,6 +23,7 @@ defmodule ReqManagedAgents.Acceptance.RecoveryAttempt do
   @type t :: %__MODULE__{
           session_id: String.t(),
           source_id: String.t(),
+          thread_id: String.t(),
           use_id: String.t(),
           result_id: String.t(),
           family: :builtin | :custom | :mcp,
@@ -36,7 +38,7 @@ defmodule ReqManagedAgents.Acceptance.RecoveryAttempt do
   @doc "Validate native identity, explicit relationship and strictly ordered UTC event bounds."
   @spec new(map()) :: {:ok, t()} | {:error, :invalid_recovery_attempt}
   def new(attrs) when is_map(attrs) do
-    identities = ~w(session_id source_id use_id result_id target)a
+    identities = ~w(session_id source_id thread_id use_id result_id target)a
 
     with true <- Enum.sort(Map.keys(attrs)) == Enum.sort(@enforce_keys),
          true <- Enum.all?(identities, &match?({:ok, _}, Validation.id(Map.get(attrs, &1)))),

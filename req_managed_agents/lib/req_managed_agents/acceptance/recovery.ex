@@ -45,7 +45,8 @@ defmodule ReqManagedAgents.Acceptance.Recovery do
 
   defp pair?(%RecoveryAttempt{} = first, %RecoveryAttempt{} = second) do
     first.session_id == second.session_id and first.source_id == second.source_id and
-      first.family == second.family and first.use_id != second.use_id and
+      first.thread_id == second.thread_id and first.family == second.family and
+      first.use_id != second.use_id and
       first.result_id != second.result_id and first.outcome == :failed and
       second.outcome == :passed and
       DateTime.compare(first.ended_at, second.started_at) == :lt
