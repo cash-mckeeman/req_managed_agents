@@ -9,11 +9,9 @@ defmodule ReqManagedAgents.CloudWatch.Evidence do
   CloudWatch requires the optional `:ex_aws_auth` dependency, without EventStream.
 
   Retained payloads preserve each outer log record and its exact message string.
-  The recognized message dialect is standard OTLP JSON `resourceSpans` /
-  `scopeSpans` / `spans`, with hex trace/span IDs, unsigned nanosecond timestamps,
-  and a string `session.id` attribute on the span or resource. This is a supported
-  standard input shape, **not verified live AgentCore harness output**. Matching
-  spans establish only same-session association. Unsupported messages and native
+  The default message matcher is `ReqManagedAgents.CloudWatch.OTLP`; an explicit
+  `:message_association` option selects a supported matcher. Matching messages
+  establish only same-session association. Unsupported messages and native
   identity mismatches remain private raw evidence and make coverage partial.
 
   A drained cursor covers retrieval for the declared interval at collection time;
@@ -25,7 +23,7 @@ defmodule ReqManagedAgents.CloudWatch.Evidence do
   """
   @behaviour ReqManagedAgents.Evidence.Adapter
 
-  alias ReqManagedAgents.CloudWatch.{Client, Query}
+  alias ReqManagedAgents.CloudWatch.{Client, OTLP, Query}
   alias ReqManagedAgents.Evidence
 
   alias ReqManagedAgents.Evidence.{
@@ -50,6 +48,7 @@ defmodule ReqManagedAgents.CloudWatch.Evidence do
       :query,
       :options,
       :client,
+      :message_association,
       :source,
       :deadline,
       :pages,
@@ -62,6 +61,7 @@ defmodule ReqManagedAgents.CloudWatch.Evidence do
       :query,
       :options,
       :client,
+      :message_association,
       :source,
       :deadline,
       :pages,
@@ -77,6 +77,7 @@ defmodule ReqManagedAgents.CloudWatch.Evidence do
             query: Query.t(),
             options: Options.t(),
             client: Client.t(),
+            message_association: module(),
             source: Source.t(),
             deadline: integer(),
             pages: non_neg_integer(),
@@ -88,7 +89,12 @@ defmodule ReqManagedAgents.CloudWatch.Evidence do
           }
   end
 
-  @doc "Enriches matching AgentCore evidence; opts accept an explicit client or credentials/resolver and transport."
+  @doc """
+  Enriches matching evidence with an explicit client or credentials/resolver and transport.
+
+  `:message_association` accepts a trusted Elixir module implementing
+  `ReqManagedAgents.CloudWatch.MessageAssociation`; the default is `ReqManagedAgents.CloudWatch.OTLP`.
+  """
   @spec enrich(Capture.t(), Query.t(), Options.t(), keyword()) ::
           {:ok, Capture.t()} | {:error, Error.t()}
   def enrich(capture, query, options, opts \\ [])
@@ -102,9 +108,10 @@ defmodule ReqManagedAgents.CloudWatch.Evidence do
     with {:ok, query} <- Query.new(query),
          {:ok, options} <- Options.new(options),
          true <- capture.session_id == query.session_id,
-         {:ok, client} <- client(query, opts),
+         {:ok, association} <- message_association(opts),
+         {:ok, client} <- client(query, Keyword.delete(opts, :message_association)),
          {:ok, capture} <- Capture.new(capture, options) do
-      capture |> initialize(query, options, client) |> collect() |> finish()
+      capture |> initialize(query, options, client, association) |> collect() |> finish()
     else
       false -> Error.error(:invalid_reference)
       {:error, _} = error -> error
@@ -112,6 +119,22 @@ defmodule ReqManagedAgents.CloudWatch.Evidence do
   end
 
   def enrich(_, _, _, _), do: Error.error(:invalid_input)
+
+  defp message_association(opts) when is_list(opts) do
+    if Keyword.keyword?(opts) and
+         length(opts) == length(Enum.uniq(Keyword.keys(opts))) do
+      module = Keyword.get(opts, :message_association, OTLP)
+
+      if is_atom(module) and Code.ensure_loaded?(module) and
+           function_exported?(module, :matches?, 2),
+         do: {:ok, module},
+         else: Error.error(:invalid_options)
+    else
+      Error.error(:invalid_options)
+    end
+  end
+
+  defp message_association(_), do: Error.error(:invalid_options)
 
   defp client(query, opts) when is_list(opts) do
     with true <- Keyword.keyword?(opts),
@@ -136,13 +159,14 @@ defmodule ReqManagedAgents.CloudWatch.Evidence do
       else: Client.new(Keyword.put(opts, :region, query.region))
   end
 
-  defp initialize(capture, query, options, client) do
+  defp initialize(capture, query, options, client, association) do
     %State{
       capture: capture,
       prior_count: length(capture.records),
       query: query,
       options: options,
       client: client,
+      message_association: association,
       source: %Source{
         id: id(),
         kind: :cloudwatch,
@@ -263,7 +287,7 @@ defmodule ReqManagedAgents.CloudWatch.Evidence do
         payload: payload
       })
 
-    matched? = matching_message?(payload, state.query)
+    matched? = state.message_association.matches?(payload, state.query)
     record = %{record | validation_issue?: not matched?}
     links = if matched?, do: [session_link(record, state.query)], else: []
     identity = NativeIdentity.new(record, state.options.content)
@@ -318,110 +342,6 @@ defmodule ReqManagedAgents.CloudWatch.Evidence do
 
     link
   end
-
-  # Only this standard envelope is recognized; log messages are otherwise opaque.
-  defp matching_message?(
-         %{"eventId" => id, "logStreamName" => stream, "message" => message, "timestamp" => time} =
-           payload,
-         query
-       )
-       when is_binary(id) and id != "" and is_binary(stream) and is_binary(message) and
-              is_integer(time) do
-    with true <-
-           time >= DateTime.to_unix(query.from, :millisecond) and
-             time <= DateTime.to_unix(query.to, :millisecond),
-         true <- is_integer(Map.get(payload, "ingestionTime")) and payload["ingestionTime"] >= 0,
-         {:ok, %{"resourceSpans" => resources}} <- Jason.decode(message),
-         true <- is_list(resources) and resources != [] do
-      Enum.all?(resources, &matching_resource?(&1, query))
-    else
-      _ -> false
-    end
-  end
-
-  defp matching_message?(_, _), do: false
-
-  defp matching_resource?(%{"scopeSpans" => scopes} = resource, query)
-       when is_list(scopes) and scopes != [] do
-    case Map.get(resource, "resource", %{}) do
-      metadata when is_map(metadata) ->
-        attrs = Map.get(metadata, "attributes", [])
-        Enum.all?(scopes, &matching_scope?(&1, attrs, query))
-
-      _ ->
-        false
-    end
-  end
-
-  defp matching_resource?(_, _), do: false
-
-  defp matching_scope?(%{"spans" => spans}, attrs, query) when is_list(spans) and spans != [],
-    do: Enum.all?(spans, &matching_span?(&1, attrs, query))
-
-  defp matching_scope?(_, _, _), do: false
-
-  defp matching_span?(
-         %{
-           "traceId" => trace,
-           "spanId" => span,
-           "name" => name,
-           "startTimeUnixNano" => from,
-           "endTimeUnixNano" => to
-         } = value,
-         resource,
-         query
-       ) do
-    with true <- Query.trace_id?(trace) and hex_span?(span) and is_binary(name),
-         true <-
-           Map.get(value, "parentSpanId") in [nil, ""] or
-             hex_span?(Map.get(value, "parentSpanId")),
-         {:ok, from} <- nano(from),
-         {:ok, to} <- nano(to),
-         true <- from <= to,
-         {:ok, ids} <- session_ids(resource),
-         {:ok, span_ids} <- session_ids(Map.get(value, "attributes", [])),
-         true <- Enum.uniq(ids ++ span_ids) == [query.session_id] do
-      query.trace_ids == [] or
-        Enum.any?(query.trace_ids, &(String.downcase(&1) == String.downcase(trace)))
-    else
-      _ -> false
-    end
-  end
-
-  defp matching_span?(_, _, _), do: false
-
-  defp hex_span?(value),
-    do:
-      is_binary(value) and Regex.match?(~r/\A[0-9a-fA-F]{16}\z/, value) and
-        value != String.duplicate("0", 16)
-
-  defp nano(value) when is_binary(value) do
-    case Integer.parse(value) do
-      {number, ""} when number >= 0 and number <= 18_446_744_073_709_551_615 -> {:ok, number}
-      _ -> :error
-    end
-  end
-
-  defp nano(_), do: :error
-
-  defp session_ids(attributes) when is_list(attributes) do
-    Enum.reduce_while(attributes, {:ok, []}, fn
-      %{"key" => "session.id", "value" => %{"stringValue" => id} = value}, {:ok, ids}
-      when is_binary(id) and map_size(value) == 1 ->
-        {:cont, {:ok, ids ++ [id]}}
-
-      %{"key" => "session.id"}, _ ->
-        {:halt, :error}
-
-      %{"key" => key, "value" => value}, acc when is_binary(key) and is_map(value) ->
-        {:cont, acc}
-
-      _, _ ->
-        {:halt, :error}
-    end)
-  end
-
-  defp session_ids(_), do: :error
 
   defp gap(state, code, count \\ 1) do
     {matching, others} =
