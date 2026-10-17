@@ -33,7 +33,7 @@ defmodule ReqManagedAgents.Providers.Local do
   @behaviour ReqManagedAgents.Provider
 
   alias ReqManagedAgents.Providers.Local.{Deps, Directives, ReqLLMChat, Retry}
-  alias ReqManagedAgents.{ToolResult, ToolUse, TurnResult, Usage}
+  alias ReqManagedAgents.{ModelConfig, ToolResult, ToolUse, TurnResult, Usage}
 
   # The conn is a struct, not a bag of keys: one place to see everything a turn needs.
   defstruct history: [],
@@ -81,7 +81,12 @@ defmodule ReqManagedAgents.Providers.Local do
   def open(opts, _subscriber) do
     spec = opts[:spec] || %{}
     model_config = normalize_model_config(opts[:model_config] || spec[:model_config])
-    {:ok, build_conn(opts, spec, model_config)}
+
+    if opts[:chat_fun] != nil and ModelConfig.data_plane?(model_config) do
+      {:error, :data_plane_unsupported}
+    else
+      {:ok, build_conn(opts, spec, model_config)}
+    end
   end
 
   defp build_conn(opts, spec, model_config) do

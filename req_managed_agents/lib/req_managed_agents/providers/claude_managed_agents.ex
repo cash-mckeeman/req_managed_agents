@@ -25,6 +25,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
   alias ReqManagedAgents.{
     Budget,
     Environment,
+    ModelConfig,
     Outcome,
     ToolUse,
     TurnResult,
@@ -108,13 +109,22 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   @impl true
   def open(opts, subscriber) do
-    with {:ok, budget} <- budget_from(opts) do
+    with {:ok, budget} <- budget_from(opts),
+         :ok <- validate_transport(opts) do
       client = client_from(opts)
 
       case opts[:session_id] do
         nil -> open_fresh(client, opts, budget, subscriber)
         sid -> open_resume(client, sid, opts[:evidence_context])
       end
+    end
+  end
+
+  defp validate_transport(opts) do
+    if opts[:client] != nil and ModelConfig.data_plane?(opts[:model_config] || %{}) do
+      {:error, :data_plane_unsupported}
+    else
+      :ok
     end
   end
 
