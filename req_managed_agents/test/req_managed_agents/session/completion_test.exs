@@ -4,6 +4,25 @@ defmodule ReqManagedAgents.Session.CompletionTest do
   alias ReqManagedAgents.Session.Completion
   alias ReqManagedAgents.{SessionResult, Usage}
 
+  test "owner diagnostics redact accepted content without changing the delivered result" do
+    owner = owner()
+    generation = make_ref()
+
+    result = %{
+      snapshot(1)
+      | text: "PRIVATE_OWNER_TEXT",
+        events: [%{"secret" => "PRIVATE_OWNER_EVENT"}]
+    }
+
+    assert :ok = Completion.begin_request(owner, generation, result)
+    status = owner |> :sys.get_status() |> inspect(limit: :infinity)
+    refute status =~ "PRIVATE_OWNER_TEXT"
+    refute status =~ "PRIVATE_OWNER_EVENT"
+    assert :ok = Completion.finish(owner, generation, {:ok, result}, result)
+    assert_receive {:managed_agents_session, ^result}
+    assert_receive {:session_completion, ^owner, {:ok, ^result}}
+  end
+
   test "session death publishes the acknowledged snapshot before completion and reaps workers" do
     owner = owner()
     session = actor()

@@ -8,6 +8,14 @@ function — `ReqManagedAgents.Host.send_message/3` — finds, starts, or reatta
 right session, runs it to a terminal, and returns the RMA `SessionResult`, with the
 session's upstream identity durably persisted so a BEAM restart resumes the conversation.
 
+Pass `provider_opts: [notify: pid]` to receive the accumulated result when a run
+fails after its opened request is acknowledged. The recipient is bound per call,
+even when a live server is reused; use a separate recipient per run. Delivery
+precedes the original `{:error, reason}` return. Without a recipient, that error
+tuple contains no partial usage. Failed runs do not advance persisted handles
+or transcripts. A missing result after an interrupted open does not prove zero
+provider work; see `ReqManagedAgents.SessionResult.in_flight`.
+
 ## Installation
 
 ```elixir

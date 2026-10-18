@@ -3,7 +3,80 @@ defmodule ReqManagedAgents.Test.ExecutionUsageFixture do
 
   alias ReqManagedAgents.Providers.{BedrockAgentCore, ClaudeManagedAgents, Local}
   alias ReqManagedAgents.Providers.Local.ReqLLMChat
-  alias ReqManagedAgents.{Session, Usage}
+  alias ReqManagedAgents.{Session, SessionResult, Usage}
+
+  @spec results() :: %{String.t() => SessionResult.t()}
+  def results do
+    chat = fn request ->
+      if List.last(request.messages)["role"] == "tool",
+        do: {:error, :fixture_transport_down},
+        else: {:ok, response(known_usage(), true)}
+    end
+
+    witness = make_ref()
+    owner = self()
+
+    timeout_chat = fn _ ->
+      send(owner, {:fixture_attempt, witness})
+      receive do: (:never -> {:error, :late})
+    end
+
+    first_timeout = result(timeout_chat, {:error, :timeout}, timeout: 100)
+
+    receive do
+      {:fixture_attempt, ^witness} -> :ok
+    after
+      0 -> raise "timeout fixture did not enter its first provider attempt"
+    end
+
+    %{
+      "success" => result(fn _ -> {:ok, response(known_usage(), false)} end, :ok),
+      "guard-stop" =>
+        result(
+          fn _ -> {:ok, response(known_usage(), false)} end,
+          {:error, {:halted, :fixture_guard}}, turn_guard: fn _ -> {:halt, :fixture_guard} end),
+      "first-attempt-timeout" => first_timeout,
+      "partial-error" => result(chat, {:error, :fixture_transport_down})
+    }
+  end
+
+  defp result(chat, expected, opts \\ []) do
+    returned =
+      Session.run(
+        Local,
+        opts ++
+          [
+            chat_fun: chat,
+            session_id: "fixture-session",
+            prompt: "go",
+            model_config: %{model: "test-model"},
+            max_chat_retries: 0,
+            handler: fn _, _, _ -> {:ok, "done"} end,
+            notify: self()
+          ]
+      )
+
+    case {expected, returned} do
+      {:ok, {:ok, %SessionResult{}}} -> :ok
+      {same, same} -> :ok
+      other -> raise "unexpected fixture return: #{inspect(other)}"
+    end
+
+    receive do
+      {:managed_agents_session, %SessionResult{} = result} -> result
+    after
+      0 -> raise "fixture result was not delivered before return"
+    end
+  end
+
+  defp known_usage do
+    %{
+      "prompt_tokens" => 12,
+      "completion_tokens" => 4,
+      "input_token_basis" => "uncached",
+      "prompt_tokens_details" => %{"cached_tokens" => 3, "cache_write_tokens" => 2}
+    }
+  end
 
   @spec samples() :: %{String.t() => Usage.t()}
   def samples do

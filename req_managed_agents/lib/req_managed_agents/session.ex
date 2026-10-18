@@ -64,8 +64,15 @@ defmodule ReqManagedAgents.Session do
 
   `run/2` also accepts `:deadline`, an absolute `System.monotonic_time(:millisecond)`
   value bounding local initialization, execution waits and owned-process teardown.
-  Deadline runs terminate their session and workers if their caller dies; absent
-  `:deadline`, `:timeout` retains its existing semantics.
+  Caller death terminates the session and owned workers. Without `:deadline`,
+  `:timeout` starts after initialization.
+
+  After a successful open is acknowledged, `:notify` receives one
+  `{:managed_agents_session, result}` per request, including local errors, before
+  `run/2` returns. Error results retain accepted usage/events with
+  `terminal: :terminated`; synchronous error tuples are unchanged. Failed or
+  interrupted initialization has no fabricated result and may still have
+  contacted the provider. See `ReqManagedAgents.SessionResult.in_flight`.
 
   Provider-specific opts (e.g. `:agent_id`/`:environment_id`, `:harness_arn`/`:runtime_session_id`,
   `:session_id` to resume) are forwarded to the provider's `open/2`. `:agent`/`:environment` accept

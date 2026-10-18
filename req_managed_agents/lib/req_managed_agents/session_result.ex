@@ -4,6 +4,10 @@ defmodule ReqManagedAgents.SessionResult do
 
   `transcript` is the provider's client-held history when the provider exports
   `transcript/1` (potentially large); `nil` for server-held providers.
+
+  `in_flight: :unknown` means additional provider work may be unmeasured;
+  `:none` marks a completed local boundary. `usage.complete?` describes the
+  represented contributions, so neither flag alone certifies total billed cost.
   """
   @derive Jason.Encoder
   defstruct terminal: :terminated,

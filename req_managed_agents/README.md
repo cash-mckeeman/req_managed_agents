@@ -187,6 +187,24 @@ flattened. The raw events are always in `events`.
 - **Live / supervised:** `Session.start_link(provider, opts)` (reconnecting, multi-turn) +
   `Session.message(pid, text)`; pass `notify: pid` to be told when a turn terminates.
 
+After a successful provider open is acknowledged, `notify: pid` receives exactly
+one `{:managed_agents_session, result}` per request, including errors, before
+`Session.run/2` returns. Errors retain their original `{:error, reason}` tuple;
+the notified result has `terminal: :terminated` and retains accepted usage and
+events. Use a separate notification recipient per run when collecting failures.
+The remote `session_id` can be shared by several requests.
+
+`result.in_flight` is `:none` at a completed boundary or `:unknown` when additional
+provider work may be unmeasured. `Usage.complete?` covers represented
+contributions. A first-attempt timeout can therefore have zero observed usage
+and unknown unfinished work. Missing notification after failed or interrupted
+open also does not establish zero provider work. Local cleanup does not cancel
+remote execution.
+
+The legacy `:timeout` starts after initialization; an absolute monotonic
+`:deadline` also bounds initialization. Live `message/2` calls queue while a
+request is active and start fresh usage accumulation when delivered.
+
 ### Convenience facade (Claude)
 
 For the Claude path, thin sugar over the above:

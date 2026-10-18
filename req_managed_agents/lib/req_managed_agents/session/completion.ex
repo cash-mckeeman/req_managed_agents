@@ -143,6 +143,9 @@ defmodule ReqManagedAgents.Session.Completion do
 
   def handle_info(_message, state), do: {:noreply, state}
 
+  @impl true
+  defdelegate format_status(status), to: ReqManagedAgents.Session
+
   defp close(state, reason) do
     state = if state.completed?, do: state, else: publish(state, {:error, reason})
     cleanup(state)
