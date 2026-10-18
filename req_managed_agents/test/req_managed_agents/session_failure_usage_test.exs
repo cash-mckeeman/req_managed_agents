@@ -533,58 +533,61 @@ defmodule ReqManagedAgents.SessionFailureUsageTest do
   for acquisition <- [:request_response, :streaming, :recovered] do
     @acquisition acquisition
     test "#{acquisition} checkpoints completed usage before a blocking event handler" do
-      acquisition = @acquisition
-      test_pid = self()
-      first = turn(:requires_action)
-
-      second =
-        turn(:end_turn)
-        |> Map.put("id", "callback-block")
-        |> Map.put("stop_reason", "second-stop")
-
-      poll = fn
-        0, _ -> {:ok, [first]}
-        1, _ -> {:ok, [second]}
-      end
-
-      push = fn subscriber, ref, input ->
-        cond do
-          input == :kickoff -> send(subscriber, {:managed_agents, ref, {:event, first}})
-          acquisition == :recovered -> send(subscriber, :reconnect)
-          true -> send(subscriber, {:managed_agents, ref, {:event, second}})
-        end
-
-        :ok
-      end
-
-      reconnect = fn conn, _subscriber, seen ->
-        {:ok, conn, [], MapSet.put(seen, "callback-block"), [second]}
-      end
-
-      provider =
-        if acquisition == :request_response, do: FailureProvider, else: FailureProvider.Streaming
-
-      runner =
-        run_async(provider,
-          poll_fun: poll,
-          push_fun: push,
-          reconnect_fun: reconnect,
-          handler: BoundaryEventHandler,
-          context: test_pid,
-          deadline: now() + 300
-        )
-
-      assert_receive {:boundary_blocked, _}, 2_000
-      assert_receive {:returned, ^runner, {:error, :timeout}, result, []}, 2_000
-      assert result.turns == 2
-      assert result.usage.input_tokens == 24
-      assert result.usage.output_tokens == 8
-      assert result.usage.cache_read_input_tokens == 6
-      assert result.usage.cache_creation_input_tokens == 4
-      assert result.in_flight == :none
-      assert result.stop_reason == "second-stop"
-      assert result.events == [first, second]
+      assert_boundary_usage(@acquisition)
     end
+  end
+
+  defp assert_boundary_usage(acquisition) do
+    test_pid = self()
+    first = turn(:requires_action)
+
+    second =
+      turn(:end_turn)
+      |> Map.put("id", "callback-block")
+      |> Map.put("stop_reason", "second-stop")
+
+    poll = fn
+      0, _ -> {:ok, [first]}
+      1, _ -> {:ok, [second]}
+    end
+
+    push = fn subscriber, ref, input ->
+      cond do
+        input == :kickoff -> send(subscriber, {:managed_agents, ref, {:event, first}})
+        acquisition == :recovered -> send(subscriber, :reconnect)
+        true -> send(subscriber, {:managed_agents, ref, {:event, second}})
+      end
+
+      :ok
+    end
+
+    reconnect = fn conn, _subscriber, seen ->
+      {:ok, conn, [], MapSet.put(seen, "callback-block"), [second]}
+    end
+
+    provider =
+      if acquisition == :request_response, do: FailureProvider, else: FailureProvider.Streaming
+
+    runner =
+      run_async(provider,
+        poll_fun: poll,
+        push_fun: push,
+        reconnect_fun: reconnect,
+        handler: BoundaryEventHandler,
+        context: test_pid,
+        deadline: now() + 300
+      )
+
+    assert_receive {:boundary_blocked, _}, 2_000
+    assert_receive {:returned, ^runner, {:error, :timeout}, result, []}, 2_000
+    assert result.turns == 2
+    assert result.usage.input_tokens == 24
+    assert result.usage.output_tokens == 8
+    assert result.usage.cache_read_input_tokens == 6
+    assert result.usage.cache_creation_input_tokens == 4
+    assert result.in_flight == :none
+    assert result.stop_reason == "second-stop"
+    assert result.events == [first, second]
   end
 
   defp run_async(provider, opts) do
