@@ -34,7 +34,9 @@ defmodule ReqManagedAgents.Test.ExecutionUsageFixture do
       "guard-stop" =>
         result(
           fn _ -> {:ok, response(known_usage(), false)} end,
-          {:error, {:halted, :fixture_guard}}, turn_guard: fn _ -> {:halt, :fixture_guard} end),
+          {:error, {:halted, :fixture_guard}},
+          turn_guard: fn _ -> {:halt, :fixture_guard} end
+        ),
       "first-attempt-timeout" => first_timeout,
       "partial-error" => result(chat, {:error, :fixture_transport_down})
     }
