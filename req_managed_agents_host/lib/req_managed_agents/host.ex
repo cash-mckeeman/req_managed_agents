@@ -35,6 +35,11 @@ defmodule ReqManagedAgents.Host do
   `opts` is validated into a `ReqManagedAgents.Host.Config` (`:provider`, `:handler`, and
   `:store` are required); an invalid config short-circuits with `{:error, {:invalid_config,
   key}}` before any session work happens.
+
+  `provider_opts: [notify: pid]` binds the notification recipient for this call,
+  including when reusing a live server. An acknowledged request's failure result
+  reaches that recipient before this function returns `{:error, reason}`.
+  Only successful session handles and transcripts are persisted.
   """
   @spec send_message(String.t(), String.t(), keyword()) ::
           {:ok, ReqManagedAgents.SessionResult.t()} | {:error, term()}
@@ -42,7 +47,7 @@ defmodule ReqManagedAgents.Host do
       when is_binary(external_id) and is_binary(message) do
     with {:ok, %Config{} = config} <- Config.new(opts),
          {:ok, pid} <- SessionSupervisor.start_or_get(external_id, config) do
-      SessionServer.deliver(pid, message)
+      SessionServer.deliver(pid, message, config.provider_opts[:notify])
     end
   end
 end

@@ -2,6 +2,12 @@
 
 All notable changes to `req_managed_agents_host` are documented here.
 
+## Unreleased
+
+- Bind `provider_opts[:notify]` per `send_message/3` call when reusing a live
+  server. Post-open failure results reach the external recipient before the
+  unchanged error return; failed transcripts and handles remain unpersisted.
+
 ## v0.13.0
 
 - Requires `{:req_managed_agents, "~> 0.13.0"}` (was `~> 0.12.0`). No host API or

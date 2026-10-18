@@ -64,8 +64,15 @@ defmodule ReqManagedAgents.Session do
 
   `run/2` also accepts `:deadline`, an absolute `System.monotonic_time(:millisecond)`
   value bounding local initialization, execution waits and owned-process teardown.
-  Deadline runs terminate their session and workers if their caller dies; absent
-  `:deadline`, `:timeout` retains its existing semantics.
+  Caller death terminates the session and owned workers. Without `:deadline`,
+  `:timeout` starts after initialization.
+
+  After a successful open is acknowledged, `:notify` receives one
+  `{:managed_agents_session, result}` per request, including local errors, before
+  `run/2` returns. Error results retain accepted usage/events with
+  `terminal: :terminated`; synchronous error tuples are unchanged. Failed or
+  interrupted initialization has no fabricated result and may still have
+  contacted the provider. See `ReqManagedAgents.SessionResult.in_flight`.
 
   Provider-specific opts (e.g. `:agent_id`/`:environment_id`, `:harness_arn`/`:runtime_session_id`,
   `:session_id` to resume) are forwarded to the provider's `open/2`. `:agent`/`:environment` accept
@@ -92,180 +99,113 @@ defmodule ReqManagedAgents.Session do
   }
 
   alias ReqManagedAgents.Evidence.Recorder
+  alias ReqManagedAgents.Session.Completion
+  alias ReqManagedAgents.Session.Completion.Request
 
   @max_tool_concurrency 8
 
   @spec run(module(), keyword()) :: {:ok, ReqManagedAgents.SessionResult.t()} | {:error, term()}
   def run(provider, opts) do
-    case Keyword.fetch(opts, :deadline) do
-      :error -> run_without_deadline(provider, opts)
-      {:ok, deadline} when is_integer(deadline) -> run_with_deadline(provider, opts, deadline)
-      {:ok, _invalid} -> {:error, {:invalid_opts, :deadline}}
-    end
-  end
-
-  defp run_with_deadline(provider, opts, deadline) do
-    if remaining(deadline) == 0 do
-      {:error, :timeout}
-    else
-      caller = self()
-      token = make_ref()
-      {guard, monitor} = spawn_monitor(fn -> deadline_guard(caller, token, deadline) end)
-
-      register_worker = fn ->
-        own_deadline_process([deadline_owner: {guard, token}], :own_worker, self())
-      end
-
-      opts =
-        opts
-        |> Keyword.put(:caller, caller)
-        |> Keyword.put(:deadline_owner, {guard, token})
-        |> Keyword.put(:deadline_own_worker, register_worker)
+    with :ok <- validate_deadline(opts),
+         {:ok, owner} <-
+           Completion.start(caller: self(), notify: opts[:notify], deadline: opts[:deadline]) do
+      monitor = Process.monitor(owner)
+      opts = completion_opts(opts, owner) |> Keyword.put(:caller, self())
 
       try do
-        case GenServer.start(__MODULE__, {provider, opts}, timeout: remaining(deadline)) do
-          {:ok, pid} ->
-            await_deadline_result(pid, deadline)
+        case GenServer.start(__MODULE__, {provider, opts}, start_options(opts)) do
+          {:ok, _pid} ->
+            unless opts[:deadline], do: Completion.arm_timeout(owner, opts[:timeout] || 600_000)
 
           {:error, reason} ->
-            if remaining(deadline) == 0, do: {:error, :timeout}, else: {:error, reason}
+            Completion.abort(owner, reason)
         end
+
+        await_completion(owner, monitor)
       after
-        send(guard, {:stop, token})
-        receive do: ({:DOWN, ^monitor, :process, ^guard, _} -> :ok)
+        Completion.abort(owner, :shutdown)
+        Process.demonitor(monitor, [:flush])
       end
     end
   end
 
-  defp await_deadline_result(pid, deadline) do
-    monitor = Process.monitor(pid)
-
-    try do
-      receive do
-        {:session_result, ^pid, result} ->
-          if remaining(deadline) == 0, do: {:error, :timeout}, else: result
-
-        {:DOWN, ^monitor, :process, ^pid, reason} ->
-          if remaining(deadline) == 0, do: {:error, :timeout}, else: {:error, reason}
-      after
-        remaining(deadline) -> {:error, :timeout}
-      end
-    after
-      Process.demonitor(monitor, [:flush])
-    end
-  end
-
-  defp deadline_guard(caller, token, deadline) do
-    monitor = Process.monitor(caller)
-    guard_deadline(monitor, token, deadline, nil, [])
-  end
-
-  defp guard_deadline(caller_monitor, token, deadline, session, workers) do
+  defp await_completion(owner, monitor) do
     receive do
-      {:own_session, ^token, pid, registering} ->
-        monitor = Process.monitor(pid)
-
-        if remaining(deadline) == 0 do
-          reap_deadline_processes({pid, monitor}, workers)
-        else
-          send(registering, {:owned, token, pid})
-          guard_deadline(caller_monitor, token, deadline, {pid, monitor}, workers)
-        end
-
-      {:own_worker, ^token, pid, registering} ->
-        workers =
-          if List.keymember?(workers, pid, 0),
-            do: workers,
-            else: [{pid, Process.monitor(pid)} | workers]
-
-        if remaining(deadline) == 0 do
-          reap_deadline_processes(session, workers)
-        else
-          send(registering, {:owned, token, pid})
-          guard_deadline(caller_monitor, token, deadline, session, workers)
-        end
-
-      {:DOWN, ^caller_monitor, :process, _pid, _reason} ->
-        reap_deadline_processes(session, workers)
-
-      {:DOWN, monitor, :process, pid, _reason} ->
-        if session == {pid, monitor},
-          do: reap_deadline_processes(nil, workers),
-          else:
-            guard_deadline(
-              caller_monitor,
-              token,
-              deadline,
-              session,
-              List.keydelete(workers, pid, 0)
-            )
-
-      {:stop, ^token} ->
-        reap_deadline_processes(session, workers)
-    after
-      remaining(deadline) -> reap_deadline_processes(session, workers)
+      {:session_completion, ^owner, result} -> result
+      {:DOWN, ^monitor, :process, ^owner, reason} -> {:error, reason}
     end
   end
 
-  defp reap_deadline_processes(session, workers) do
-    owned = if session, do: [session | workers], else: workers
-    Enum.each(owned, fn {pid, _} -> Process.exit(pid, :kill) end)
+  defp validate_deadline(opts) do
+    case Keyword.fetch(opts, :deadline) do
+      :error ->
+        :ok
 
-    Enum.each(owned, fn {pid, monitor} ->
-      receive do: ({:DOWN, ^monitor, :process, ^pid, _} -> :ok)
-    end)
+      {:ok, deadline} when is_integer(deadline) ->
+        if remaining(deadline) == 0, do: {:error, :timeout}, else: :ok
+
+      {:ok, _invalid} ->
+        {:error, {:invalid_opts, :deadline}}
+    end
+  end
+
+  defp completion_opts(opts, owner) do
+    opts
+    |> Keyword.put(:completion_owner, owner)
+    |> Keyword.put(:deadline_own_worker, fn -> own_process(owner, :worker, self()) end)
+  end
+
+  defp start_options(opts) do
+    if opts[:deadline], do: [timeout: remaining(opts[:deadline])], else: []
   end
 
   defp own_deadline_process(opts, kind, pid) when is_pid(pid) do
-    case opts[:deadline_owner] do
-      {guard, token} ->
-        monitor = Process.monitor(guard)
-        send(guard, {kind, token, pid, self()})
-
-        receive do
-          {:owned, ^token, ^pid} -> Process.demonitor(monitor, [:flush])
-          {:DOWN, ^monitor, :process, ^guard, _} -> Process.exit(self(), :kill)
-        end
-
-      nil ->
-        :ok
-    end
+    kind = if kind == :own_session, do: :session, else: :worker
+    own_process(opts[:completion_owner], kind, pid)
   end
 
   defp own_deadline_process(_opts, _kind, _pid), do: :ok
-  defp remaining(deadline), do: max(0, deadline - System.monotonic_time(:millisecond))
 
-  defp run_without_deadline(provider, opts) do
-    # start (NOT start_link) + monitor: an open/init failure or an unexpected GenServer death
-    # surfaces as a value here instead of a link exit that would kill the caller.
-    case GenServer.start(__MODULE__, {provider, Keyword.put(opts, :caller, self())}) do
-      {:ok, pid} ->
-        mref = Process.monitor(pid)
-        timeout = opts[:timeout] || 600_000
+  defp own_process(owner, kind, pid) do
+    result =
+      case kind do
+        :session -> Completion.register_session(owner, pid)
+        :worker -> Completion.register_worker(owner, pid)
+      end
 
-        receive do
-          {:session_result, ^pid, result} ->
-            Process.demonitor(mref, [:flush])
-            result
-
-          {:DOWN, ^mref, :process, ^pid, reason} ->
-            {:error, reason}
-        after
-          timeout ->
-            Process.demonitor(mref, [:flush])
-            GenServer.stop(pid, :normal)
-            {:error, :timeout}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+    completion_ack(result)
   end
+
+  defp completion_ack(:ok), do: :ok
+  defp completion_ack({:error, :closed}), do: exit(:normal)
+  defp remaining(deadline), do: max(0, deadline - System.monotonic_time(:millisecond))
 
   @doc "Start a long-lived session. Unlike run/2, it stays alive after a terminal for follow-ups."
   @spec start_link(module(), keyword()) :: GenServer.on_start()
   def start_link(provider, opts) do
-    GenServer.start_link(__MODULE__, {provider, opts}, name: opts[:name])
+    with :ok <- validate_deadline(opts),
+         {:ok, owner} <-
+           Completion.start(
+             caller: self(),
+             reply_to: nil,
+             notify: opts[:notify],
+             deadline: opts[:deadline]
+           ) do
+      opts = completion_opts(opts, owner)
+
+      case GenServer.start_link(
+             __MODULE__,
+             {provider, opts},
+             [name: opts[:name]] ++ start_options(opts)
+           ) do
+        {:ok, _pid} = ok ->
+          ok
+
+        {:error, reason} = error ->
+          Completion.abort(owner, reason)
+          error
+      end
+    end
   end
 
   @doc "Return a child_spec for a live session."
@@ -435,7 +375,6 @@ defmodule ReqManagedAgents.Session do
           handler: Keyword.fetch!(opts, :handler),
           context: opts[:context],
           caller: opts[:caller],
-          notify: opts[:notify],
           meta: meta,
           ref: provider.ref(conn),
           consumer: provider.consumer(conn),
@@ -464,6 +403,7 @@ defmodule ReqManagedAgents.Session do
           pending_user_message: pending_user_message(provider, conn, opts)
         }
 
+        state = begin_request(state)
         {:ok, state, {:continue, if(provider.resumed?(conn), do: :resume, else: :maybe_kickoff)}}
 
       # Surface the provider's error verbatim (e.g. {:create_session_failed, _}) — no extra wrapping.
@@ -528,11 +468,33 @@ defmodule ReqManagedAgents.Session do
     {:noreply, %{s | kicked_off: :resuming}}
   end
 
+  def handle_continue(:next_message, s) do
+    [text | rest] = s.request.pending_messages
+    s = %{s | request: %{s.request | pending_messages: rest}}
+    start_message(s, text)
+  end
+
   @impl true
   def handle_info({:managed_agents, ref, :connected}, %{ref: ref, kicked_off: false} = s),
     do: kickoff(s)
 
   def handle_info({:managed_agents, ref, :connected}, %{ref: ref} = s), do: {:noreply, s}
+
+  def handle_info(
+        {:managed_agents, ref, {:event, ev}},
+        %State{ref: ref, request: %Request{generation: nil}} = s
+      ) do
+    Recorder.native(native_evidence(s), ev)
+    id = ev["id"]
+
+    if is_binary(id) and MapSet.member?(s.seen, id) do
+      {:noreply, s}
+    else
+      forward_with_delta(s, ev)
+      seen = if is_binary(id), do: MapSet.put(s.seen, id), else: s.seen
+      {:noreply, %{s | seen: seen}}
+    end
+  end
 
   def handle_info({:managed_agents, ref, {:event, ev}}, %{ref: ref} = s) do
     Recorder.native(native_evidence(s), ev)
@@ -542,10 +504,8 @@ defmodule ReqManagedAgents.Session do
       # Already processed (re-delivered after a reconnect) — skip.
       {:noreply, s}
     else
-      s = %{s | seen: if(is_binary(id), do: MapSet.put(s.seen, id), else: s.seen)}
-      forward_with_delta(s, ev)
-      s = %{s | turn_events: s.turn_events ++ [ev]}
-      if s.provider.turn_boundary?(ev), do: handle_turn(s, s.turn_events), else: {:noreply, s}
+      seen = if is_binary(id), do: MapSet.put(s.seen, id), else: s.seen
+      handle_stream_event(%{s | seen: seen}, ev)
     end
   end
 
@@ -563,6 +523,7 @@ defmodule ReqManagedAgents.Session do
     do: stop_error(s, reason)
 
   def handle_info(:reconnect, s) do
+    s = mark_in_flight(s)
     s = prepare_reconnect_evidence(s)
 
     case safe_reconnect(s) do
@@ -595,11 +556,7 @@ defmodule ReqManagedAgents.Session do
           # fresh request, so it must not inherit turns/usage accumulated by an earlier
           # pending-tool-use redrive on the same resume, or max_turns can trip early.
           s.pending_user_message ->
-            deliver_user_message(
-              reset_acc(%{s | turns: 0, pending_user_message: nil}),
-              s.pending_user_message,
-              false
-            )
+            deliver_pending_message(s)
 
           resuming? ->
             {:noreply, s}
@@ -638,14 +595,21 @@ defmodule ReqManagedAgents.Session do
     {:noreply, %{s | live_forwarded: s.live_forwarded + 1}}
   end
 
-  def handle_info({:turn, {:ok, events, conn}}, s) do
+  def handle_info(
+        {:turn, generation, {:ok, events, conn}},
+        %State{request: %Request{generation: generation}} = s
+      ) do
     # Batch forwarding only when nothing was live-forwarded this turn (a live
     # provider already delivered each event as it arrived).
-    if s.live_forwarded == 0, do: Enum.each(events, &forward_with_delta(s, &1))
-    handle_turn(%{s | conn: conn, live_forwarded: 0, poll_task: nil}, events)
+    forward = if s.live_forwarded == 0, do: events, else: []
+    handle_turn(%{s | conn: conn, live_forwarded: 0, poll_task: nil}, events, forward)
   end
 
-  def handle_info({:turn, {:error, reason}}, s), do: stop_error(s, reason)
+  def handle_info(
+        {:turn, generation, {:error, reason}},
+        %State{request: %Request{generation: generation}} = s
+      ),
+      do: stop_error(s, reason)
 
   # Linked-Task exits: a clean exit is fine; an abnormal consumer-task crash drives reconnect
   # (live) or surfaces an error (sync); any other linked exit (parent/supervisor) stops us.
@@ -667,22 +631,41 @@ defmodule ReqManagedAgents.Session do
   def handle_info(_other, s), do: {:noreply, s}
 
   @impl true
-  def handle_call({:send_event, event}, _from, %{mode: :streaming} = s),
-    do: {:reply, s.provider.push_input(s.conn, [event]), s}
+  def handle_call({:send_event, event}, _from, %{mode: :streaming} = s) do
+    started? = is_nil(s.request.generation)
+    s = if started?, do: begin_request(s, s.request.snapshot), else: s
+    s = begin_work(s)
+
+    case s.provider.push_input(s.conn, [event]) do
+      {:error, reason} = result when started? ->
+        case live_push_error(s, reason) do
+          {:noreply, s} -> {:reply, result, s}
+          {:noreply, s, next} -> {:reply, result, s, next}
+        end
+
+      result ->
+        {:reply, result, s}
+    end
+  end
 
   def handle_call({:send_event, _event}, _from, s), do: {:reply, {:error, :unsupported}, s}
 
   @impl true
   # A follow-up message starts a fresh request: reset the per-request turn counter and accumulators
   # so max_turns bounds a runaway tool loop within one request, not the session's whole lifetime.
-  def handle_cast({:message, text}, s),
-    do: deliver_user_message(reset_acc(%{s | turns: 0}), text)
+  def handle_cast({:message, text}, %State{request: %Request{generation: generation}} = s)
+      when is_reference(generation) do
+    request = %{s.request | pending_messages: s.request.pending_messages ++ [text]}
+    {:noreply, %{s | request: request}}
+  end
+
+  def handle_cast({:message, text}, s), do: start_message(s, text)
+
+  defp start_message(s, text),
+    do: deliver_user_message(begin_request(reset_acc(%{s | turns: 0})), text)
 
   @impl true
-  # Session traps exits, so this runs on every stop — including run/2's timeout
-  # stop. Linked poll/consumer tasks ignore a :normal exit signal, so an
-  # in-flight AgentCore invoke (or SSE consumer) would otherwise keep its HTTP
-  # stream — and server-side billing — alive after the caller got :timeout.
+  # Linked workers ignore a normal exit; ordinary Session shutdown must reap them too.
   def terminate(_reason, s) do
     shutdown(s.poll_task)
     shutdown(s.consumer)
@@ -713,13 +696,25 @@ defmodule ReqManagedAgents.Session do
         usage: Usage.zero()
     }
 
-  defp kickoff(s), do: drive(%{s | kicked_off: true}, s.provider.kickoff_input(s.opts))
+  defp kickoff(s) do
+    s = begin_work(%{s | kicked_off: true})
+    drive(s, s.provider.kickoff_input(s.opts))
+  end
 
   # The one send path for a plain user-text turn: build the provider's user.message input and
   # drive a fresh turn with it. Shared by a live follow-up (handle_cast {:message, …}) and a
   # resume that carries a new :prompt (handle_info(:reconnect, …) — issue #66) — one send path,
   # not two copies.
+  defp deliver_pending_message(s) do
+    text = s.pending_user_message
+    s = reset_acc(%{s | turns: 0, pending_user_message: nil})
+    s = if is_nil(s.request.generation), do: begin_request(s), else: s
+    deliver_user_message(s, text, false)
+  end
+
   defp deliver_user_message(s, text, new_invocation? \\ true) do
+    s = begin_work(s)
+
     evidence =
       if new_invocation?,
         do: Recorder.begin(s.opts[:evidence_recorder], s.provider),
@@ -731,6 +726,8 @@ defmodule ReqManagedAgents.Session do
 
   # ── acquire a turn (the ONLY mode-specific step) ──────────────────────────────
   defp drive(%{mode: :request_response} = s, input) do
+    s = begin_work(s)
+    generation = s.request.generation
     parent = self()
     %{provider: p, conn: c} = s
 
@@ -747,7 +744,7 @@ defmodule ReqManagedAgents.Session do
               e -> {:error, {:provider_error, e}}
             end
 
-          send(parent, {:turn, result})
+          send(parent, {:turn, generation, result})
         catch
           :exit, :normal ->
             :ok
@@ -764,6 +761,7 @@ defmodule ReqManagedAgents.Session do
   end
 
   defp drive(%{mode: :streaming} = s, input) do
+    s = begin_work(s)
     s = ensure_stream_attempt(s)
 
     case s.provider.push_input(s.conn, input) do
@@ -786,7 +784,8 @@ defmodule ReqManagedAgents.Session do
     )
 
     s = finish_evidence(s, {:error, reason})
-    {:noreply, %{s | turn_events: []}}
+    s = complete_request(s, {:error, reason})
+    live_reply(%{s | turn_events: []})
   end
 
   defp ensure_stream_attempt(%State{evidence: nil} = s), do: s
@@ -803,28 +802,55 @@ defmodule ReqManagedAgents.Session do
 
   # History has already been recorded with historical provenance and deduplicated
   # by the provider. Process it before queued stream events can observe the grown seen set.
-  defp recover_events(s, events) do
-    Enum.reduce_while(events, {:noreply, s}, fn ev, {:noreply, s} ->
-      forward_with_delta(s, ev)
-      s = %{s | turn_events: s.turn_events ++ [ev]}
+  defp recover_events(%State{request: %Request{generation: nil}} = s, _events),
+    do: {:noreply, s}
 
-      result =
-        if s.provider.turn_boundary?(ev),
-          do: handle_turn(s, s.turn_events),
-          else: {:noreply, s}
+  defp recover_events(s, events), do: recover_batch(s, events)
 
-      case result do
-        {:noreply, _} -> {:cont, result}
-        {:stop, _, _} -> {:halt, result}
-      end
-    end)
+  defp recover_batch(s, []), do: {:noreply, s}
+
+  defp recover_batch(%State{request: %Request{generation: nil}} = s, events) do
+    observe_recovery_tail(s, events)
+    {:noreply, s}
   end
 
+  defp recover_batch(s, [ev | rest]) do
+    result = handle_stream_event(s, ev)
+
+    case result do
+      {:noreply, s} ->
+        recover_batch(s, rest)
+
+      {:noreply, s, next} ->
+        observe_recovery_tail(s, rest)
+        {:noreply, s, next}
+
+      {:stop, _, _} ->
+        result
+    end
+  end
+
+  defp observe_recovery_tail(s, events), do: Enum.each(events, &forward_with_delta(s, &1))
+
   # ── shared per-turn handling ──────────────────────────────────────────────────
-  defp handle_turn(s, turn_events) do
+  defp handle_stream_event(s, ev) do
+    s = checkpoint_partial(%{s | turn_events: s.turn_events ++ [ev]})
+
+    if s.provider.turn_boundary?(ev) do
+      handle_turn(s, s.turn_events, [ev])
+    else
+      forward_with_delta(s, ev)
+      {:noreply, s}
+    end
+  end
+
+  defp handle_turn(s, turn_events, forward) do
     s = %{s | events: s.events ++ turn_events, turns: s.turns + 1, turn_events: []}
     tr = s.provider.normalize(turn_events)
     s = accumulate(s, tr)
+    s = checkpoint(s, %{session_result(s, tr, tr.terminal) | in_flight: :none})
+    s = checkpoint(s, %{s.request.snapshot | transcript: transcript_of(s)})
+    Enum.each(forward, &forward_with_delta(s, &1))
     emit_tool_use_telemetry(s, tr.custom_tool_uses)
 
     # The frozen governance hook: plain data in, plain verdict out. Hosts compose
@@ -834,7 +860,6 @@ defmodule ReqManagedAgents.Session do
         continue_turn(s, tr)
 
       {:halt, reason} ->
-        notify(s, session_result(s, tr, :terminated))
         stop_error(s, {:halted, reason})
     end
   end
@@ -852,7 +877,6 @@ defmodule ReqManagedAgents.Session do
   defp continue_turn(s, tr) do
     cond do
       s.turns > s.max_turns ->
-        notify(s, session_result(s, tr, :terminated))
         stop_error(s, {:max_turns_exceeded, s.max_turns})
 
       tr.terminal == :requires_action ->
@@ -893,7 +917,6 @@ defmodule ReqManagedAgents.Session do
   defp handle_empty_requires_action(s, tr) do
     case recoverable_tool_uses(s) do
       [] ->
-        notify(s, session_result(s, tr, :terminated))
         stop_error(s, {:unresolved_requires_action, tr.stop_reason})
 
       recovered ->
@@ -968,9 +991,12 @@ defmodule ReqManagedAgents.Session do
   end
 
   defp run_tools(custom_tool_uses, s) do
+    s = begin_work(s)
+
     custom_tool_uses
     |> Task.async_stream(
       fn %ToolUse{id: id, name: name, input: input} ->
+        own_deadline_process(s.opts, :own_worker, self())
         Tools.execute(s.handler, id, name, input, s.context, s.info, s.meta, evidence_attempt(s))
       end,
       max_concurrency: @max_tool_concurrency,
@@ -1046,7 +1072,7 @@ defmodule ReqManagedAgents.Session do
       usage: s.usage,
       turns: s.turns,
       events: s.events,
-      transcript: transcript_of(s)
+      transcript: s.request.snapshot.transcript
     }
   end
 
@@ -1059,8 +1085,7 @@ defmodule ReqManagedAgents.Session do
       Map.put(s.meta, :terminal, tr.terminal)
     )
 
-    result = session_result(s, tr, tr.terminal)
-    notify(s, result)
+    result = %{session_result(s, tr, tr.terminal) | in_flight: :none}
     # Real terminal reached — reset the reconnect backoff for any subsequent live activity.
     reply(%{s | reconnect_attempts: 0}, {:ok, result})
   end
@@ -1136,21 +1161,51 @@ defmodule ReqManagedAgents.Session do
 
   # A synchronous run/2 caller gets the result and the GenServer stops; a live session
   # (no caller) stays alive after a non-error terminal to accept follow-up messages.
-  defp reply(%{caller: caller} = s, result) when is_pid(caller) do
+  defp reply(s, result) do
     s = finish_evidence(s, result)
-    send(caller, {:session_result, self(), result})
-    {:stop, :normal, s}
+    s = complete_request(s, result)
+    if s.caller || match?({:error, _}, result), do: {:stop, :normal, s}, else: live_reply(s)
   end
 
-  defp reply(s, {:error, _} = result) do
-    s = finish_evidence(s, result)
-    {:stop, :normal, s}
+  defp live_reply(%State{request: %Request{pending_messages: []}} = s), do: {:noreply, s}
+  defp live_reply(s), do: {:noreply, s, {:continue, :next_message}}
+
+  defp complete_request(s, result) do
+    snapshot =
+      case result do
+        {:ok, snapshot} -> snapshot
+        {:error, _reason} -> %{s.request.snapshot | terminal: :terminated}
+      end
+
+    completion_ack(Completion.finish(s.request.owner, s.request.generation, result, snapshot))
+    %{s | request: %{s.request | generation: nil, snapshot: snapshot}}
   end
 
-  defp reply(s, {:ok, _} = result) do
-    s = finish_evidence(s, result)
-    {:noreply, s}
+  defp begin_request(s),
+    do: begin_request(s, %SessionResult{session_id: s.info.session_id, usage: Usage.zero()})
+
+  defp begin_request(s, snapshot) do
+    pending = if s.request, do: s.request.pending_messages, else: []
+
+    request =
+      Request.new(s.opts[:completion_owner], make_ref(), snapshot, pending_messages: pending)
+
+    completion_ack(Completion.begin_request(request.owner, request.generation, snapshot))
+    %{s | request: request}
   end
+
+  defp checkpoint(s, snapshot) do
+    completion_ack(Completion.checkpoint(s.request.owner, s.request.generation, snapshot))
+    %{s | request: %{s.request | snapshot: snapshot}}
+  end
+
+  defp mark_in_flight(%State{request: %Request{generation: nil}} = s), do: s
+  defp mark_in_flight(s), do: begin_work(s)
+  defp begin_work(s), do: checkpoint(s, %{s.request.snapshot | in_flight: :unknown})
+
+  defp checkpoint_partial(s),
+    do:
+      checkpoint(s, %{s.request.snapshot | events: s.events ++ s.turn_events, in_flight: :unknown})
 
   # A Converse-envelope event is a single-key map (%{"messageStop" => …}).
   defp envelope_type(%{} = ev), do: ev |> Map.keys() |> List.first()
@@ -1208,10 +1263,6 @@ defmodule ReqManagedAgents.Session do
     end
   end
 
-  defp notify(%{notify: pid}, payload) when is_pid(pid),
-    do: send(pid, {:managed_agents_session, payload})
-
-  defp notify(_s, _payload), do: :ok
   defoverridable handle_info: 2, handle_call: 3, handle_cast: 2
 
   @impl true

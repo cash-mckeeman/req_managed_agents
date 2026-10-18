@@ -5,6 +5,7 @@ defmodule ReqManagedAgents.Session.State do
 
   defstruct [
     :provider,
+    :request,
     :evidence,
     :mode,
     :conn,
@@ -13,7 +14,6 @@ defmodule ReqManagedAgents.Session.State do
     :handler,
     :context,
     :caller,
-    :notify,
     :meta,
     :ref,
     :consumer,
@@ -39,6 +39,7 @@ defmodule ReqManagedAgents.Session.State do
 
   @type t :: %__MODULE__{
           provider: module(),
+          request: ReqManagedAgents.Session.Completion.Request.t() | nil,
           evidence: ReqManagedAgents.Evidence.Recorder.Context.t() | nil,
           mode: :streaming | :request_response,
           conn: term(),
@@ -47,11 +48,10 @@ defmodule ReqManagedAgents.Session.State do
           handler: module() | Tools.handler_fun(),
           context: term() | nil,
           caller: pid() | nil,
-          notify: pid() | nil,
           meta: map(),
           ref: reference() | nil,
           consumer: pid() | nil,
-          poll_task: Task.t() | nil,
+          poll_task: pid() | nil,
           turn_guard: (map() -> :cont | {:halt, term()}) | nil,
           enforced_terminal_tool: String.t() | nil,
           pending_user_message: String.t() | nil,

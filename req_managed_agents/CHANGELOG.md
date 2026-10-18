@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Acknowledged request completion preserves accumulated results through local
+  errors, timeout and Session death. Notifications precede the unchanged
+  synchronous return; `SessionResult.in_flight` records possible unmeasured work.
+  Live messages queue until the active request completes.
+
 - Canonical cache-read and cache-creation counts, input-token basis and
   measurement completeness in `Usage`, with validated construction and shared
   accumulation. Provider and Local adapter projections preserve available facts;

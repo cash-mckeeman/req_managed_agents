@@ -55,6 +55,12 @@ defmodule ReqManagedAgents.Host.SessionServer do
   @spec deliver(GenServer.server(), String.t()) :: {:ok, SessionResult.t()} | {:error, term()}
   def deliver(server, message), do: GenServer.call(server, {:send, message}, :infinity)
 
+  @doc false
+  @spec deliver(GenServer.server(), String.t(), pid() | nil) ::
+          {:ok, SessionResult.t()} | {:error, term()}
+  def deliver(server, message, notify),
+    do: GenServer.call(server, {:send, message, notify}, :infinity)
+
   @doc "The `Registry`-backed name a server for `external_id` runs under."
   @spec via(Locator.external_id()) :: {:via, Registry, {module(), Locator.external_id()}}
   def via(external_id), do: {:via, Registry, {@registry, external_id}}
@@ -64,9 +70,12 @@ defmodule ReqManagedAgents.Host.SessionServer do
     do: {:ok, %__MODULE__{external_id: external_id, config: config}}
 
   @impl true
-  def handle_call({:send, message}, _from, %__MODULE__{} = state) do
+  def handle_call({:send, message}, from, %__MODULE__{config: config} = state),
+    do: handle_call({:send, message, config.provider_opts[:notify]}, from, state)
+
+  def handle_call({:send, message, notify}, _from, %__MODULE__{} = state) do
     state = cancel_idle(state)
-    result = run_turn(state, message)
+    result = run_turn(state, message, notify)
 
     if match?({:ok, _}, result) do
       persist(state, result)
@@ -81,9 +90,10 @@ defmodule ReqManagedAgents.Host.SessionServer do
 
   # ── turn ────────────────────────────────────────────────────────────────
 
-  @spec run_turn(t(), String.t()) :: {:ok, SessionResult.t()} | {:error, term()}
-  defp run_turn(%__MODULE__{config: cfg, external_id: external_id}, message) do
+  @spec run_turn(t(), String.t(), pid() | nil) :: {:ok, SessionResult.t()} | {:error, term()}
+  defp run_turn(%__MODULE__{config: cfg, external_id: external_id}, message, notify) do
     base = [prompt: message, handler: cfg.handler, timeout: cfg.timeout_ms]
+    provider_opts = Keyword.put(cfg.provider_opts, :notify, notify)
 
     # history_opts precedes cfg.provider_opts here — the opposite of agent_opts' never-shadow
     # principle below: a persisted transcript's history: wins over (shadows) any explicit
@@ -91,12 +101,12 @@ defmodule ReqManagedAgents.Host.SessionServer do
     {lead, provider_opts} =
       case existing_session_id(cfg.store, external_id) do
         nil ->
-          {base, cfg.provider_opts}
+          {base, provider_opts}
 
         # A budget caps a fresh session and cannot be added to an existing one, so only
         # the turn that creates the session carries it.
         session_id ->
-          {[{:session_id, session_id} | base], Keyword.delete(cfg.provider_opts, :budget)}
+          {[{:session_id, session_id} | base], Keyword.delete(provider_opts, :budget)}
       end
 
     opts = lead ++ history_opts(cfg.store, external_id) ++ agent_opts(cfg) ++ provider_opts

@@ -1,0 +1,215 @@
+{
+  "first-attempt-timeout": {
+    "events": [],
+    "text": "",
+    "usage": {
+      "raw": [],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "input_token_basis": "none",
+      "complete?": true
+    },
+    "terminal": "terminated",
+    "session_id": "fixture-session",
+    "stop_reason": null,
+    "in_flight": "unknown",
+    "custom_tool_uses": [],
+    "server_tool_uses": [],
+    "turns": 0,
+    "transcript": null
+  },
+  "guard-stop": {
+    "events": [
+      {
+        "finish_reason": "stop",
+        "message": {
+          "content": "done"
+        },
+        "type": "local.model_response",
+        "usage": {
+          "completion_tokens": 4,
+          "input_token_basis": "uncached",
+          "prompt_tokens": 12,
+          "prompt_tokens_details": {
+            "cache_write_tokens": 2,
+            "cached_tokens": 3
+          }
+        }
+      }
+    ],
+    "text": "done",
+    "usage": {
+      "raw": [
+        {
+          "completion_tokens": 4,
+          "input_token_basis": "uncached",
+          "prompt_tokens": 12,
+          "prompt_tokens_details": {
+            "cache_write_tokens": 2,
+            "cached_tokens": 3
+          }
+        }
+      ],
+      "input_tokens": 12,
+      "output_tokens": 4,
+      "cache_read_input_tokens": 3,
+      "cache_creation_input_tokens": 2,
+      "input_token_basis": "uncached",
+      "complete?": true
+    },
+    "terminal": "terminated",
+    "session_id": "fixture-session",
+    "stop_reason": "stop",
+    "in_flight": "none",
+    "custom_tool_uses": [],
+    "server_tool_uses": [],
+    "turns": 1,
+    "transcript": [
+      {
+        "content": "go",
+        "role": "user"
+      },
+      {
+        "content": "done"
+      }
+    ]
+  },
+  "partial-error": {
+    "events": [
+      {
+        "finish_reason": "tool_calls",
+        "message": {
+          "content": null,
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{}",
+                "name": "echo"
+              },
+              "id": "tool-1"
+            }
+          ]
+        },
+        "type": "local.model_response",
+        "usage": {
+          "completion_tokens": 4,
+          "input_token_basis": "uncached",
+          "prompt_tokens": 12,
+          "prompt_tokens_details": {
+            "cache_write_tokens": 2,
+            "cached_tokens": 3
+          }
+        }
+      }
+    ],
+    "text": "",
+    "usage": {
+      "raw": [
+        {
+          "completion_tokens": 4,
+          "input_token_basis": "uncached",
+          "prompt_tokens": 12,
+          "prompt_tokens_details": {
+            "cache_write_tokens": 2,
+            "cached_tokens": 3
+          }
+        }
+      ],
+      "input_tokens": 12,
+      "output_tokens": 4,
+      "cache_read_input_tokens": 3,
+      "cache_creation_input_tokens": 2,
+      "input_token_basis": "uncached",
+      "complete?": true
+    },
+    "terminal": "terminated",
+    "session_id": "fixture-session",
+    "stop_reason": "tool_calls",
+    "in_flight": "unknown",
+    "custom_tool_uses": [
+      {
+        "id": "tool-1",
+        "input": {},
+        "name": "echo"
+      }
+    ],
+    "server_tool_uses": [],
+    "turns": 1,
+    "transcript": [
+      {
+        "content": "go",
+        "role": "user"
+      },
+      {
+        "content": null,
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{}",
+              "name": "echo"
+            },
+            "id": "tool-1"
+          }
+        ]
+      }
+    ]
+  },
+  "success": {
+    "events": [
+      {
+        "finish_reason": "stop",
+        "message": {
+          "content": "done"
+        },
+        "type": "local.model_response",
+        "usage": {
+          "completion_tokens": 4,
+          "input_token_basis": "uncached",
+          "prompt_tokens": 12,
+          "prompt_tokens_details": {
+            "cache_write_tokens": 2,
+            "cached_tokens": 3
+          }
+        }
+      }
+    ],
+    "text": "done",
+    "usage": {
+      "raw": [
+        {
+          "completion_tokens": 4,
+          "input_token_basis": "uncached",
+          "prompt_tokens": 12,
+          "prompt_tokens_details": {
+            "cache_write_tokens": 2,
+            "cached_tokens": 3
+          }
+        }
+      ],
+      "input_tokens": 12,
+      "output_tokens": 4,
+      "cache_read_input_tokens": 3,
+      "cache_creation_input_tokens": 2,
+      "input_token_basis": "uncached",
+      "complete?": true
+    },
+    "terminal": "end_turn",
+    "session_id": "fixture-session",
+    "stop_reason": "stop",
+    "in_flight": "none",
+    "custom_tool_uses": [],
+    "server_tool_uses": [],
+    "turns": 1,
+    "transcript": [
+      {
+        "content": "go",
+        "role": "user"
+      },
+      {
+        "content": "done"
+      }
+    ]
+  }
+}
