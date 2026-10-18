@@ -825,6 +825,7 @@ defmodule ReqManagedAgents.Session do
 
       case result do
         {:noreply, _} -> {:cont, result}
+        {:noreply, _, {:continue, :next_message}} -> {:halt, result}
         {:stop, _, _} -> {:halt, result}
       end
     end)

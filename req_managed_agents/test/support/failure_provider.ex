@@ -86,6 +86,13 @@ defmodule ReqManagedAgents.Test.FailureProvider do
         )
 
     @impl true
+    def reconnect_with_events(conn, subscriber, seen) do
+      if conn.opts[:reconnect_fun],
+        do: conn.opts[:reconnect_fun].(conn, subscriber, seen),
+        else: {:ok, conn, [], seen, []}
+    end
+
+    @impl true
     defdelegate kickoff_input(opts), to: FailureProvider
     @impl true
     defdelegate user_input(text), to: FailureProvider

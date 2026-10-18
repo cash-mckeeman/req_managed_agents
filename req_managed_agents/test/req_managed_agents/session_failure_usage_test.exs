@@ -425,6 +425,56 @@ defmodule ReqManagedAgents.SessionFailureUsageTest do
     GenServer.stop(session)
   end
 
+  test "a recovered terminal releases the queued live message with fresh usage" do
+    session = recovering_session([turn(:end_turn)])
+    Session.message(session, "queued")
+    send(session, :reconnect)
+    assert_receive {:managed_agents_session, first}, 2_000
+    assert first.turns == 1
+    assert first.usage.input_tokens == 12
+    assert_receive {:managed_agents_session, second}, 2_000
+    assert second.turns == 1
+    assert second.usage.input_tokens == 24
+    assert second.session_id == first.session_id
+    GenServer.stop(session)
+    refute_receive {:managed_agents_session, _}
+  end
+
+  defp recovering_session(recovered) do
+    test_pid = self()
+    next = put_in(turn(:end_turn), ["usage", :input_tokens], 24) |> Map.put("id", "next")
+
+    push = fn subscriber, ref, input ->
+      case input do
+        :kickoff -> send(test_pid, :recovering_started)
+        {:user, _} -> send(subscriber, {:managed_agents, ref, {:event, next}})
+      end
+
+      :ok
+    end
+
+    reconnect = fn conn, _subscriber, seen ->
+      seen = Enum.reduce(recovered, seen, &MapSet.put(&2, &1["id"]))
+      {:ok, conn, [], seen, recovered}
+    end
+
+    {:ok, session} =
+      Session.start_link(FailureProvider.Streaming,
+        handler: fn _, _, _ ->
+          send(test_pid, :unexpected_recovery_tool)
+          {:ok, "done"}
+        end,
+        notify: test_pid,
+        push_fun: push,
+        reconnect_fun: reconnect
+      )
+
+    Process.unlink(session)
+    on_exit(fn -> if Process.alive?(session), do: GenServer.stop(session) end)
+    assert_receive :recovering_started
+    session
+  end
+
   defp run_async(provider, opts) do
     test = self()
 
