@@ -25,13 +25,14 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
 
     for deadline <- [nil, :infinity, "100", 1.5] do
       assert {:error, {:invalid_opts, :deadline}} =
-               Session.run(Managed, options(client, deadline))
+               Session.run(Managed, options(client, deadline) ++ [notify: self()])
     end
 
     assert {:error, :timeout} =
-             Session.run(Managed, options(client, now() - 1))
+             Session.run(Managed, options(client, now() - 1) ++ [notify: self()])
 
     refute_receive :request
+    refute_receive {:managed_agents_session, _}
   end
 
   test "the absolute deadline includes a blocked provider open" do
@@ -45,9 +46,13 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
       end)
 
     started = now()
-    assert {:error, :timeout} = Session.run(Managed, options(client, started + 200))
+
+    assert {:error, :timeout} =
+             Session.run(Managed, options(client, started + 200) ++ [notify: self()])
+
     assert now() - started < 350
     assert_receive {:creating, session}
+    refute_receive {:managed_agents_session, _}
     assert_dead(session)
     refute_receive {:creating, _}
   end
@@ -73,9 +78,16 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
       end)
 
     started = now()
-    assert {:error, :timeout} = Session.run(Managed, options(client, started + 200))
+
+    assert {:error, :timeout} =
+             Session.run(Managed, options(client, started + 200) ++ [notify: self()])
+
     assert now() - started < 350
     assert_receive {:kickoff, session}
+    assert_received {:managed_agents_session, result}
+    assert result.session_id == "owned-session"
+    assert result.in_flight == :unknown
+    assert result.usage == ReqManagedAgents.Usage.zero()
     assert_receive {:consumer, consumer}
     assert_dead(session)
     assert_dead(consumer)

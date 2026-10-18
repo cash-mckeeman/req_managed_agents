@@ -83,6 +83,13 @@ defmodule ReqManagedAgents.Session.CompletionTest do
     refute_receive {:managed_agents_session, _}
   end
 
+  test "an idle owner cannot checkpoint or finish an absent generation" do
+    owner = owner()
+    assert {:error, :closed} = Completion.checkpoint(owner, nil, snapshot(0))
+    assert {:error, :closed} = Completion.finish(owner, nil, {:ok, snapshot(0)}, snapshot(0))
+    refute_receive {:managed_agents_session, _}
+  end
+
   test "death before acknowledged open has no fabricated result" do
     owner = owner()
     session = actor()
@@ -118,6 +125,42 @@ defmodule ReqManagedAgents.Session.CompletionTest do
     assert_receive {:managed_agents_session, result}
     assert result.turns == 0
     assert_receive {:session_completion, ^owner, {:error, :timeout}}
+  end
+
+  test "a queued success is refused when its deadline passed before the owner can accept it" do
+    owner = owner(deadline: now() + 100)
+    generation = make_ref()
+    :ok = Completion.begin_request(owner, generation, snapshot(1))
+    :sys.suspend(owner)
+    test = self()
+
+    spawn(fn ->
+      send(test, :finishing)
+      reply = Completion.finish(owner, generation, {:ok, snapshot(1)}, snapshot(1))
+      send(test, {:finish_reply, reply})
+    end)
+
+    assert_receive :finishing
+    refute_receive {:session_completion, ^owner, _}, 150
+    :sys.resume(owner)
+    assert {:notify, result} = delivery(owner)
+    assert result.terminal == :terminated
+    assert_receive {:session_completion, ^owner, {:error, :timeout}}
+    assert_receive {:finish_reply, {:error, :closed}}
+    refute_receive {:managed_agents_session, _}
+  end
+
+  test "a new live generation retains the original absolute deadline" do
+    owner = owner(deadline: now() + 150, reply_to: nil)
+    first = make_ref()
+    :ok = Completion.begin_request(owner, first, snapshot(1))
+    :ok = Completion.finish(owner, first, {:ok, snapshot(1)}, snapshot(1))
+    assert_receive {:managed_agents_session, _}
+    :ok = Completion.begin_request(owner, make_ref(), snapshot(0))
+    assert_receive {:managed_agents_session, result}, 500
+    assert result.terminal == :terminated
+    assert result.turns == 0
+    refute_receive {:managed_agents_session, _}
   end
 
   test "absolute deadline is armed before initialization has any snapshot" do

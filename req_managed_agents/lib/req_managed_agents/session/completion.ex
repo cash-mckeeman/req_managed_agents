@@ -96,22 +96,27 @@ defmodule ReqManagedAgents.Session.Completion do
          {:begin, generation, %SessionResult{} = snapshot},
          _from,
          %State{generation: nil} = state
-       ) do
-    {:reply, :ok, %{state | generation: generation, snapshot: snapshot, completed?: false}}
+       )
+       when is_reference(generation) do
+    state = %{state | generation: generation, snapshot: snapshot, completed?: false}
+    state = if state.deadline && is_nil(state.timer), do: arm(state, state.deadline), else: state
+    {:reply, :ok, state}
   end
 
   defp dispatch(
          {:checkpoint, generation, %SessionResult{} = snapshot},
          _from,
          %State{generation: generation} = state
-       ),
+       )
+       when is_reference(generation),
        do: {:reply, :ok, %{state | snapshot: snapshot}}
 
   defp dispatch(
          {:finish, generation, result, %SessionResult{} = snapshot},
          _from,
          %State{generation: generation} = state
-       ) do
+       )
+       when is_reference(generation) do
     state = publish(%{state | snapshot: snapshot}, result)
     {:reply, :ok, cancel_timer(state)}
   end
@@ -125,11 +130,13 @@ defmodule ReqManagedAgents.Session.Completion do
   def handle_info({:expire, token}, %State{timer_token: token} = state),
     do: {:stop, :normal, close(state, :timeout)}
 
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, %State{caller_monitor: ref} = state),
-    do: {:stop, :normal, cleanup(state)}
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %State{caller_monitor: ref} = state),
+    do: {:stop, :normal, close(state, reason)}
 
-  def handle_info({:DOWN, ref, :process, pid, reason}, %State{session: {pid, ref}} = state),
-    do: {:stop, :normal, close(%{state | session: nil}, reason)}
+  def handle_info({:DOWN, ref, :process, pid, reason}, %State{session: {pid, ref}} = state) do
+    reason = if expired?(state), do: :timeout, else: reason
+    {:stop, :normal, close(%{state | session: nil}, reason)}
+  end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state),
     do: {:noreply, %{state | workers: Map.delete(state.workers, pid)}}
@@ -180,7 +187,7 @@ defmodule ReqManagedAgents.Session.Completion do
 
   defp cancel_timer(state) do
     if state.timer, do: Process.cancel_timer(state.timer)
-    %{state | timer: nil, timer_token: nil, deadline: nil}
+    %{state | timer: nil, timer_token: nil}
   end
 
   defp expired?(%State{deadline: nil}), do: false
