@@ -1,0 +1,140 @@
+{
+  "agentcore-turn": {
+    "raw": [
+      {
+        "cacheReadInputTokens": 3,
+        "cacheWriteInputTokens": 2,
+        "inputTokens": 12,
+        "outputTokens": 4
+      }
+    ],
+    "input_tokens": 12,
+    "output_tokens": 4,
+    "cache_read_input_tokens": 3,
+    "cache_creation_input_tokens": 2,
+    "input_token_basis": "uncached",
+    "complete?": true
+  },
+  "cma-request": {
+    "raw": [
+      {
+        "cache_creation_input_tokens": 2,
+        "cache_read_input_tokens": 3,
+        "input_tokens": 12,
+        "output_tokens": 4
+      }
+    ],
+    "input_tokens": 12,
+    "output_tokens": 4,
+    "cache_read_input_tokens": 3,
+    "cache_creation_input_tokens": 2,
+    "input_token_basis": "uncached",
+    "complete?": true
+  },
+  "local-inclusive": {
+    "raw": [
+      {
+        "completion_tokens": 4,
+        "prompt_tokens": 12,
+        "prompt_tokens_details": {
+          "cache_write_tokens": 2,
+          "cached_tokens": 3
+        }
+      }
+    ],
+    "input_tokens": 12,
+    "output_tokens": 4,
+    "cache_read_input_tokens": 3,
+    "cache_creation_input_tokens": 2,
+    "input_token_basis": "inclusive",
+    "complete?": true
+  },
+  "local-missing": {
+    "raw": [
+      {
+        "completion_tokens": 4,
+        "prompt_tokens": 12
+      }
+    ],
+    "input_tokens": 12,
+    "output_tokens": 4,
+    "cache_read_input_tokens": null,
+    "cache_creation_input_tokens": null,
+    "input_token_basis": "inclusive",
+    "complete?": false
+  },
+  "local-mixed": {
+    "raw": [
+      {
+        "completion_tokens": 4,
+        "prompt_tokens": 12,
+        "prompt_tokens_details": {
+          "cache_write_tokens": 2,
+          "cached_tokens": 3
+        }
+      }
+    ],
+    "input_tokens": 12,
+    "output_tokens": 4,
+    "cache_read_input_tokens": null,
+    "cache_creation_input_tokens": null,
+    "input_token_basis": "unknown",
+    "complete?": false
+  },
+  "local-uncached": {
+    "raw": [
+      {
+        "completion_tokens": 4,
+        "input_token_basis": "uncached",
+        "prompt_tokens": 12,
+        "prompt_tokens_details": {
+          "cache_write_tokens": 2,
+          "cached_tokens": 3
+        }
+      }
+    ],
+    "input_tokens": 12,
+    "output_tokens": 4,
+    "cache_read_input_tokens": 3,
+    "cache_creation_input_tokens": 2,
+    "input_token_basis": "uncached",
+    "complete?": true
+  },
+  "local-zero": {
+    "raw": [
+      {
+        "completion_tokens": 0,
+        "prompt_tokens": 0,
+        "prompt_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        }
+      }
+    ],
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "input_token_basis": "inclusive",
+    "complete?": true
+  },
+  "req-llm-ambiguous-zero": {
+    "raw": [
+      {
+        "completion_tokens": 0,
+        "input_token_basis": "unknown",
+        "prompt_tokens": 0,
+        "prompt_tokens_details": {
+          "cache_write_tokens": null,
+          "cached_tokens": null
+        }
+      }
+    ],
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": null,
+    "cache_creation_input_tokens": null,
+    "input_token_basis": "unknown",
+    "complete?": false
+  }
+}

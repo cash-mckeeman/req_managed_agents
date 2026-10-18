@@ -117,7 +117,12 @@ defmodule ReqManagedAgents.SessionRecoveredTerminalTest do
     usage = %{
       "id" => "usage",
       "type" => "span.model_request_end",
-      "model_usage" => %{"input_tokens" => 7, "output_tokens" => 3}
+      "model_usage" => %{
+        "input_tokens" => 7,
+        "output_tokens" => 3,
+        "cache_read_input_tokens" => 3,
+        "cache_creation_input_tokens" => 2
+      }
     }
 
     terminal = %{
@@ -160,7 +165,14 @@ defmodule ReqManagedAgents.SessionRecoveredTerminalTest do
                       session_id: "session",
                       events: events,
                       text: "hello",
-                      usage: %Usage{input_tokens: 7, output_tokens: 3}
+                      usage: %Usage{
+                        input_tokens: 7,
+                        output_tokens: 3,
+                        cache_read_input_tokens: 3,
+                        cache_creation_input_tokens: 2,
+                        input_token_basis: :uncached,
+                        complete?: true
+                      }
                     }},
                    1000
 

@@ -1059,14 +1059,21 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
     }
   end
 
-  defp to_usage(%{} = u),
-    do: %Usage{
-      input_tokens: u["inputTokens"] || 0,
-      output_tokens: u["outputTokens"] || 0,
-      raw: [u]
-    }
+  defp to_usage(%{} = usage) do
+    case Usage.new(%{
+           input_tokens: usage["inputTokens"],
+           output_tokens: usage["outputTokens"],
+           cache_read_input_tokens: usage["cacheReadInputTokens"],
+           cache_creation_input_tokens: usage["cacheWriteInputTokens"],
+           input_token_basis: :uncached,
+           raw: [usage]
+         }) do
+      {:ok, usage} -> usage
+      {:error, _reason} -> nil
+    end
+  end
 
-  defp to_usage(_), do: nil
+  defp to_usage(_usage), do: nil
 
   @doc false
   def terminal("end_turn"), do: :end_turn

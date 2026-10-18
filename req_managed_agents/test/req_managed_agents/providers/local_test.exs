@@ -234,7 +234,7 @@ defmodule ReqManagedAgents.Providers.LocalTest do
     assert Local.text_delta(%{"type" => "other"}) == nil
   end
 
-  test "normalize: null prompt_tokens in usage yields usage: nil" do
+  test "normalize: null token observations retain raw usage with incomplete coverage" do
     resp = fn _req ->
       {:ok,
        %{
@@ -247,7 +247,13 @@ defmodule ReqManagedAgents.Providers.LocalTest do
 
     conn = open!(scripted([resp]))
     {:ok, events, _} = Local.poll_turn(conn, Local.kickoff_input(prompt: "x"))
-    assert %TurnResult{usage: nil} = Local.normalize(events)
+    assert %TurnResult{usage: usage} = Local.normalize(events)
+    assert usage.input_tokens == 0
+    assert usage.output_tokens == 0
+    assert usage.cache_read_input_tokens == nil
+    assert usage.cache_creation_input_tokens == nil
+    assert usage.raw == [%{"prompt_tokens" => nil, "completion_tokens" => nil}]
+    refute usage.complete?
   end
 
   test "polls reset per request: a follow-up message does not fire final_turn early" do

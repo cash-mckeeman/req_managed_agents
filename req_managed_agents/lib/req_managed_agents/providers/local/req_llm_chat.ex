@@ -132,10 +132,23 @@ defmodule ReqManagedAgents.Providers.Local.ReqLLMChat do
     end
   end
 
-  # One shape, matched once — :input_tokens/:output_tokens are the canonical field names
-  # in the resolved req_llm usage map (verified against deps/req_llm/lib/req_llm/usage.ex).
-  defp to_neutral_usage(%{input_tokens: input, output_tokens: output}),
-    do: %{"prompt_tokens" => input, "completion_tokens" => output}
+  # ReqLLM normalizes missing cache counts to zero; presence is no longer observable.
+  defp to_neutral_usage(%{input_tokens: input, output_tokens: output} = usage) do
+    %{
+      "prompt_tokens" => input,
+      "completion_tokens" => output,
+      "prompt_tokens_details" => %{
+        "cached_tokens" => observed_cache(usage[:cached_tokens]),
+        "cache_write_tokens" => observed_cache(usage[:cache_creation_tokens])
+      },
+      "input_token_basis" => input_token_basis(usage[:input_includes_cached])
+    }
+  end
 
-  defp to_neutral_usage(_), do: nil
+  defp to_neutral_usage(_usage), do: nil
+  defp observed_cache(value) when is_integer(value) and value > 0, do: value
+  defp observed_cache(_value), do: nil
+  defp input_token_basis(true), do: "inclusive"
+  defp input_token_basis(false), do: "uncached"
+  defp input_token_basis(_unknown), do: "unknown"
 end

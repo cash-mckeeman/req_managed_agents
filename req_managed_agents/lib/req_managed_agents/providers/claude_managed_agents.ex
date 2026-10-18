@@ -562,28 +562,31 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     }
   end
 
-  # Managed Agents reports token usage on each `span.model_request_end` event under `model_usage`
-  # (a turn may make several model requests — sum them). Confirmed against a live
-  # consumer (chat_handler.ex); Anthropic's snake_case `input_tokens`/`output_tokens`.
   defp claude_usage(events) do
     usages =
-      for %{"type" => "span.model_request_end"} = ev <- events,
-          u = ev["model_usage"] || ev["usage"],
-          is_map(u),
-          do: u
+      for %{"type" => "span.model_request_end"} = event <- events,
+          do: claude_request_usage(event["model_usage"] || event["usage"])
 
-    case usages do
-      [] ->
-        nil
+    if Enum.any?(usages, &is_struct(&1, Usage)),
+      do: Enum.reduce(usages, Usage.zero(), &Usage.add(&2, &1)),
+      else: nil
+  end
 
-      list ->
-        %Usage{
-          input_tokens: Enum.sum(Enum.map(list, &(&1["input_tokens"] || 0))),
-          output_tokens: Enum.sum(Enum.map(list, &(&1["output_tokens"] || 0))),
-          raw: list
-        }
+  defp claude_request_usage(%{} = usage) do
+    case Usage.new(%{
+           input_tokens: usage["input_tokens"],
+           output_tokens: usage["output_tokens"],
+           cache_read_input_tokens: usage["cache_read_input_tokens"],
+           cache_creation_input_tokens: usage["cache_creation_input_tokens"],
+           input_token_basis: :uncached,
+           raw: [usage]
+         }) do
+      {:ok, usage} -> usage
+      {:error, _reason} -> nil
     end
   end
+
+  defp claude_request_usage(_usage), do: nil
 
   @doc false
   def terminal("end_turn"), do: :end_turn

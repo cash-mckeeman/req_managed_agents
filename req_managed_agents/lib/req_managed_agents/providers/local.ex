@@ -384,20 +384,29 @@ defmodule ReqManagedAgents.Providers.Local do
   def terminal("tool_calls", _, _), do: :requires_action
   def terminal(_other, _, _), do: :terminated
 
-  # The neutral contract names them prompt_tokens/completion_tokens — one shape,
-  # no fallback key-chains. A response without usage (or with JSON-null tokens)
-  # yields nil (Session skips it).
-  defp to_usage(%{"prompt_tokens" => input} = usage) when is_integer(input) do
-    completion = usage["completion_tokens"]
+  defp to_usage(%{} = usage) do
+    details = cache_details(usage["prompt_tokens_details"])
 
-    %Usage{
-      input_tokens: input,
-      output_tokens: if(is_integer(completion), do: completion, else: 0),
-      raw: [usage]
-    }
+    case Usage.new(%{
+           input_tokens: usage["prompt_tokens"],
+           output_tokens: usage["completion_tokens"],
+           cache_read_input_tokens: details["cached_tokens"],
+           cache_creation_input_tokens: details["cache_write_tokens"],
+           input_token_basis: input_token_basis(usage),
+           raw: [usage]
+         }) do
+      {:ok, usage} -> usage
+      {:error, _reason} -> nil
+    end
   end
 
-  defp to_usage(_), do: nil
+  defp to_usage(_usage), do: nil
+  defp cache_details(%{} = details), do: details
+  defp cache_details(_details), do: %{}
+  defp input_token_basis(%{"input_token_basis" => "inclusive"}), do: :inclusive
+  defp input_token_basis(%{"input_token_basis" => "uncached"}), do: :uncached
+  defp input_token_basis(%{"input_token_basis" => _unknown}), do: :unknown
+  defp input_token_basis(_usage), do: :inclusive
 
   @impl true
   def text_delta(%{"type" => "local.model_response", "message" => %{"content" => c}})

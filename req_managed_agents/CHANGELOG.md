@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Canonical cache-read and cache-creation counts, input-token basis and
+  measurement completeness in `Usage`, with validated construction and shared
+  accumulation. Provider and Local adapter projections preserve available facts;
+  missing measurements remain unknown instead of becoming measured zero.
+
 - Qualify Claude Managed Agents recovery from a uniquely enumerated primary
   thread's complete event history, preserving native payloads and descriptor
   evidence references. Conflicting identities or incomplete supporting sources
