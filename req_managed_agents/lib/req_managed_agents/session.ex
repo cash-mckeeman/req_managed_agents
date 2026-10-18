@@ -504,15 +504,8 @@ defmodule ReqManagedAgents.Session do
       # Already processed (re-delivered after a reconnect) — skip.
       {:noreply, s}
     else
-      s = %{
-        s
-        | seen: if(is_binary(id), do: MapSet.put(s.seen, id), else: s.seen),
-          turn_events: s.turn_events ++ [ev]
-      }
-
-      s = checkpoint_partial(s)
-      forward_with_delta(s, ev)
-      if s.provider.turn_boundary?(ev), do: handle_turn(s, s.turn_events), else: {:noreply, s}
+      seen = if is_binary(id), do: MapSet.put(s.seen, id), else: s.seen
+      handle_stream_event(%{s | seen: seen}, ev)
     end
   end
 
@@ -608,8 +601,8 @@ defmodule ReqManagedAgents.Session do
       ) do
     # Batch forwarding only when nothing was live-forwarded this turn (a live
     # provider already delivered each event as it arrived).
-    if s.live_forwarded == 0, do: Enum.each(events, &forward_with_delta(s, &1))
-    handle_turn(%{s | conn: conn, live_forwarded: 0, poll_task: nil}, events)
+    forward = if s.live_forwarded == 0, do: events, else: []
+    handle_turn(%{s | conn: conn, live_forwarded: 0, poll_task: nil}, events, forward)
   end
 
   def handle_info(
@@ -822,14 +815,7 @@ defmodule ReqManagedAgents.Session do
   end
 
   defp recover_batch(s, [ev | rest]) do
-    s = %{s | turn_events: s.turn_events ++ [ev]}
-    s = checkpoint_partial(s)
-    forward_with_delta(s, ev)
-
-    result =
-      if s.provider.turn_boundary?(ev),
-        do: handle_turn(s, s.turn_events),
-        else: {:noreply, s}
+    result = handle_stream_event(s, ev)
 
     case result do
       {:noreply, s} ->
@@ -847,12 +833,24 @@ defmodule ReqManagedAgents.Session do
   defp observe_recovery_tail(s, events), do: Enum.each(events, &forward_with_delta(s, &1))
 
   # ── shared per-turn handling ──────────────────────────────────────────────────
-  defp handle_turn(s, turn_events) do
+  defp handle_stream_event(s, ev) do
+    s = checkpoint_partial(%{s | turn_events: s.turn_events ++ [ev]})
+
+    if s.provider.turn_boundary?(ev) do
+      handle_turn(s, s.turn_events, [ev])
+    else
+      forward_with_delta(s, ev)
+      {:noreply, s}
+    end
+  end
+
+  defp handle_turn(s, turn_events, forward) do
     s = %{s | events: s.events ++ turn_events, turns: s.turns + 1, turn_events: []}
     tr = s.provider.normalize(turn_events)
     s = accumulate(s, tr)
     s = checkpoint(s, %{session_result(s, tr, tr.terminal) | in_flight: :none})
     s = checkpoint(s, %{s.request.snapshot | transcript: transcript_of(s)})
+    Enum.each(forward, &forward_with_delta(s, &1))
     emit_tool_use_telemetry(s, tr.custom_tool_uses)
 
     # The frozen governance hook: plain data in, plain verdict out. Hosts compose
