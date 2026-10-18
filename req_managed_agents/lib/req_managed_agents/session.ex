@@ -478,8 +478,15 @@ defmodule ReqManagedAgents.Session do
         %State{ref: ref, request: %Request{generation: nil}} = s
       ) do
     Recorder.native(native_evidence(s), ev)
-    forward_with_delta(s, ev)
-    {:noreply, s}
+    id = ev["id"]
+
+    if is_binary(id) and MapSet.member?(s.seen, id) do
+      {:noreply, s}
+    else
+      forward_with_delta(s, ev)
+      seen = if is_binary(id), do: MapSet.put(s.seen, id), else: s.seen
+      {:noreply, %{s | seen: seen}}
+    end
   end
 
   def handle_info({:managed_agents, ref, {:event, ev}}, %{ref: ref} = s) do
