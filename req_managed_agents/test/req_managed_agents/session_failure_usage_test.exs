@@ -216,6 +216,29 @@ defmodule ReqManagedAgents.SessionFailureUsageTest do
     refute_receive {:managed_agents_session, _}
   end
 
+  test "a blocked transcript callback cannot lose an already accepted completed turn" do
+    test = self()
+
+    transcript = fn _ ->
+      send(test, :reading_transcript)
+      receive do: (:release -> [])
+    end
+
+    runner =
+      run_async(FailureProvider,
+        transcript_fun: transcript,
+        deadline: now() + 300,
+        poll_fun: fn _, _ -> {:ok, [turn(:end_turn)]} end
+      )
+
+    assert_receive :reading_transcript, 2_000
+    assert_receive {:returned, ^runner, {:error, :timeout}, result, []}, 2_000
+    assert %SessionResult{} = result
+    assert result.turns == 1
+    assert result.usage.input_tokens == 12
+    assert result.in_flight == :none
+  end
+
   test "an ownership refusal prevents further provider work" do
     test = self()
 
@@ -320,6 +343,86 @@ defmodule ReqManagedAgents.SessionFailureUsageTest do
     assert second.in_flight == :none
     GenServer.stop(session)
     refute_receive {:managed_agents_session, _}
+  end
+
+  test "live messages arriving during a request queue in order with separate usage" do
+    test = self()
+
+    poll = fn index, input ->
+      if index == 0 do
+        send(test, {:first_attempt, self()})
+        receive do: (:release -> :ok)
+      end
+
+      tokens =
+        case input do
+          :kickoff -> 12
+          {:user, "next"} -> 24
+          {:user, "last"} -> 36
+        end
+
+      event = turn(:end_turn) |> put_in(["usage", :input_tokens], tokens)
+      {:ok, [event]}
+    end
+
+    {:ok, session} =
+      Session.start_link(FailureProvider,
+        handler: fn _, _, _ -> {:ok, "done"} end,
+        notify: self(),
+        poll_fun: poll
+      )
+
+    assert_receive {:first_attempt, worker}, 2_000
+    Session.message(session, "next")
+    Session.message(session, "last")
+    send(worker, :release)
+
+    for tokens <- [12, 24, 36] do
+      assert_receive {:managed_agents_session, result}, 2_000
+      assert result.terminal == :end_turn
+      assert result.turns == 1
+      assert result.usage.input_tokens == tokens
+    end
+
+    GenServer.stop(session)
+    refute_receive {:managed_agents_session, _}
+  end
+
+  test "retired stream frames cannot execute tools or complete another request" do
+    test = self()
+
+    push = fn subscriber, ref, input ->
+      send(test, {:stream, subscriber, ref})
+      id = if input == :kickoff, do: "first", else: "next"
+      event = Map.put(turn(:end_turn), "id", id)
+      send(subscriber, {:managed_agents, ref, {:event, event}})
+      :ok
+    end
+
+    handler = fn _, _, _ ->
+      send(test, :unexpected_tool)
+      {:ok, "done"}
+    end
+
+    {:ok, session} =
+      Session.start_link(FailureProvider.Streaming,
+        handler: handler,
+        notify: self(),
+        push_fun: push
+      )
+
+    assert_receive {:stream, ^session, ref}, 2_000
+    assert_receive {:managed_agents_session, first}, 2_000
+    assert first.usage.input_tokens == 12
+    retired = Map.put(turn(:requires_action), "id", "retired")
+    send(session, {:managed_agents, ref, {:event, retired}})
+    refute_receive :unexpected_tool
+    refute_receive {:managed_agents_session, _}
+    Session.message(session, "next")
+    assert_receive {:managed_agents_session, second}, 2_000
+    assert second.usage.input_tokens == 12
+    assert second.turns == 1
+    GenServer.stop(session)
   end
 
   defp run_async(provider, opts) do

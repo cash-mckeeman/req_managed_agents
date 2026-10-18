@@ -168,7 +168,7 @@ defmodule ReqManagedAgents.Session.CompletionTest do
              Completion.start(caller: self(), notify: self(), deadline: now() + 20)
 
     ref = Process.monitor(owner)
-    assert_receive {:session_completion, ^owner, {:error, :timeout}}
+    assert_receive {:session_completion, ^owner, {:error, :timeout}}, 1_000
     assert_receive {:DOWN, ^ref, :process, ^owner, :normal}
     refute_receive {:managed_agents_session, _}
   end

@@ -461,11 +461,25 @@ defmodule ReqManagedAgents.Session do
     {:noreply, %{s | kicked_off: :resuming}}
   end
 
+  def handle_continue(:next_message, s) do
+    [text | rest] = s.request.pending_messages
+    s = %{s | request: %{s.request | pending_messages: rest}}
+    start_message(s, text)
+  end
+
   @impl true
   def handle_info({:managed_agents, ref, :connected}, %{ref: ref, kicked_off: false} = s),
     do: kickoff(s)
 
   def handle_info({:managed_agents, ref, :connected}, %{ref: ref} = s), do: {:noreply, s}
+
+  def handle_info(
+        {:managed_agents, ref, {:event, ev}},
+        %State{ref: ref, request: %Request{generation: nil}} = s
+      ) do
+    Recorder.native(native_evidence(s), ev)
+    {:noreply, s}
+  end
 
   def handle_info({:managed_agents, ref, {:event, ev}}, %{ref: ref} = s) do
     Recorder.native(native_evidence(s), ev)
@@ -534,11 +548,7 @@ defmodule ReqManagedAgents.Session do
           # fresh request, so it must not inherit turns/usage accumulated by an earlier
           # pending-tool-use redrive on the same resume, or max_turns can trip early.
           s.pending_user_message ->
-            deliver_user_message(
-              reset_acc(%{s | turns: 0, pending_user_message: nil}),
-              s.pending_user_message,
-              false
-            )
+            deliver_pending_message(s)
 
           resuming? ->
             {:noreply, s}
@@ -577,14 +587,21 @@ defmodule ReqManagedAgents.Session do
     {:noreply, %{s | live_forwarded: s.live_forwarded + 1}}
   end
 
-  def handle_info({:turn, {:ok, events, conn}}, s) do
+  def handle_info(
+        {:turn, generation, {:ok, events, conn}},
+        %State{request: %Request{generation: generation}} = s
+      ) do
     # Batch forwarding only when nothing was live-forwarded this turn (a live
     # provider already delivered each event as it arrived).
     if s.live_forwarded == 0, do: Enum.each(events, &forward_with_delta(s, &1))
     handle_turn(%{s | conn: conn, live_forwarded: 0, poll_task: nil}, events)
   end
 
-  def handle_info({:turn, {:error, reason}}, s), do: stop_error(s, reason)
+  def handle_info(
+        {:turn, generation, {:error, reason}},
+        %State{request: %Request{generation: generation}} = s
+      ),
+      do: stop_error(s, reason)
 
   # Linked-Task exits: a clean exit is fine; an abnormal consumer-task crash drives reconnect
   # (live) or surfaces an error (sync); any other linked exit (parent/supervisor) stops us.
@@ -606,15 +623,37 @@ defmodule ReqManagedAgents.Session do
   def handle_info(_other, s), do: {:noreply, s}
 
   @impl true
-  def handle_call({:send_event, event}, _from, %{mode: :streaming} = s),
-    do: {:reply, s.provider.push_input(s.conn, [event]), s}
+  def handle_call({:send_event, event}, _from, %{mode: :streaming} = s) do
+    started? = is_nil(s.request.generation)
+    s = if started?, do: begin_request(s, s.request.snapshot), else: s
+    s = begin_work(s)
+
+    case s.provider.push_input(s.conn, [event]) do
+      {:error, reason} = result when started? ->
+        case live_push_error(s, reason) do
+          {:noreply, s} -> {:reply, result, s}
+          {:noreply, s, next} -> {:reply, result, s, next}
+        end
+
+      result ->
+        {:reply, result, s}
+    end
+  end
 
   def handle_call({:send_event, _event}, _from, s), do: {:reply, {:error, :unsupported}, s}
 
   @impl true
   # A follow-up message starts a fresh request: reset the per-request turn counter and accumulators
   # so max_turns bounds a runaway tool loop within one request, not the session's whole lifetime.
-  def handle_cast({:message, text}, s),
+  def handle_cast({:message, text}, %State{request: %Request{generation: generation}} = s)
+      when is_reference(generation) do
+    request = %{s.request | pending_messages: s.request.pending_messages ++ [text]}
+    {:noreply, %{s | request: request}}
+  end
+
+  def handle_cast({:message, text}, s), do: start_message(s, text)
+
+  defp start_message(s, text),
     do: deliver_user_message(begin_request(reset_acc(%{s | turns: 0})), text)
 
   @impl true
@@ -650,7 +689,7 @@ defmodule ReqManagedAgents.Session do
     }
 
   defp kickoff(s) do
-    s = mark_in_flight(%{s | kicked_off: true})
+    s = begin_work(%{s | kicked_off: true})
     drive(s, s.provider.kickoff_input(s.opts))
   end
 
@@ -658,8 +697,15 @@ defmodule ReqManagedAgents.Session do
   # drive a fresh turn with it. Shared by a live follow-up (handle_cast {:message, …}) and a
   # resume that carries a new :prompt (handle_info(:reconnect, …) — issue #66) — one send path,
   # not two copies.
+  defp deliver_pending_message(s) do
+    text = s.pending_user_message
+    s = reset_acc(%{s | turns: 0, pending_user_message: nil})
+    s = if is_nil(s.request.generation), do: begin_request(s), else: s
+    deliver_user_message(s, text, false)
+  end
+
   defp deliver_user_message(s, text, new_invocation? \\ true) do
-    s = mark_in_flight(s)
+    s = begin_work(s)
 
     evidence =
       if new_invocation?,
@@ -672,7 +718,8 @@ defmodule ReqManagedAgents.Session do
 
   # ── acquire a turn (the ONLY mode-specific step) ──────────────────────────────
   defp drive(%{mode: :request_response} = s, input) do
-    s = mark_in_flight(s)
+    s = begin_work(s)
+    generation = s.request.generation
     parent = self()
     %{provider: p, conn: c} = s
 
@@ -689,7 +736,7 @@ defmodule ReqManagedAgents.Session do
               e -> {:error, {:provider_error, e}}
             end
 
-          send(parent, {:turn, result})
+          send(parent, {:turn, generation, result})
         catch
           :exit, :normal ->
             :ok
@@ -706,7 +753,7 @@ defmodule ReqManagedAgents.Session do
   end
 
   defp drive(%{mode: :streaming} = s, input) do
-    s = mark_in_flight(s)
+    s = begin_work(s)
     s = ensure_stream_attempt(s)
 
     case s.provider.push_input(s.conn, input) do
@@ -730,7 +777,7 @@ defmodule ReqManagedAgents.Session do
 
     s = finish_evidence(s, {:error, reason})
     s = complete_request(s, {:error, reason})
-    {:noreply, %{s | turn_events: []}}
+    live_reply(%{s | turn_events: []})
   end
 
   defp ensure_stream_attempt(%State{evidence: nil} = s), do: s
@@ -747,6 +794,9 @@ defmodule ReqManagedAgents.Session do
 
   # History has already been recorded with historical provenance and deduplicated
   # by the provider. Process it before queued stream events can observe the grown seen set.
+  defp recover_events(%State{request: %Request{generation: nil}} = s, _events),
+    do: {:noreply, s}
+
   defp recover_events(s, events) do
     Enum.reduce_while(events, {:noreply, s}, fn ev, {:noreply, s} ->
       s = %{s | turn_events: s.turn_events ++ [ev]}
@@ -912,7 +962,7 @@ defmodule ReqManagedAgents.Session do
   end
 
   defp run_tools(custom_tool_uses, s) do
-    s = mark_in_flight(s)
+    s = begin_work(s)
 
     custom_tool_uses
     |> Task.async_stream(
@@ -1085,8 +1135,11 @@ defmodule ReqManagedAgents.Session do
   defp reply(s, result) do
     s = finish_evidence(s, result)
     s = complete_request(s, result)
-    if s.caller || match?({:error, _}, result), do: {:stop, :normal, s}, else: {:noreply, s}
+    if s.caller || match?({:error, _}, result), do: {:stop, :normal, s}, else: live_reply(s)
   end
+
+  defp live_reply(%State{request: %Request{pending_messages: []}} = s), do: {:noreply, s}
+  defp live_reply(s), do: {:noreply, s, {:continue, :next_message}}
 
   defp complete_request(s, result) do
     snapshot =
@@ -1099,21 +1152,27 @@ defmodule ReqManagedAgents.Session do
     %{s | request: %{s.request | generation: nil, snapshot: snapshot}}
   end
 
-  defp begin_request(s) do
-    snapshot = %SessionResult{session_id: s.info.session_id, usage: Usage.zero()}
-    request = Request.new(s.opts[:completion_owner], make_ref(), snapshot)
+  defp begin_request(s),
+    do: begin_request(s, %SessionResult{session_id: s.info.session_id, usage: Usage.zero()})
+
+  defp begin_request(s, snapshot) do
+    pending = if s.request, do: s.request.pending_messages, else: []
+
+    request =
+      Request.new(s.opts[:completion_owner], make_ref(), snapshot, pending_messages: pending)
+
     completion_ack(Completion.begin_request(request.owner, request.generation, snapshot))
     %{s | request: request}
   end
-
-  defp checkpoint(%State{request: %Request{generation: nil}} = s, _snapshot), do: s
 
   defp checkpoint(s, snapshot) do
     completion_ack(Completion.checkpoint(s.request.owner, s.request.generation, snapshot))
     %{s | request: %{s.request | snapshot: snapshot}}
   end
 
-  defp mark_in_flight(s), do: checkpoint(s, %{s.request.snapshot | in_flight: :unknown})
+  defp mark_in_flight(%State{request: %Request{generation: nil}} = s), do: s
+  defp mark_in_flight(s), do: begin_work(s)
+  defp begin_work(s), do: checkpoint(s, %{s.request.snapshot | in_flight: :unknown})
 
   defp checkpoint_partial(s),
     do:

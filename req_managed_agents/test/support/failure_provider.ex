@@ -63,7 +63,11 @@ defmodule ReqManagedAgents.Test.FailureProvider do
   @impl true
   def resumed?(_conn), do: false
   @impl true
-  def transcript(conn), do: [%{"role" => "assistant", "content" => to_string(conn.index)}]
+  def transcript(conn) do
+    if conn.opts[:transcript_fun],
+      do: conn.opts[:transcript_fun].(conn),
+      else: [%{"role" => "assistant", "content" => to_string(conn.index)}]
+  end
 
   defmodule Streaming do
     @moduledoc false
