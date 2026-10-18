@@ -8,6 +8,7 @@ defmodule ReqManagedAgents.SessionResult do
   @derive Jason.Encoder
   defstruct terminal: :terminated,
             stop_reason: nil,
+            in_flight: :unknown,
             session_id: nil,
             text: "",
             custom_tool_uses: [],
@@ -19,6 +20,7 @@ defmodule ReqManagedAgents.SessionResult do
 
   @type t :: %__MODULE__{
           terminal: ReqManagedAgents.Provider.terminal(),
+          in_flight: :none | :unknown,
           stop_reason: String.t() | map() | atom() | nil,
           session_id: String.t() | nil,
           text: String.t(),
