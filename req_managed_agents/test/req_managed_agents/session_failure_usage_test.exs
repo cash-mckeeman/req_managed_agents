@@ -291,7 +291,7 @@ defmodule ReqManagedAgents.SessionFailureUsageTest do
   end
 
   defmodule BlockingEventHandler do
-    def handle_tool(_, _, _), do: {:ok, "done"}
+    def handle_tool_call(_, _, _), do: {:ok, "done"}
 
     def handle_event(%{"type" => "text"}, test, _) do
       send(test, {:event_blocked, self()})
@@ -441,7 +441,7 @@ defmodule ReqManagedAgents.SessionFailureUsageTest do
   end
 
   defmodule RecoveryEventHandler do
-    def handle_tool(_, _, test_pid) do
+    def handle_tool_call(_, _, test_pid) do
       send(test_pid, :unexpected_recovery_tool)
       {:ok, "done"}
     end
@@ -452,6 +452,22 @@ defmodule ReqManagedAgents.SessionFailureUsageTest do
   for queued? <- [false, true] do
     @queued queued?
     test "history after recovered completion stays observational (queued: #{@queued})" do
+      probe =
+        run_async(FailureProvider,
+          handler: RecoveryEventHandler,
+          context: self(),
+          poll_fun: fn
+            0, _ ->
+              {:ok, [turn(:requires_action)]}
+
+            1, {:resume, [%ReqManagedAgents.ToolResult{is_error: false, text: "done"}]} ->
+              {:ok, [turn(:end_turn)]}
+          end
+        )
+
+      assert_receive {:returned, ^probe, {:ok, _}, _, []}, 2_000
+      assert_received :unexpected_recovery_tool
+
       tail = Map.put(turn(:requires_action), "id", "unowned-tail")
       session = recovering_session([turn(:end_turn), tail])
       if @queued, do: Session.message(session, "next")
@@ -504,7 +520,7 @@ defmodule ReqManagedAgents.SessionFailureUsageTest do
   end
 
   defmodule BoundaryEventHandler do
-    def handle_tool(_, _, _), do: {:ok, "done"}
+    def handle_tool_call(_, _, _), do: {:ok, "done"}
 
     def handle_event(%{"id" => "callback-block"}, test_pid, _) do
       send(test_pid, {:boundary_blocked, self()})
