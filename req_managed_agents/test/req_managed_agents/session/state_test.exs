@@ -34,7 +34,6 @@ defmodule ReqManagedAgents.Session.StateTest do
                handler: nil,
                context: nil,
                caller: nil,
-               notify: nil,
                meta: nil,
                ref: nil,
                consumer: nil,
