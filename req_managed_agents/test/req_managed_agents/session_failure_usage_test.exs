@@ -440,6 +440,36 @@ defmodule ReqManagedAgents.SessionFailureUsageTest do
     refute_receive {:managed_agents_session, _}
   end
 
+  defmodule RecoveryEventHandler do
+    def handle_tool(_, _, test_pid) do
+      send(test_pid, :unexpected_recovery_tool)
+      {:ok, "done"}
+    end
+
+    def handle_event(event, test_pid, _), do: send(test_pid, {:recovery_observation, event})
+  end
+
+  for queued? <- [false, true] do
+    @queued queued?
+    test "history after recovered completion stays observational (queued: #{@queued})" do
+      tail = %{"id" => "unowned-tail", "type" => "text", "text" => "observed"}
+      session = recovering_session([turn(:end_turn), tail])
+      if @queued, do: Session.message(session, "next")
+      send(session, :reconnect)
+      assert_receive {:managed_agents_session, first}, 2_000
+      assert first.turns == 1
+      assert first.usage.input_tokens == 12
+      assert_receive {:recovery_observation, ^tail}, 2_000
+      unless @queued, do: Session.message(session, "next")
+      assert_receive {:managed_agents_session, second}, 2_000
+      assert second.turns == 1
+      assert second.usage.input_tokens == 24
+      refute_receive :unexpected_recovery_tool
+      GenServer.stop(session)
+      refute_receive {:managed_agents_session, _}
+    end
+  end
+
   defp recovering_session(recovered) do
     test_pid = self()
     next = put_in(turn(:end_turn), ["usage", :input_tokens], 24) |> Map.put("id", "next")
@@ -460,10 +490,8 @@ defmodule ReqManagedAgents.SessionFailureUsageTest do
 
     {:ok, session} =
       Session.start_link(FailureProvider.Streaming,
-        handler: fn _, _, _ ->
-          send(test_pid, :unexpected_recovery_tool)
-          {:ok, "done"}
-        end,
+        handler: RecoveryEventHandler,
+        context: test_pid,
         notify: test_pid,
         push_fun: push,
         reconnect_fun: reconnect

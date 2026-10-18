@@ -812,24 +812,39 @@ defmodule ReqManagedAgents.Session do
   defp recover_events(%State{request: %Request{generation: nil}} = s, _events),
     do: {:noreply, s}
 
-  defp recover_events(s, events) do
-    Enum.reduce_while(events, {:noreply, s}, fn ev, {:noreply, s} ->
-      s = %{s | turn_events: s.turn_events ++ [ev]}
-      s = checkpoint_partial(s)
-      forward_with_delta(s, ev)
+  defp recover_events(s, events), do: recover_batch(s, events)
 
-      result =
-        if s.provider.turn_boundary?(ev),
-          do: handle_turn(s, s.turn_events),
-          else: {:noreply, s}
+  defp recover_batch(s, []), do: {:noreply, s}
 
-      case result do
-        {:noreply, _} -> {:cont, result}
-        {:noreply, _, {:continue, :next_message}} -> {:halt, result}
-        {:stop, _, _} -> {:halt, result}
-      end
-    end)
+  defp recover_batch(%State{request: %Request{generation: nil}} = s, events) do
+    observe_recovery_tail(s, events)
+    {:noreply, s}
   end
+
+  defp recover_batch(s, [ev | rest]) do
+    s = %{s | turn_events: s.turn_events ++ [ev]}
+    s = checkpoint_partial(s)
+    forward_with_delta(s, ev)
+
+    result =
+      if s.provider.turn_boundary?(ev),
+        do: handle_turn(s, s.turn_events),
+        else: {:noreply, s}
+
+    case result do
+      {:noreply, s} ->
+        recover_batch(s, rest)
+
+      {:noreply, s, next} ->
+        observe_recovery_tail(s, rest)
+        {:noreply, s, next}
+
+      {:stop, _, _} ->
+        result
+    end
+  end
+
+  defp observe_recovery_tail(s, events), do: Enum.each(events, &forward_with_delta(s, &1))
 
   # ── shared per-turn handling ──────────────────────────────────────────────────
   defp handle_turn(s, turn_events) do
