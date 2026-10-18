@@ -21,7 +21,7 @@ provider work; see `ReqManagedAgents.SessionResult.in_flight`.
 ```elixir
 def deps do
   [
-    {:req_managed_agents_host, "~> 0.12.0"}
+    {:req_managed_agents_host, "~> 0.14.0"}
   ]
 end
 ```
