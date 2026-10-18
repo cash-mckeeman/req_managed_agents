@@ -478,6 +478,7 @@ defmodule ReqManagedAgents.Session do
         %State{ref: ref, request: %Request{generation: nil}} = s
       ) do
     Recorder.native(native_evidence(s), ev)
+    forward_with_delta(s, ev)
     {:noreply, s}
   end
 
