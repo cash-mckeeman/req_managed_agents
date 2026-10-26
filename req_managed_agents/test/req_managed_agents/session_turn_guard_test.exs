@@ -110,6 +110,41 @@ defmodule ReqManagedAgents.SessionTurnGuardTest do
     assert %Usage{input_tokens: 1, output_tokens: 1, raw: [_]} = usage
   end
 
+  test "turn limit stops request-response and streaming tools at the completed boundary" do
+    owner = self()
+
+    for provider <- [RequestResponse, Streaming] do
+      assert {:error, {:max_turns_exceeded, 1}} =
+               Session.run(provider,
+                 handler: fn _, _, _ ->
+                   send(owner, :tool_ran)
+                   {:ok, "unused"}
+                 end,
+                 turns: [@tool_turn, @end_turn],
+                 max_turns: 1,
+                 notify: self()
+               )
+
+      assert_receive {:managed_agents_session, %SessionResult{turns: 1}}
+      refute_received :tool_ran
+    end
+  end
+
+  test "turn limit refuses a terminal-tool re-prompt before a second turn" do
+    assert {:error, {:max_turns_exceeded, 1}} =
+             Session.run(Recording,
+               handler: ok_handler(),
+               turns: [@end_turn, @end_turn],
+               require_terminal_tool: true,
+               terminal_tool: "submit_answer",
+               max_reprompts: 1,
+               max_turns: 1,
+               notify: self()
+             )
+
+    assert_receive {:managed_agents_session, %SessionResult{turns: 1}}
+  end
+
   test "invalid turn_guard is rejected at start" do
     assert {:error, {:invalid_turn_guard, :nope}} =
              Session.run(RequestResponse, handler: ok_handler(), turns: [], turn_guard: :nope)

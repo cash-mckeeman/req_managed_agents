@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## v0.14.1 (2026-10-18)
+
+### Fixed
+
+- `Session` refuses tool continuations and terminal-tool re-prompts before they
+  would exceed `max_turns`. A final response at the limit still succeeds, and a
+  limit refusal retains the completed turn’s usage without starting extra work.
+
 ## v0.14.0 (2026-10-18)
 
 ### Added

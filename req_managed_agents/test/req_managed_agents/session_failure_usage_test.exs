@@ -67,7 +67,7 @@ defmodule ReqManagedAgents.SessionFailureUsageTest do
 
   for {terminal, kind, error, tokens} <- [
         {:end_turn, :guard, {:halted, :policy}, 12},
-        {:end_turn, :limit, {:max_turns_exceeded, 1}, 24},
+        {:end_turn, :limit, {:max_turns_exceeded, 1}, 12},
         {:requires_action, :unresolved, {:unresolved_requires_action, "native-stop"}, 12}
       ] do
     @terminal terminal
