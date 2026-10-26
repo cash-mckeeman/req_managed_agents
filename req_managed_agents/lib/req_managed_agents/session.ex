@@ -880,7 +880,7 @@ defmodule ReqManagedAgents.Session do
     needs_followup? = tr.terminal == :requires_action or reprompt?
 
     cond do
-      s.turns > s.max_turns or (s.turns == s.max_turns and needs_followup?) ->
+      turn_limit_exceeded?(s, needs_followup?) ->
         stop_error(s, {:max_turns_exceeded, s.max_turns})
 
       tr.terminal == :requires_action ->
@@ -898,6 +898,10 @@ defmodule ReqManagedAgents.Session do
       true ->
         finish(s, tr)
     end
+  end
+
+  defp turn_limit_exceeded?(s, needs_followup?) do
+    s.turns > s.max_turns or (s.turns == s.max_turns and needs_followup?)
   end
 
   # A `requires_action` turn either carries custom tool uses to run and resume with,
