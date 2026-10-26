@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Require ReqLLM 1.29 or later for verified TLS certificates in WebSocket sessions.
 - Bounded AgentCore calls also disable redirects requested through Req's legacy
   `:follow_redirects` option, preserving the invocation-attempt limit.
 - `Session` refuses tool continuations and terminal-tool re-prompts before they

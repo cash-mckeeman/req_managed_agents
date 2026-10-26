@@ -68,7 +68,7 @@ defmodule ReqManagedAgents.MixProject do
       # req_llm is optional: only the Local provider's DEFAULT chat_fun needs it.
       # Injected chat_funs (tests, Ollama, mimir lanes) work without it;
       # Local raises a clear error at first use if it's missing (Local.Deps).
-      {:req_llm, "~> 1.10", optional: true},
+      {:req_llm, "~> 1.29", optional: true},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
