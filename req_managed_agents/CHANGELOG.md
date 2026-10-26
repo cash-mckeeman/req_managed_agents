@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bounded AgentCore calls also disable redirects requested through Req's legacy
+  `:follow_redirects` option, preserving the invocation-attempt limit.
 - `Session` refuses tool continuations and terminal-tool re-prompts before they
   would exceed `max_turns`. A final response at the limit still succeeds, and a
   limit refusal retains the completed turn’s usage without starting extra work.
