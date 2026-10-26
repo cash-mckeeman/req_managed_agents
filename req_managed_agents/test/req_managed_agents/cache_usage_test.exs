@@ -202,7 +202,9 @@ defmodule ReqManagedAgents.CacheUsageTest do
 
   test "actual ReqLLM decoding retains cache counts without inventing an unexposed input basis" do
     for {model, raw, creation} <- [
-          {"openai:gpt-5", openai_response(native_usage(Local)), nil},
+          {"openai:gpt-5", openai_response(native_usage(Local)), 2},
+          {"openai:gpt-5",
+           openai_response(change_cache(Local, native_usage(Local), :creation, :missing)), nil},
           {"anthropic:claude-haiku-4-5", anthropic_response(native_usage(ClaudeManagedAgents)), 2}
         ] do
       assert {:ok, decoded} = ReqLLM.Response.decode_response(raw, model)
