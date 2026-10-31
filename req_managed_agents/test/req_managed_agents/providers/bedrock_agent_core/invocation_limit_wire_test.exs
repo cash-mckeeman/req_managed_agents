@@ -6,11 +6,20 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore.InvocationLimitWireTest do
   alias ReqManagedAgents.Providers.BedrockAgentCore, as: P
   alias ReqManagedAgents.Providers.BedrockAgentCore.Client
 
-  for constructor <- [Client, LegacyClient], status <- [503, 307, 200] do
-    test "#{inspect(constructor)} bounded calls disable HTTP replay for status #{status}" do
+  for constructor <- [Client, LegacyClient],
+      {status, redirect_option} <- [
+        {503, :redirect},
+        {307, :redirect},
+        {307, :follow_redirects},
+        {200, :redirect}
+      ] do
+    test "#{inspect(constructor)} bounded calls disable HTTP replay for status #{status} with #{redirect_option}" do
       bypass = Bypass.open()
       owner = self()
-      options = [retry: :transient, max_retries: 3, retry_delay: 0, redirect: true]
+
+      options =
+        [retry: :transient, max_retries: 3, retry_delay: 0] ++
+          [{unquote(redirect_option), true}]
 
       client =
         unquote(constructor).new(

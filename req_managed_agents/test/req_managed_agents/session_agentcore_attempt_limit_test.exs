@@ -86,6 +86,25 @@ defmodule ReqManagedAgents.SessionAgentCoreAttemptLimitTest do
            ] = messages
   end
 
+  test "turn limit refuses tool continuation before another invocation" do
+    {agent, fun} = script([tool_turn(), done()])
+    options = opts(fun, 3) |> Keyword.put(:max_turns, 1) |> Keyword.put(:notify, self())
+
+    assert Session.run(P, options) == {:error, {:max_turns_exceeded, 1}}
+    assert {1, [_]} = Agent.get(agent, & &1)
+    assert_receive {:invoked, 1, _, _}
+    refute_receive {:invoked, 2, _, _}
+    refute_received :handled
+    assert_receive {:managed_agents_session, %SessionResult{turns: 1, in_flight: :none}}
+  end
+
+  test "a final turn at the turn limit succeeds" do
+    {agent, fun} = script([done()])
+    options = opts(fun, 3) |> Keyword.put(:max_turns, 1)
+    assert {:ok, %SessionResult{terminal: :end_turn, turns: 1}} = Session.run(P, options)
+    assert {1, []} = Agent.get(agent, & &1)
+  end
+
   test "live messages keep the cap while a separate run with the same AWS ID starts fresh" do
     {agent, fun} = script([done(), done(), done()])
     {:ok, session} = Session.start_link(P, opts(fun, 1) ++ [notify: self()])

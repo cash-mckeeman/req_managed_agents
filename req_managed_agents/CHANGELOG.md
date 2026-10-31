@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## v0.14.1 (unreleased)
+
+### Fixed
+
+- Update test-only Plug.Crypto to 2.2.1 to avoid exposing secrets in error traces.
+- Require ReqLLM 1.29 or later for verified TLS certificates in WebSocket sessions.
+- Bounded AgentCore calls also disable redirects requested through Req's legacy
+  `:follow_redirects` option, preserving the invocation-attempt limit.
+- `Session` refuses tool continuations and terminal-tool re-prompts before they
+  would exceed `max_turns`. A final response at the limit still succeeds, and a
+  limit refusal retains the completed turn’s usage without starting extra work.
+
 ## v0.14.0 (2026-10-18)
 
 ### Added

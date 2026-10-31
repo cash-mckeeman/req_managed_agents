@@ -875,8 +875,12 @@ defmodule ReqManagedAgents.Session do
   end
 
   defp continue_turn(s, tr) do
+    missing_terminal? = tr.terminal == :end_turn and missing_terminal_tool?(s)
+    reprompt? = missing_terminal? and s.reprompts_left > 0
+    needs_followup? = tr.terminal == :requires_action or reprompt?
+
     cond do
-      s.turns > s.max_turns ->
+      turn_limit_exceeded?(s, needs_followup?) ->
         stop_error(s, {:max_turns_exceeded, s.max_turns})
 
       tr.terminal == :requires_action ->
@@ -884,16 +888,20 @@ defmodule ReqManagedAgents.Session do
 
       # Terminal-tool enforcement: an :end_turn that never called the required tool
       # re-drives with a re-prompt; re-prompt turns count against :max_turns.
-      tr.terminal == :end_turn and missing_terminal_tool?(s) and s.reprompts_left > 0 ->
+      reprompt? ->
         input = s.provider.user_input(terminal_reprompt(s.enforced_terminal_tool))
         drive(%{s | reprompts_left: s.reprompts_left - 1}, input)
 
-      tr.terminal == :end_turn and missing_terminal_tool?(s) ->
+      missing_terminal? ->
         finish(s, %{tr | stop_reason: :no_terminal_tool})
 
       true ->
         finish(s, tr)
     end
+  end
+
+  defp turn_limit_exceeded?(s, needs_followup?) do
+    s.turns > s.max_turns or (s.turns == s.max_turns and needs_followup?)
   end
 
   # A `requires_action` turn either carries custom tool uses to run and resume with,

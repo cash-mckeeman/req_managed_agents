@@ -904,7 +904,12 @@ defmodule ReqManagedAgents.Providers.BedrockAgentCore do
 
     client =
       if opts[:max_invocation_attempts] do
-        %{client | req_options: Keyword.merge(client.req_options, retry: false, redirect: false)}
+        req_options =
+          client.req_options
+          |> Keyword.delete(:follow_redirects)
+          |> Keyword.merge(retry: false, redirect: false)
+
+        %{client | req_options: req_options}
       else
         client
       end
