@@ -34,6 +34,7 @@ defmodule ReqManagedAgentsHost.MixProject do
     [
       sibling(:req_managed_agents, @version),
       {:jason, "~> 1.4"},
+      {:jsv, "~> 0.20", only: :test},
       {:mox, "~> 1.1", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
