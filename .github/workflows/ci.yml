@@ -18,7 +18,7 @@ jobs:
       packages: ${{ steps.select.outputs.packages }}
       root: ${{ steps.select.outputs.root }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: select
@@ -42,7 +42,7 @@ jobs:
     if: needs.detect-changes.outputs.root == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: "1.20"
@@ -86,12 +86,12 @@ jobs:
       run:
         working-directory: ${{ matrix.package }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: ${{ matrix.leg.elixir }}
           otp-version: ${{ matrix.leg.otp }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ${{ matrix.package }}/deps
@@ -131,12 +131,12 @@ jobs:
       run:
         working-directory: ${{ matrix.package }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: "1.20"
           otp-version: "29"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ${{ matrix.package }}/deps
@@ -174,12 +174,12 @@ jobs:
       run:
         working-directory: ${{ matrix.package }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: "1.20"
           otp-version: "29"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ${{ matrix.package }}/deps
@@ -189,7 +189,7 @@ jobs:
             mix-dialyzer-${{ matrix.package }}-${{ runner.os }}-
       # PLTs are cached separately from deps: they change on BEAM upgrades,
       # not on every mix.lock bump.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ${{ matrix.package }}/priv/plts
           key: plt-${{ matrix.package }}-${{ runner.os }}-29-1.20-${{ hashFiles(format('{0}/mix.lock', matrix.package)) }}
@@ -204,7 +204,7 @@ jobs:
     needs: [detect-changes, root, test, quality, dialyzer]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: CI graph includes every job
         run: bash .github/scripts/test/ci_ok_test.sh
       - name: every selected job passed; every skip was detect-changes' choice
