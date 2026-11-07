@@ -98,7 +98,9 @@ defmodule ReqManagedAgents.MixProject do
         # Cookie request header injection in cow_cookie:cookie/1
         "EEF-CVE-2026-43969",
         # Test-only HTTP/2 header amplification; no fixed Hex release (2026-11-07).
-        "EEF-CVE-2026-113431"
+        "EEF-CVE-2026-113431",
+        # Test-only HTTP/1.1 pipelining exhaustion; no fixed Hex release (2026-11-07).
+        "EEF-CVE-2026-115701"
       ]
     ]
   end
