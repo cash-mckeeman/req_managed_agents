@@ -89,15 +89,16 @@ defmodule ReqManagedAgents.MixProject do
   end
 
   # Read by `mix hex.audit` (Hex 2.5.1+), which warns once an entry stops
-  # matching. cowlib is test-only (bypass -> plug_cowboy -> cowboy), and no
-  # release fixes these two (checked 2026-10-01).
+  # matching. These server dependencies are test-only through Bypass.
   defp hex do
     [
       ignore_advisories: [
         # HTTP response splitting in cow_http_struct_hd:escape_string/2
         "EEF-CVE-2026-43966",
         # Cookie request header injection in cow_cookie:cookie/1
-        "EEF-CVE-2026-43969"
+        "EEF-CVE-2026-43969",
+        # Test-only HTTP/2 header amplification; no fixed Hex release (2026-11-07).
+        "EEF-CVE-2026-113431"
       ]
     ]
   end
