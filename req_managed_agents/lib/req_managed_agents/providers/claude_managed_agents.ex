@@ -117,7 +117,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
       case opts[:session_id] do
         nil -> open_fresh(client, opts, budget, subscriber)
-        sid -> open_resume(client, sid, opts[:evidence_context])
+        sid -> open_resume(client, sid, opts[:evidence_context], opts[:telemetry_metadata] || %{})
       end
     end
   end
@@ -166,6 +166,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
          session_id: sid,
          ref: ref,
          consumer: task,
+         telemetry_metadata: opts[:telemetry_metadata] || %{},
          evidence: evidence,
          evidence_recorder: if(evidence, do: evidence.recorder)
        }}
@@ -189,7 +190,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   # Resume an existing session: don't create or kick off — the Session consolidates via
   # reconnect/3 (list history, dedup, re-drive any unanswered tool call), opening the stream there.
-  defp open_resume(client, sid, evidence),
+  defp open_resume(client, sid, evidence, telemetry_metadata),
     do:
       {:ok,
        %{
@@ -197,6 +198,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
          session_id: sid,
          ref: nil,
          resume: true,
+         telemetry_metadata: telemetry_metadata,
          evidence: evidence,
          evidence_recorder: if(evidence, do: evidence.recorder)
        }}
@@ -473,7 +475,10 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
         {:ok, task} =
           Task.start_link(fn ->
-            Stream.stream(conn.client, conn.session_id, subscriber, ref: ref)
+            Stream.stream(conn.client, conn.session_id, subscriber,
+              ref: ref,
+              telemetry_metadata: Map.get(conn, :telemetry_metadata, %{})
+            )
           end)
 
         {:ok, Map.merge(conn, %{ref: ref, consumer: task, evidence: evidence}), pending, seen,

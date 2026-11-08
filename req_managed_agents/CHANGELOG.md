@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their existing cache keys; an invalid scope returns `{:error, {:invalid_opts, :cache_scope}}`
   before any store or provider access.
 
+### Fixed
+
+- Claude Managed Agents streams keep the caller's `:telemetry_metadata` after a reconnect,
+  including for sessions reattached with `:session_id`. Reconnected streams previously
+  emitted telemetry without the caller's metadata.
+
 ## v0.14.1 (2026-10-31)
 
 ### Fixed
