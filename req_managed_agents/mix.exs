@@ -93,10 +93,8 @@ defmodule ReqManagedAgents.MixProject do
   defp hex do
     [
       ignore_advisories: [
-        # HTTP response splitting in cow_http_struct_hd:escape_string/2
+        # Test-only HTTP response splitting; no fixed Hex release.
         "EEF-CVE-2026-43966",
-        # Cookie request header injection in cow_cookie:cookie/1
-        "EEF-CVE-2026-43969",
         # Test-only HTTP/2 header amplification; no fixed Hex release (2026-11-07).
         "EEF-CVE-2026-113431",
         # Test-only HTTP/1.1 pipelining exhaustion; no fixed Hex release (2026-11-07).
