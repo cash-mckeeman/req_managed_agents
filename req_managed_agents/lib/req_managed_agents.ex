@@ -53,8 +53,10 @@ defmodule ReqManagedAgents do
 
   @doc """
   Provision (create-or-reuse) a provider's agent resource for `spec`, returning a durable
-  `handle` you splat into `ReqManagedAgents.Session.run/2` opts. Cached in-process by
-  `{provider, spec}`.
+  `handle` you splat into `ReqManagedAgents.Session.run/2` opts. Cached by
+  `{provider, spec}` plus the `:environment` digest when given; pass `:cache_scope` to keep
+  handles provisioned under different accounts apart (see
+  `ReqManagedAgents.Provisioner.ensure/3`).
   """
   @spec provision(module(), ReqManagedAgents.Provider.spec(), keyword()) ::
           {:ok, ReqManagedAgents.Provider.handle()} | {:error, term()}

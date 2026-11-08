@@ -264,12 +264,15 @@ spec = %Spec{
   tools: tools                  # SCHEMAS only; the implementations stay in your Handler
 }
 
-# create-or-reuse, cached in-process per {provider, spec}; `teardown/2` releases it
+# create-or-reuse, cached per {provider, spec, environment digest}; `teardown/2` releases it
 {:ok, handle} = ReqManagedAgents.provision(provider, spec, environment: env_spec)
 
 # then thread `handle` into Session.run — the connection opts are the one
 # per-provider difference (see the table below).
 ```
+
+When `provision/3` serves more than one account, pass `cache_scope:` (a non-secret name for the
+account and endpoint) so an identical spec is provisioned once per account rather than shared.
 
 What actually differs between the two providers is only this:
 

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- `ReqManagedAgents.provision/3` and `Provisioner.ensure/3` accept `:cache_scope`, a
+  non-secret name for the account a handle is provisioned under. The same spec under two
+  scopes is provisioned twice instead of sharing one cached handle. Calls without it keep
+  their existing cache keys; an invalid scope returns `{:error, {:invalid_opts, :cache_scope}}`
+  before any store or provider access.
+
 ## v0.14.1 (2026-10-31)
 
 ### Fixed
