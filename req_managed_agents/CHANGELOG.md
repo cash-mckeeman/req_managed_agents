@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- `ReqManagedAgents.provision/3` and `Provisioner.ensure/3` accept `:cache_scope`, a
+  non-secret name for the account a handle is provisioned under. The same spec under two
+  scopes is provisioned twice instead of sharing one cached handle. Calls without it keep
+  their existing cache keys; an invalid scope returns `{:error, {:invalid_opts, :cache_scope}}`
+  before any store or provider access.
+
+### Fixed
+
+- Claude Managed Agents streams keep the caller's `:telemetry_metadata` after a reconnect,
+  including for sessions reattached with `:session_id`. Reconnected streams previously
+  emitted telemetry without the caller's metadata.
+
 ## v0.14.1 (2026-10-31)
 
 ### Fixed
