@@ -27,7 +27,15 @@ defmodule ReqManagedAgents.SessionOutcomeTest do
         Plug.Conn.chunk(
           conn,
           wire([
-            %{"type" => "span.outcome_evaluation_end", "verdict" => "needs_revision"},
+            %{
+              "type" => "span.outcome_evaluation_end",
+              "id" => "end-1",
+              "outcome_id" => "outc-1",
+              "iteration" => 0,
+              "result" => "needs_revision",
+              "explanation" => "Missing total",
+              "outcome_evaluation_start_id" => "start-1"
+            },
             %{"type" => "agent.message", "content" => [%{"type" => "text", "text" => "v2"}]},
             %{"type" => "session.status_idle", "stop_reason" => %{"type" => "satisfied"}}
           ])
@@ -56,6 +64,9 @@ defmodule ReqManagedAgents.SessionOutcomeTest do
     assert result.terminal == :end_turn
     assert result.stop_reason == %{"type" => "satisfied"}
     assert result.turns == 1
+
+    # The idle stop reason never supplies a grade: only the evaluation end does.
+    assert [%{outcome_id: "outc-1", status: :needs_revision}] = result.outcomes
 
     # The kickoff POST carried the define_outcome event, not a user.message.
     # (Client.send_events/3 posts %{events: events} — see lib/req_managed_agents/client.ex:141.)

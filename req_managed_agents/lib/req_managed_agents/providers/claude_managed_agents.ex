@@ -22,7 +22,14 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.Evidence.{OwnedRequest, Recorder, Validation}
-  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, Consolidate, Event, Stream}
+
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{
+    Client,
+    Consolidate,
+    Event,
+    Grading,
+    Stream
+  }
 
   alias ReqManagedAgents.{
     Budget,
@@ -512,6 +519,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     |> Consolidate.unanswered_tool_uses()
     |> Enum.map(fn e -> %ToolUse{id: e["id"], name: e["name"], input: e["input"]} end)
   end
+
+  @impl true
+  def outcome_results(events), do: Grading.outcome_results(events)
 
   @impl true
   def text_delta(%{"type" => "agent.message", "content" => blocks}) when is_list(blocks) do

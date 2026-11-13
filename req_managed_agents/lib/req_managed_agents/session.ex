@@ -224,7 +224,9 @@ defmodule ReqManagedAgents.Session do
   @doc """
   Post a pre-built raw user event (e.g. `Event.tool_confirmation/2`, a mid-session
   `Event.define_outcome/3`) into a running live session. The event is pushed verbatim —
-  no turn accounting or accumulator reset. Streaming providers only:
+  no turn accounting or accumulator reset, so `SessionResult.outcomes` accumulates across
+  chained definitions (earlier outcomes first; select by `outcome_id`, not `hd/1`),
+  where `message/2` resets it. Streaming providers only:
   `{:error, :unsupported}` on `:request_response` providers (their input is consumed
   by `poll_turn/2`, there is no out-of-band channel).
   """
@@ -1070,7 +1072,7 @@ defmodule ReqManagedAgents.Session do
     do: min(500 * Integer.pow(2, min(n, 7)), :timer.minutes(60))
 
   defp session_result(s, tr, terminal) do
-    %SessionResult{
+    snapshot = %SessionResult{
       terminal: terminal,
       stop_reason: tr.stop_reason,
       session_id: s.info.session_id,
@@ -1082,6 +1084,45 @@ defmodule ReqManagedAgents.Session do
       events: s.events,
       transcript: s.request.snapshot.transcript
     }
+
+    project_outcomes(s, snapshot)
+  end
+
+  # The one place typed outcomes are derived: from exactly the snapshot's raw events,
+  # so success, checkpoint and failure snapshots cannot disagree. Unknown verdicts are
+  # counted against the previous snapshot (as multisets), so each is reported once.
+  @spec project_outcomes(State.t(), SessionResult.t()) :: SessionResult.t()
+  defp project_outcomes(s, %SessionResult{events: events} = snapshot) do
+    outcomes = Provider.outcome_results(s.provider, events)
+
+    report_unknown_results(
+      s,
+      unknown_results(outcomes) -- unknown_results(s.request.snapshot.outcomes)
+    )
+
+    %{snapshot | outcomes: outcomes}
+  end
+
+  defp unknown_results(outcomes) do
+    for %{outcome_id: id, evaluations: evaluations} <- outcomes,
+        %{result: :unknown, raw: raw} <- evaluations,
+        do: {id, raw}
+  end
+
+  defp report_unknown_results(_s, []), do: :ok
+
+  defp report_unknown_results(s, fresh) do
+    ids = Enum.uniq(Enum.map(fresh, &elem(&1, 0)))
+
+    :telemetry.execute(
+      [:req_managed_agents, :session, :unknown_outcome_result],
+      %{unknown_count: length(fresh)},
+      Map.merge(s.meta, %{outcome_ids: ids})
+    )
+
+    Logger.debug(fn ->
+      "unknown_outcome_result: #{length(fresh)} unrecognized verdict(s) for outcome(s) #{inspect(ids)}"
+    end)
   end
 
   defp finish(s, %TurnResult{} = tr) do
@@ -1211,9 +1252,10 @@ defmodule ReqManagedAgents.Session do
   defp mark_in_flight(s), do: begin_work(s)
   defp begin_work(s), do: checkpoint(s, %{s.request.snapshot | in_flight: :unknown})
 
-  defp checkpoint_partial(s),
-    do:
-      checkpoint(s, %{s.request.snapshot | events: s.events ++ s.turn_events, in_flight: :unknown})
+  defp checkpoint_partial(s) do
+    partial = %{s.request.snapshot | events: s.events ++ s.turn_events, in_flight: :unknown}
+    checkpoint(s, project_outcomes(s, partial))
+  end
 
   # A Converse-envelope event is a single-key map (%{"messageStop" => …}).
   defp envelope_type(%{} = ev), do: ev |> Map.keys() |> List.first()

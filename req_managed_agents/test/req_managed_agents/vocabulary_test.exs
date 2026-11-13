@@ -1,6 +1,15 @@
 defmodule ReqManagedAgents.VocabularyTest do
   use ExUnit.Case, async: true
-  alias ReqManagedAgents.{SessionResult, ToolResult, ToolUse, TurnResult, Usage}
+
+  alias ReqManagedAgents.{
+    OutcomeEvaluation,
+    OutcomeResult,
+    SessionResult,
+    ToolResult,
+    ToolUse,
+    TurnResult,
+    Usage
+  }
 
   test "structs construct with the documented defaults and encode to JSON" do
     assert %Usage{input_tokens: 0, output_tokens: 0, raw: []} = %Usage{}
@@ -20,7 +29,17 @@ defmodule ReqManagedAgents.VocabularyTest do
 
     assert %ToolUse{id: nil, name: "echo", input: %{}} = %ToolUse{name: "echo"}
 
+    {:ok, evaluation} =
+      OutcomeEvaluation.new(%{outcome_id: "o", iteration: 0, result: :satisfied})
+
+    {:ok, outcome} = OutcomeResult.new(%{outcome_id: "o", evaluations: [evaluation]})
+
+    assert %SessionResult{}.outcomes == []
+    assert Jason.decode!(Jason.encode!(%SessionResult{}))["outcomes"] == []
+
     for s <- [
+          evaluation,
+          outcome,
           %Usage{},
           %ToolUse{id: "1", name: "n", input: %{}},
           %ToolResult{tool_use_id: "1"},
