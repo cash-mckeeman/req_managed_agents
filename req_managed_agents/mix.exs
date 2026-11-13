@@ -94,11 +94,8 @@ defmodule ReqManagedAgents.MixProject do
     [
       ignore_advisories: [
         # Test-only HTTP response splitting; no fixed Hex release.
-        "EEF-CVE-2026-43966",
         # Test-only HTTP/2 header amplification; no fixed Hex release (2026-11-07).
-        "EEF-CVE-2026-113431",
         # Test-only HTTP/1.1 pipelining exhaustion; no fixed Hex release (2026-11-07).
-        "EEF-CVE-2026-115701"
       ]
     ]
   end
