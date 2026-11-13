@@ -149,7 +149,12 @@ defmodule ReqManagedAgents.Provider do
   """
   @callback text_delta(event()) :: String.t() | nil
 
-  @doc "Optional — true when the provider natively honors the `:outcome` kickoff (`user.define_outcome`)."
+  @doc """
+  Optional — true when the provider natively honors the `:outcome` kickoff (`user.define_outcome`).
+
+  A provider that returns true must export `c:outcome_results/1`; without it,
+  graded sessions report `outcomes: []`.
+  """
   @callback supports_outcomes?() :: boolean()
 
   @doc "Optional — true when the provider can enforce the `:budget` spend cap on a fresh session."
@@ -193,6 +198,16 @@ defmodule ReqManagedAgents.Provider do
   """
   @callback pending_tool_uses([event()]) :: [ReqManagedAgents.ToolUse.t()]
 
+  @doc """
+  Optional — project the provider's native grading evidence in `events` (a result's
+  accepted raw events, oldest first) into typed outcomes, in first-observation order.
+
+  Must be pure and total for any event data. Pairs with `c:supports_outcomes?/0`: a
+  provider that returns true there must export this callback, or its sessions report
+  `outcomes: []`. Providers without it always report `[]`.
+  """
+  @callback outcome_results([event()]) :: [ReqManagedAgents.OutcomeResult.t()]
+
   @optional_callbacks poll_turn: 2,
                       push_input: 2,
                       turn_boundary?: 1,
@@ -206,7 +221,8 @@ defmodule ReqManagedAgents.Provider do
                       supports_runtime_model?: 0,
                       data_plane: 0,
                       native_model: 1,
-                      pending_tool_uses: 1
+                      pending_tool_uses: 1,
+                      outcome_results: 1
 
   @capabilities %{
     outcomes: :supports_outcomes?,
@@ -238,6 +254,18 @@ defmodule ReqManagedAgents.Provider do
     if Code.ensure_loaded?(provider) and function_exported?(provider, :data_plane, 0),
       do: provider.data_plane(),
       else: :none
+  end
+
+  @doc """
+  The typed outcomes from `c:outcome_results/1`, loading the provider first.
+  Returns `[]` when the provider does not export the callback; support is never
+  inferred from the shape of `events`.
+  """
+  @spec outcome_results(module(), [event()]) :: [ReqManagedAgents.OutcomeResult.t()]
+  def outcome_results(provider, events) do
+    if Code.ensure_loaded?(provider) and function_exported?(provider, :outcome_results, 1),
+      do: provider.outcome_results(events),
+      else: []
   end
 
   @doc """

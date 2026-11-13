@@ -1,5 +1,6 @@
 defmodule ReqManagedAgents.ProviderConformanceTest do
   use ExUnit.Case, async: true
+  alias ReqManagedAgents.Provider
   alias ReqManagedAgents.Providers.{BedrockAgentCore, ClaudeManagedAgents, Local}
 
   # Every provider implements the shared callbacks; each mode adds its own.
@@ -54,6 +55,20 @@ defmodule ReqManagedAgents.ProviderConformanceTest do
 
     assert function_exported?(Local, :teardown, 2), "Local missing teardown/2"
     assert function_exported?(Local, :text_delta, 1), "Local missing text_delta/1"
+  end
+
+  test "every in-repo provider that supports native outcomes exports outcome_results/1" do
+    supporting =
+      for provider <- [BedrockAgentCore, ClaudeManagedAgents, Local],
+          Provider.supports?(provider, :outcomes),
+          do: provider
+
+    assert ClaudeManagedAgents in supporting
+
+    for provider <- supporting do
+      assert function_exported?(provider, :outcome_results, 1),
+             "#{inspect(provider)} supports outcomes but is missing outcome_results/1"
+    end
   end
 
   test "conn accessors answer for each provider's own conn shape" do

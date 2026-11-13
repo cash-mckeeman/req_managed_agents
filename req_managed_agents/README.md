@@ -45,7 +45,7 @@ Requires Elixir 1.20 or later.
 
 ```elixir
 def deps do
-  [{:req_managed_agents, "~> 0.14.0"}]
+  [{:req_managed_agents, "~> 0.15.0"}]
 end
 ```
 
@@ -55,7 +55,7 @@ users can skip these):
 ```elixir
 def deps do
   [
-    {:req_managed_agents, "~> 0.14.0"},
+    {:req_managed_agents, "~> 0.15.0"},
     {:ex_aws_auth, "~> 1.4"},
     {:aws_event_stream, "~> 0.1"}
   ]
@@ -67,7 +67,7 @@ Using `Providers.Local` with the **default chat_fun** (ReqLLM)? Add:
 ```elixir
 def deps do
   [
-    {:req_managed_agents, "~> 0.14.0"},
+    {:req_managed_agents, "~> 0.15.0"},
     {:req_llm, "~> 1.10"}
   ]
 end
@@ -205,6 +205,47 @@ The legacy `:timeout` starts after initialization; an absolute monotonic
 `:deadline` also bounds initialization. Live `message/2` calls queue while a
 request is active and start fresh usage accumulation when delivered.
 
+### Outcome results (Claude)
+
+On Claude Managed Agents, a graded session carries the grader's verdicts as typed data in
+`result.outcomes`, a list of `ReqManagedAgents.OutcomeResult`, one per outcome seen in the
+result's events, in first-observation order. The provider assigns each `outcome_id` and
+echoes it in `outcomes`. There is no singular "latest outcome" field: once several outcomes
+are chained with `Session.send_event/2`, record each id from its `OutcomeResult` and select
+with `Enum.find/2`, not `hd/1`.
+
+```elixir
+outcome = %ReqManagedAgents.Outcome{description: "Summarize the report", rubric: "Under 200 words"}
+{:ok, result} = ReqManagedAgents.run_to_completion(agent: agent, environment: env, outcome: outcome, handler: MyHandler)
+
+case result.outcomes do
+  [%{status: :satisfied}] -> :graded_ok
+  [%{status: status, evaluations: evals}] -> {status, Enum.map(evals, &{&1.iteration, &1.explanation})}
+  [] -> :no_grading_evidence
+end
+
+result.terminal  # the session's own boundary, not the grade
+```
+
+- `status` is `:pending` (no completed evaluation yet), one of the grader's verdicts
+  (`:satisfied`, `:needs_revision`, `:max_iterations_reached`, `:failed`, `:interrupted`), or
+  `:unknown`. It follows the evaluation at the greatest iteration; `:unknown` also marks
+  evidence that cannot be read as one grade (for example two different evaluations of the
+  same iteration), with the reason in `issues`.
+- `evaluations` holds each completed `OutcomeEvaluation`, ordered by iteration, with its
+  `explanation`. The provider's end event is kept verbatim in `raw`, including grader usage; the
+  usage in this end event is not added to `result.usage`.
+- A grade is not a completion signal, and `terminal` is not a grade: the grade comes only from
+  evaluation-end events, never from the idle stop reason. Read `outcomes` for the grade and
+  `terminal` for the session boundary; `result.events` still holds every raw event.
+- Missing evidence is not a pass: an empty `outcomes` means the result shows no
+  grade. A satisfied grade also does not mean your application accepts the output.
+- `outcomes` covers exactly the events of that result, including the partial snapshots
+  delivered on failure or timeout. It resets with `Session.message/2`; it accumulates across
+  outcomes defined mid-session with `Session.send_event/2`, earlier outcomes first.
+- Providers without native grading (Bedrock AgentCore, Local, and third-party providers that
+  do not implement `c:ReqManagedAgents.Provider.outcome_results/1`) always return `[]`.
+
 ### Convenience facade (Claude)
 
 For the Claude path, thin sugar over the above:
@@ -264,12 +305,15 @@ spec = %Spec{
   tools: tools                  # SCHEMAS only; the implementations stay in your Handler
 }
 
-# create-or-reuse, cached in-process per {provider, spec}; `teardown/2` releases it
+# create-or-reuse, cached per {provider, spec, environment digest}; `teardown/2` releases it
 {:ok, handle} = ReqManagedAgents.provision(provider, spec, environment: env_spec)
 
 # then thread `handle` into Session.run — the connection opts are the one
 # per-provider difference (see the table below).
 ```
+
+When `provision/3` serves more than one account, pass `cache_scope:` (a non-secret name for the
+account and endpoint) so an identical spec is provisioned once per account rather than shared.
 
 What actually differs between the two providers is only this:
 
@@ -281,7 +325,7 @@ What actually differs between the two providers is only this:
 | **provision creates** | a versioned agent **and** an environment (two resources) | one harness folding in model + tools + environment |
 | **provision handle** | `%{agent_id:, environment_id:}` | `%{harness_arn:, harness_id:}` |
 | **`Session.run` connection** | `agent: handle, environment: handle` | `harness_arn: handle.harness_arn, runtime_session_id: sid` (id ≥33 chars) |
-| **capabilities** | outcomes, server-tool observation, cross-batch tool recovery, resume/reconnect (stream-level, with `reconnect/3` event recovery) | `session_id:` reattach within the session window (no event recovery — a dropped turn just re-invokes) |
+| **capabilities** | outcomes (typed results in `SessionResult.outcomes`), server-tool observation, cross-batch tool recovery, resume/reconnect (stream-level, with `reconnect/3` event recovery) | `session_id:` reattach within the session window (no event recovery — a dropped turn just re-invokes) |
 
 `:agent`/`:environment` accept a handle (a struct, or a bare map with the same
 `agent_id:`/`environment_id:` keys) and unpack to the raw ids before the provider opens the
@@ -402,6 +446,7 @@ timeout outside it, so leave margin rather than sizing to the millisecond.
 | `[:req_managed_agents, :tool, :start \| :stop \| :exception]` | `duration` | `tool`, `session_id`, `is_error` |
 | `[:req_managed_agents, :session, :tool_uses]` | `tool_use_count` | `turn`, `tool_use_ids` |
 | `[:req_managed_agents, :session, :terminal]` | — | `terminal` |
+| `[:req_managed_agents, :session, :unknown_outcome_result]` | `unknown_count` | `outcome_ids` |
 
 The `:provision` events fire once per poll and once per terminal outcome while a Bedrock
 AgentCore harness is being provisioned; `phase` is `:ready`, `:endpoint` or `:deleted`, and `result` is
@@ -409,6 +454,9 @@ AgentCore harness is being provisioned; `phase` is `:ready`, `:endpoint` or `:de
 failure is diagnosable without attaching a handler.
 
 All providers run through `Session`, so the `:session` events fire regardless of loop host.
+`:unknown_outcome_result` fires when a result's outcomes first hold evaluations whose verdict
+the library does not recognize; `unknown_count` is how many, and `outcome_ids` lists the outcomes
+they belong to. Each such evaluation is counted once.
 `:stream` `:event` also fires for **both** providers as events arrive mid-turn — on Claude,
 `type` is the SSE event type and `session_id`/`usage` are set; on Bedrock AgentCore, `type` is
 the Converse envelope key (e.g. `"contentBlockDelta"`) and there is no `session_id`. The other
