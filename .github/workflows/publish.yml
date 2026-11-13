@@ -39,7 +39,7 @@ jobs:
       # Only a manual run may shorten the wait; a tag push is always bounded at 1200 s.
       CI_OK_WAIT_SECONDS: ${{ github.event_name == 'workflow_dispatch' && inputs.ci_ok_wait_seconds || '1200' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: erlef/setup-beam@v1
