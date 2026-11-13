@@ -14,11 +14,12 @@
     "terminal": "terminated",
     "session_id": "fixture-session",
     "stop_reason": null,
-    "in_flight": "unknown",
+    "transcript": null,
+    "outcomes": [],
     "custom_tool_uses": [],
     "server_tool_uses": [],
     "turns": 0,
-    "transcript": null
+    "in_flight": "unknown"
   },
   "guard-stop": {
     "events": [
@@ -62,10 +63,6 @@
     "terminal": "terminated",
     "session_id": "fixture-session",
     "stop_reason": "stop",
-    "in_flight": "none",
-    "custom_tool_uses": [],
-    "server_tool_uses": [],
-    "turns": 1,
     "transcript": [
       {
         "content": "go",
@@ -74,7 +71,12 @@
       {
         "content": "done"
       }
-    ]
+    ],
+    "outcomes": [],
+    "custom_tool_uses": [],
+    "server_tool_uses": [],
+    "turns": 1,
+    "in_flight": "none"
   },
   "partial-error": {
     "events": [
@@ -127,16 +129,6 @@
     "terminal": "terminated",
     "session_id": "fixture-session",
     "stop_reason": "tool_calls",
-    "in_flight": "unknown",
-    "custom_tool_uses": [
-      {
-        "id": "tool-1",
-        "input": {},
-        "name": "echo"
-      }
-    ],
-    "server_tool_uses": [],
-    "turns": 1,
     "transcript": [
       {
         "content": "go",
@@ -154,7 +146,18 @@
           }
         ]
       }
-    ]
+    ],
+    "outcomes": [],
+    "custom_tool_uses": [
+      {
+        "id": "tool-1",
+        "input": {},
+        "name": "echo"
+      }
+    ],
+    "server_tool_uses": [],
+    "turns": 1,
+    "in_flight": "unknown"
   },
   "success": {
     "events": [
@@ -198,10 +201,6 @@
     "terminal": "end_turn",
     "session_id": "fixture-session",
     "stop_reason": "stop",
-    "in_flight": "none",
-    "custom_tool_uses": [],
-    "server_tool_uses": [],
-    "turns": 1,
     "transcript": [
       {
         "content": "go",
@@ -210,6 +209,11 @@
       {
         "content": "done"
       }
-    ]
+    ],
+    "outcomes": [],
+    "custom_tool_uses": [],
+    "server_tool_uses": [],
+    "turns": 1,
+    "in_flight": "none"
   }
 }

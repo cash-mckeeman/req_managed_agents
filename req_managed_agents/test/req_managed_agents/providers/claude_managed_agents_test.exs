@@ -665,7 +665,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsTest do
     test "span.outcome_evaluation_end is NOT a turn boundary (needs_revision keeps running)" do
       refute ManagedAgents.turn_boundary?(%{
                "type" => "span.outcome_evaluation_end",
-               "verdict" => "needs_revision"
+               "outcome_id" => "outc-1",
+               "iteration" => 0,
+               "result" => "needs_revision"
              })
     end
   end
