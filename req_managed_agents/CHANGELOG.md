@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- Typed outcome results on Claude Managed Agents: `ReqManagedAgents.OutcomeResult` and
+  `ReqManagedAgents.OutcomeEvaluation`, delivered in the new `SessionResult.outcomes` (default
+  `[]`). Existing fields are unchanged; a Jason-encoded result gains an `outcomes` key. Providers
+  can implement the new optional `outcome_results/1` callback; `Provider.outcome_results/2`
+  returns `[]` for those that do not. `Providers.ClaudeManagedAgents.Grading.outcome_results/1`
+  projects a caller-supplied event list.
+- Telemetry event `[:req_managed_agents, :session, :unknown_outcome_result]` (measurement
+  `unknown_count`, metadata `outcome_ids`) when an evaluation carries a verdict the library does
+  not recognize.
+
+## v0.15.0 (2026-11-13)
+
+### Added
+
+- `ReqManagedAgents.provision/3` and `Provisioner.ensure/3` accept `:cache_scope`, a
+  non-secret name for the account a handle is provisioned under. The same spec under two
+  scopes is provisioned twice instead of sharing one cached handle. Calls without it keep
+  their existing cache keys; an invalid scope returns `{:error, {:invalid_opts, :cache_scope}}`
+  before any store or provider access.
+
+### Fixed
+
+- Claude Managed Agents streams keep the caller's `:telemetry_metadata` after a reconnect,
+  including for sessions reattached with `:session_id`. Reconnected streams previously
+  emitted telemetry without the caller's metadata.
+
 ## v0.14.1 (2026-10-31)
 
 ### Fixed

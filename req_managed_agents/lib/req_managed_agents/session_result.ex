@@ -8,6 +8,12 @@ defmodule ReqManagedAgents.SessionResult do
   `in_flight: :unknown` means additional provider work may be unmeasured;
   `:none` marks a completed local boundary. `usage.complete?` describes the
   represented contributions, so neither flag alone certifies total billed cost.
+
+  `outcomes` is the provider's native grading evidence projected from `events`
+  (`[]` when the provider has none). It resets with `Session.message/2` and
+  accumulates across `Session.send_event/2` chained definitions, in
+  first-observation order, so `hd/1` is not the current outcome: select by
+  `outcome_id`. A grade is not a completion signal; read `terminal` for that.
   """
   @derive Jason.Encoder
   defstruct terminal: :terminated,
@@ -20,6 +26,7 @@ defmodule ReqManagedAgents.SessionResult do
             usage: %ReqManagedAgents.Usage{},
             turns: 0,
             events: [],
+            outcomes: [],
             transcript: nil
 
   @type t :: %__MODULE__{
@@ -33,6 +40,7 @@ defmodule ReqManagedAgents.SessionResult do
           usage: ReqManagedAgents.Usage.t(),
           turns: non_neg_integer(),
           events: [map()],
+          outcomes: [ReqManagedAgents.OutcomeResult.t()],
           transcript: [map()] | nil
         }
 end

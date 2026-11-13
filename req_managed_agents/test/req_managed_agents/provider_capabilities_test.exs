@@ -24,6 +24,35 @@ defmodule ReqManagedAgents.ProviderCapabilitiesTest do
     end
   end
 
+  describe "outcome_results/2" do
+    @claude_events [
+      %{
+        "type" => "span.outcome_evaluation_end",
+        "id" => "e1",
+        "outcome_id" => "outc-1",
+        "iteration" => 0,
+        "result" => "satisfied"
+      }
+    ]
+
+    test "a provider without the callback returns [] even for Claude-shaped events" do
+      refute function_exported?(FakeProviders.RequestResponse, :outcome_results, 1)
+      assert Provider.outcome_results(FakeProviders.RequestResponse, @claude_events) == []
+      assert Provider.outcome_results(Local, @claude_events) == []
+      assert Provider.outcome_results(BedrockAgentCore, @claude_events) == []
+    end
+
+    test "Claude dispatches to its projection" do
+      assert [%{outcome_id: "outc-1", status: :satisfied}] =
+               Provider.outcome_results(ClaudeManagedAgents, @claude_events)
+    end
+
+    test "native grading stays unsupported on Local and AgentCore" do
+      refute Provider.supports?(Local, :outcomes)
+      refute Provider.supports?(BedrockAgentCore, :outcomes)
+    end
+  end
+
   test "each provider names its data-plane wire" do
     assert Provider.data_plane(Local) == :chat_completions
     assert Provider.data_plane(ClaudeManagedAgents) == :managed_agents_api
@@ -92,6 +121,15 @@ defmodule ReqManagedAgents.ProviderCapabilitiesLoadingTest do
 
     assert Provider.native_model(ClaudeManagedAgents, "anthropic:claude-haiku-4-5") ==
              {:ok, "claude-haiku-4-5"}
+  end
+
+  test "outcome results load the provider before reading the callback" do
+    unload(ClaudeManagedAgents)
+
+    assert [%{outcome_id: "outc-1"}] =
+             Provider.outcome_results(ClaudeManagedAgents, [
+               %{"type" => "user.define_outcome", "outcome_id" => "outc-1"}
+             ])
   end
 
   defp unload(provider) do

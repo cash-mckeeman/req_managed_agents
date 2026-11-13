@@ -22,7 +22,14 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   alias ReqManagedAgents.Agent.Spec
   alias ReqManagedAgents.Evidence.{OwnedRequest, Recorder, Validation}
-  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Client, Consolidate, Event, Stream}
+
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{
+    Client,
+    Consolidate,
+    Event,
+    Grading,
+    Stream
+  }
 
   alias ReqManagedAgents.{
     Budget,
@@ -117,7 +124,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
       case opts[:session_id] do
         nil -> open_fresh(client, opts, budget, subscriber)
-        sid -> open_resume(client, sid, opts[:evidence_context])
+        sid -> open_resume(client, sid, opts[:evidence_context], opts[:telemetry_metadata] || %{})
       end
     end
   end
@@ -166,6 +173,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
          session_id: sid,
          ref: ref,
          consumer: task,
+         telemetry_metadata: opts[:telemetry_metadata] || %{},
          evidence: evidence,
          evidence_recorder: if(evidence, do: evidence.recorder)
        }}
@@ -189,7 +197,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
   # Resume an existing session: don't create or kick off — the Session consolidates via
   # reconnect/3 (list history, dedup, re-drive any unanswered tool call), opening the stream there.
-  defp open_resume(client, sid, evidence),
+  defp open_resume(client, sid, evidence, telemetry_metadata),
     do:
       {:ok,
        %{
@@ -197,6 +205,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
          session_id: sid,
          ref: nil,
          resume: true,
+         telemetry_metadata: telemetry_metadata,
          evidence: evidence,
          evidence_recorder: if(evidence, do: evidence.recorder)
        }}
@@ -473,7 +482,10 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
 
         {:ok, task} =
           Task.start_link(fn ->
-            Stream.stream(conn.client, conn.session_id, subscriber, ref: ref)
+            Stream.stream(conn.client, conn.session_id, subscriber,
+              ref: ref,
+              telemetry_metadata: Map.get(conn, :telemetry_metadata, %{})
+            )
           end)
 
         {:ok, Map.merge(conn, %{ref: ref, consumer: task, evidence: evidence}), pending, seen,
@@ -507,6 +519,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents do
     |> Consolidate.unanswered_tool_uses()
     |> Enum.map(fn e -> %ToolUse{id: e["id"], name: e["name"], input: e["input"]} end)
   end
+
+  @impl true
+  def outcome_results(events), do: Grading.outcome_results(events)
 
   @impl true
   def text_delta(%{"type" => "agent.message", "content" => blocks}) when is_list(blocks) do
