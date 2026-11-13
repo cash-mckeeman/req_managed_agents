@@ -14,6 +14,12 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
     "max_list_cost" => %{"amount" => "1", "currency" => "USD"}
   }
 
+  # A blocked request sleeps far past every deadline here and is reaped when the session
+  # gives up, so the sleep costs nothing. A caller that waited on it would take the whole
+  # sleep; one that kept its deadline returns well inside @prompt_ms on a loaded runner.
+  @blocked_ms 5_000
+  @prompt_ms 1_000
+
   test "an expired or invalid absolute deadline refuses provider activity" do
     owner = self()
 
@@ -41,7 +47,7 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
     client =
       client(fn request ->
         send(owner, {:creating, self()})
-        Process.sleep(700)
+        Process.sleep(@blocked_ms)
         {request, Req.Response.new(status: 503, body: %{})}
       end)
 
@@ -50,7 +56,7 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
     assert {:error, :timeout} =
              Session.run(Managed, options(client, started + 200) ++ [notify: self()])
 
-    assert now() - started < 350
+    assert now() - started < @prompt_ms
     assert_receive {:creating, session}
     refute_receive {:managed_agents_session, _}
     assert_dead(session)
@@ -72,7 +78,7 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
 
           {:post, "/v1/sessions/owned-session/events"} ->
             send(owner, {:kickoff, self()})
-            Process.sleep(700)
+            Process.sleep(@blocked_ms)
             response(request, %{})
         end
       end)
@@ -82,7 +88,7 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
     assert {:error, :timeout} =
              Session.run(Managed, options(client, started + 200) ++ [notify: self()])
 
-    assert now() - started < 350
+    assert now() - started < @prompt_ms
     assert_receive {:kickoff, session}
     assert_received {:managed_agents_session, result}
     assert result.session_id == "owned-session"
@@ -142,14 +148,14 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
     client =
       client(fn request ->
         send(owner, {:creating, self(), now()})
-        Process.sleep(700)
+        Process.sleep(@blocked_ms)
         {request, Req.Response.new(status: 503, body: %{})}
       end)
 
     assert {:error, report} = execute(client)
     finished = now()
     assert_receive {:creating, session, started}
-    assert finished - started < 350
+    assert finished - started < @prompt_ms
     assert_dead(session)
     assert report.cleanup.status == :unknown
     assert report.cleanup.owned_resources == []
@@ -169,7 +175,7 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
             response(request, %{"id" => "owned-session"})
 
           "/v1/sessions/owned-session/archive" ->
-            Process.sleep(700)
+            Process.sleep(@blocked_ms)
             response(request, %{})
         end
       end)
@@ -177,7 +183,7 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
     assert {:error, report} = execute(client)
     finished = now()
     assert_receive {:request, :post, "/v1/sessions", session, started}
-    assert finished - started < 350
+    assert finished - started < @prompt_ms
     assert_receive {:request, :post, "/v1/sessions/owned-session/archive", worker, _}
     assert_dead(session)
     assert_dead(worker)
@@ -198,7 +204,7 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
 
           "/v1/sessions/owned-session/archive" ->
             send(owner, {:archive_worker, self()})
-            Process.sleep(700)
+            Process.sleep(@blocked_ms)
             response(request, %{})
         end
       end)
@@ -213,7 +219,7 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
     monitor = Process.monitor(worker)
     on_exit(fn -> Process.exit(worker, :kill) end)
     Process.exit(caller, :kill)
-    assert_receive {:DOWN, ^monitor, :process, ^worker, _}, 150
+    assert_receive {:DOWN, ^monitor, :process, ^worker, _}, @prompt_ms
   end
 
   test "public acceptance reaps its archive worker even while the request guard is suspended" do
@@ -272,7 +278,7 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
     client =
       client(fn request ->
         send(owner, {:creating, self()})
-        Process.sleep(700)
+        Process.sleep(@blocked_ms)
         {request, Req.Response.new(status: 503, body: %{})}
       end)
 
@@ -282,7 +288,7 @@ defmodule ReqManagedAgents.Acceptance.DeadlineTest do
     monitor = Process.monitor(session)
     on_exit(fn -> Process.exit(session, :kill) end)
     Process.exit(caller, :kill)
-    assert_receive {:DOWN, ^monitor, :process, ^session, _}, 150
+    assert_receive {:DOWN, ^monitor, :process, ^session, _}, @prompt_ms
   end
 
   defp execute(client, timeout_ms \\ 200) do
