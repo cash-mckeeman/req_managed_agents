@@ -8,7 +8,7 @@ fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok: $1"; else echo "FAIL: $1 (want '$2', got '$3')"; fail=1; fi; }
 # curl, mix and elixir are stubs: curl answers $FAKE_HTTP (exiting $FAKE_CURL_RC),
 # and mix and elixir record where (cwd, relative to the repo) and how they were called.
-# mix also records, in its own file, the calls that ran with a key in the environment.
+# mix also records, in its own file, any call that ran with a Hex key in the environment.
 # curl records its argv in its own file, so the sequence rows count only mix and elixir.
 d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
 mkdir -p "$d/bin" "$d/repo/req_managed_agents" "$d/repo/req_managed_agents_host"
@@ -37,13 +37,8 @@ for answer in "503 0" "429 0" "000 6"; do
   check "hex.pm HTTP $code (curl exit $rc): fails" 1 "$([ "$(publish req_managed_agents_host patch 0 "$code" "$rc")" -ne 0 ] && echo 1 || echo 0)"
   check "hex.pm HTTP $code (curl exit $rc): nothing runs" 0 "$(ran .)"
 done
-for k in "" UNSET; do
-  check "a real run with the key '${k:-empty}': fails" 1 "$([ "$(KEY="$k" publish req_managed_agents_host patch 0 404)" -ne 0 ] && echo 1 || echo 0)"
-  check "a real run with the key '${k:-empty}': nothing runs" 0 "$(ran .)"
-  check "a real run with the key '${k:-empty}': never publishes" 0 "$(ran hex.publish)"
-  check "a real run with the key '${k:-empty}': never asks hex.pm" 0 "$(grep -c . "$d/curls")"
-done
-check "a dry run needs no key" 0 "$(KEY= publish req_managed_agents lockstep 1 404)"
+check "a dry run needs no key" 0 "$(KEY=UNSET publish req_managed_agents lockstep 1 404)"
+check "a real run needs no key: workload identity signs the publish" 1 "$(KEY=UNSET publish req_managed_agents lockstep 0 404 >/dev/null; ran "hex.publish --yes")"
 for dry in true yes ""; do
   check "DRY_RUN='$dry': fails" 1 "$([ "$(publish req_managed_agents lockstep "$dry" 404)" -ne 0 ] && echo 1 || echo 0)"
   check "DRY_RUN='$dry': nothing runs" 0 "$(ran .)"
@@ -77,5 +72,5 @@ publish req_managed_agents lockstep 0 404 >/dev/null
 check "an RMA lockstep run: five calls, none at a floor" 5 "$(grep -c . "$d/calls")"
 check "an RMA lockstep run: every call in its directory" 5 "$(grep -c 'cwd=/req_managed_agents ' "$d/calls")"
 publish req_managed_agents_host patch 0 404 >/dev/null
-check "a real host patch: only hex.publish sees the key" "hex.publish --yes" "$(cat "$d/keyed")"
+check "a real host patch: no call sees a key" "" "$(KEY=UNSET publish req_managed_agents_host patch 0 404 >/dev/null; cat "$d/keyed")"
 exit $fail

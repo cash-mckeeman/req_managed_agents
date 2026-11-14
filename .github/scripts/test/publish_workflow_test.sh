@@ -18,26 +18,17 @@ for pkg in req_managed_agents req_managed_agents_host; do
   check "publish $pkg runs only when every guard passed" \
     "        if: contains(format(' {0} ', steps.plan.outputs.packages), ' $pkg ')" "$(step "publish $pkg" if)"
 done
-check "the RMA step gets the RMA key, on a tag push only" \
-  "          HEX_API_KEY: \${{ github.event_name == 'push' && secrets.HEX_API_KEY || '' }}" "$(step 'publish req_managed_agents' HEX_API_KEY)"
-check "the RMAH step gets the RMAH key, on a tag push only" \
-  "          HEX_API_KEY: \${{ github.event_name == 'push' && secrets.HEX_API_KEY_RMAH || '' }}" "$(step 'publish req_managed_agents_host' HEX_API_KEY)"
-check "the key check runs on a tag push only" \
-  "        if: github.event_name == 'push'" "$(step "every selected package's Hex key is set" if)"
-check "the key check reads the RMA key" \
-  "          KEY_RMA: \${{ secrets.HEX_API_KEY }}" "$(step "every selected package's Hex key is set" KEY_RMA)"
-check "the key check reads the RMAH key" \
-  "          KEY_RMAH: \${{ secrets.HEX_API_KEY_RMAH }}" "$(step "every selected package's Hex key is set" KEY_RMAH)"
-check "the version check and the key check can each fail" 2 "$(lines "          exit \$bad")"
-check "the key check precedes the first publish" 1 "$([ "$(grep -n "name: every selected package's Hex key is set" "$WF" | cut -d: -f1)" -lt "$(grep -n 'name: publish req_managed_agents$' "$WF" | cut -d: -f1)" ] && echo 1 || echo 0)"
-check "the key check checks the planned packages" \
-  "          PACKAGES: \${{ steps.plan.outputs.packages }}" "$(step "every selected package's Hex key is set" PACKAGES)"
-check "the key check tests the RMA key for req_managed_agents" 1 \
-  "$(lines "              req_managed_agents) [ -n \"\$KEY_RMA\" ] || { echo \"::error::HEX_API_KEY is empty; \$p cannot be published\"; bad=1; } ;;")"
-check "the key check tests the RMAH key for req_managed_agents_host" 1 \
-  "$(lines "              req_managed_agents_host) [ -n \"\$KEY_RMAH\" ] || { echo \"::error::HEX_API_KEY_RMAH is empty; \$p cannot be published\"; bad=1; } ;;")"
-check "the key check has one arm per package and one fallback" 3 "$(grep -cE '^              [^ ]+\) ' "$WF")"
-check "no other line reads a secret" 4 "$(grep -v '^ *#' "$WF" | grep -c 'secrets')"
+check "the version check can fail" 1 "$(lines "          exit \$bad")"
+check "no step carries a Hex key" 0 "$(grep -c 'HEX_API_KEY' "$WF")"
+check "no line reads a secret" 0 "$(grep -v '^ *#' "$WF" | grep -c 'secrets')"
+check "the job may mint an OIDC token" 1 "$(lines "      id-token: write")"
+check "only the publish job holds id-token" 1 "$(grep -c 'id-token:' "$WF")"
+check "the job keeps contents: read" 1 "$(lines "      contents: read")"
+check "the job keeps checks: read" 1 "$(lines "      checks: read")"
+check "the job runs in prod, where hex.pm trusts it" 1 "$(lines "    environment: prod")"
+check "the Hex version guard runs the script" "        run: bash .github/scripts/hex-workload-identity.sh" "$(step 'hex supports workload identity' run)"
+check "the Hex version guard precedes the plan and both publishes" 1 \
+  "$([ "$(grep -n 'name: hex supports workload identity' "$WF" | cut -d: -f1)" -lt "$(grep -n 'id: plan' "$WF" | cut -d: -f1)" ] && echo 1 || echo 0)"
 check "a dry run always ends in the verdict step" "        if: always() && env.DRY_RUN == '1'" "$(step 'dry-run verdict' if)"
 check "the verdict fails on any guard failure" 1 "$(lines "          case \"\$OUTCOMES\" in *failure*) exit 1 ;; esac")"
 check "reachability walks main's first-parent history" 1 "$(lines "        run: git rev-list --first-parent origin/main | grep -x \"\$GITHUB_SHA\" > /dev/null")"

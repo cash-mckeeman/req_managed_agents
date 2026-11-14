@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # publish-package.sh <package>, run from the repository root.
-# Env: KIND (lockstep|patch), VERSION, DRY_RUN (1|0), HEX_API_KEY (real runs only).
+# Env: KIND (lockstep|patch), VERSION, DRY_RUN (1|0). A real run publishes with the
+# job's workload identity, so no Hex key is passed.
 # Order: skip if already on Hex (a rerun after a partial failure is safe) ->
 # patch floor (host patches) -> suite against Hex deps -> tarball check -> publish.
 set -euo pipefail
@@ -11,12 +12,6 @@ cd "$pkg"
 # DRY_RUN must not fall through to a real publish.
 case "${DRY_RUN-}" in 0|1) ;; *) echo "publish-package: DRY_RUN must be 0 or 1, not '${DRY_RUN-}'" >&2; exit 1 ;; esac
 case "${KIND-}" in lockstep|patch) ;; *) echo "publish-package: KIND must be lockstep or patch, not '${KIND-}'" >&2; exit 1 ;; esac
-
-if [ "$DRY_RUN" != 1 ] && [ -z "${HEX_API_KEY:-}" ]; then
-  echo "publish-package: HEX_API_KEY is empty on a real run for $pkg" >&2; exit 1
-fi
-# Only hex.publish needs the key: the suites and their test-only deps run without it.
-hex_key="${HEX_API_KEY:-}"; unset HEX_API_KEY
 
 # A plain assignment, so set -e stops on an on-hex error. Inside `[ ... ]` the
 # error would read as "not on Hex" and the publish would go ahead.
@@ -50,5 +45,5 @@ RMA_PUBLISH=1 mix hex.build --output "$RUNNER_TEMP/$pkg.tar"
 elixir "$here/check_package.exs" "$RUNNER_TEMP/$pkg.tar"
 
 if [ "$DRY_RUN" = 1 ]; then echo "- $pkg $VERSION: dry run, would publish" >> "$summary"; exit 0; fi
-HEX_API_KEY="$hex_key" RMA_PUBLISH=1 mix hex.publish --yes
+RMA_PUBLISH=1 mix hex.publish --yes
 echo "- $pkg $VERSION: published" >> "$summary"
