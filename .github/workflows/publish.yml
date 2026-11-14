@@ -3,6 +3,11 @@ name: Publish to Hex
 # A tag publishes. vX.Y.0 releases every package in the root mix.exs's publish
 # order (a lockstep minor); <package>-vX.Y.Z releases that package alone (a
 # patch). A manual run rehearses a tag: every guard runs, nothing publishes.
+#
+# Two jobs. `guard` runs on a tag and on a manual run, holds no environment and
+# no OIDC token, and does the guards and, on a manual run, the dry-run publish
+# of each package. `publish` runs on a tag only, after `guard`: it alone runs in
+# `prod` and may mint the OIDC token hex.pm exchanges for a publish token.
 
 on:
   push:
@@ -26,17 +31,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  guard:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # hex.pm trusts this repository's publish.yml running in the `prod`
-    # environment (workload identity): no stored key. The job-level block
-    # replaces the workflow-level one, so it restates what the job reads.
-    environment: prod
-    permissions:
-      contents: read
-      checks: read
-      id-token: write
+    outputs:
+      packages: ${{ steps.plan.outputs.packages }}
+      kind: ${{ steps.plan.outputs.kind }}
+      version: ${{ steps.plan.outputs.version }}
     env:
       TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
       DRY_RUN: ${{ github.event_name == 'push' && '0' || '1' }}
@@ -51,8 +52,6 @@ jobs:
         with:
           elixir-version: "1.20"
           otp-version: "29"
-      - name: hex supports workload identity
-        run: bash .github/scripts/hex-workload-identity.sh
       - id: plan
         name: resolve the publish set
         continue-on-error: ${{ env.DRY_RUN == '1' }}
@@ -97,14 +96,14 @@ jobs:
           OUTCOMES: plan=${{ steps.plan.outcome }} versions=${{ steps.versions.outcome }} reachable=${{ steps.reachable.outcome }} ci_ok=${{ steps.ci_ok.outcome }}
         run: |
           echo "guards: $OUTCOMES" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: publish req_managed_agents
-        if: contains(format(' {0} ', steps.plan.outputs.packages), ' req_managed_agents ')
+      - name: rehearse req_managed_agents
+        if: github.event_name != 'push' && contains(format(' {0} ', steps.plan.outputs.packages), ' req_managed_agents ')
         env:
           KIND: ${{ steps.plan.outputs.kind }}
           VERSION: ${{ steps.plan.outputs.version }}
         run: bash .github/scripts/publish-package.sh req_managed_agents
-      - name: publish req_managed_agents_host
-        if: contains(format(' {0} ', steps.plan.outputs.packages), ' req_managed_agents_host ')
+      - name: rehearse req_managed_agents_host
+        if: github.event_name != 'push' && contains(format(' {0} ', steps.plan.outputs.packages), ' req_managed_agents_host ')
         env:
           KIND: ${{ steps.plan.outputs.kind }}
           VERSION: ${{ steps.plan.outputs.version }}
@@ -115,3 +114,39 @@ jobs:
           OUTCOMES: plan=${{ steps.plan.outcome }} versions=${{ steps.versions.outcome }} reachable=${{ steps.reachable.outcome }} ci_ok=${{ steps.ci_ok.outcome }}
         run: |
           case "$OUTCOMES" in *failure*) exit 1 ;; esac
+
+  publish:
+    needs: guard
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # hex.pm trusts this repository's publish.yml running in the `prod`
+    # environment (workload identity): no stored key. Only this job may mint
+    # the OIDC token. The job-level block replaces the workflow-level one, so it
+    # restates what the job reads, which no longer includes the checks API.
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DRY_RUN: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+      - name: hex supports workload identity
+        run: bash .github/scripts/hex-workload-identity.sh
+      - name: publish req_managed_agents
+        if: contains(format(' {0} ', needs.guard.outputs.packages), ' req_managed_agents ')
+        env:
+          KIND: ${{ needs.guard.outputs.kind }}
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: bash .github/scripts/publish-package.sh req_managed_agents
+      - name: publish req_managed_agents_host
+        if: contains(format(' {0} ', needs.guard.outputs.packages), ' req_managed_agents_host ')
+        env:
+          KIND: ${{ needs.guard.outputs.kind }}
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: bash .github/scripts/publish-package.sh req_managed_agents_host
