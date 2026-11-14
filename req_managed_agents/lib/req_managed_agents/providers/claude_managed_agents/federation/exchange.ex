@@ -19,20 +19,25 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Exchange do
     end
   end
 
-  # A fresh token for every exchange: the file is reread, the function called.
-  defp identity_token(%Federation{identity_token: fun}) when is_function(fun, 0) do
-    result =
-      try do
-        fun.()
-      rescue
-        _ -> :error
-      catch
-        _, _ -> :error
-      end
+  # A new token for every exchange: the file is reread, the function called.
+  # The function runs in its own process so a hung one cannot hold the caller.
+  defp identity_token(%Federation{identity_token: fun} = federation) when is_function(fun, 0) do
+    task =
+      Task.async(fn ->
+        try do
+          fun.()
+        rescue
+          _ -> :error
+        catch
+          _, _ -> :error
+        end
+      end)
 
-    case result do
-      {:ok, jwt} -> validate(jwt)
-      _ -> {:error, :identity_token_unavailable}
+    case Task.yield(task, federation.identity_token_timeout) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {:ok, jwt}} -> validate(jwt)
+      {:ok, _} -> {:error, :identity_token_unavailable}
+      {:exit, _} -> {:error, :identity_token_unavailable}
+      nil -> {:error, :identity_token_timeout}
     end
   end
 
@@ -77,7 +82,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Exchange do
         method: :post,
         base_url: http.base_url,
         url: "/v1/oauth/token",
-        receive_timeout: http.receive_timeout,
+        receive_timeout: federation.receive_timeout,
         json: body
       ]
       |> Req.new()

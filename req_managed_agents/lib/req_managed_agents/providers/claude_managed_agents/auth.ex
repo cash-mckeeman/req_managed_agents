@@ -94,7 +94,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Auth do
   @spec headers(Client.t()) ::
           {:ok, [{String.t(), String.t()}]} | {:error, {:authentication_error, reason()}}
   def headers(%Client{federation: %Federation{} = federation} = client) do
-    case Federation.token(federation, client, System.system_time(:second)) do
+    case Federation.token(federation, client, fn -> System.system_time(:second) end) do
       {:ok, token} -> {:ok, [{"authorization", "Bearer " <> token}]}
       {:error, reason} -> {:error, {:authentication_error, reason}}
     end

@@ -5,15 +5,22 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
   `ReqManagedAgents.Providers.ClaudeManagedAgents.Client.new/1`; this module is
   its `:federation` field.
 
-  Identity tokens carry a `jti` and are single use, so every exchange fetches a
-  fresh one and exchanges are serialised per credential: a second caller waits
-  for the first and then finds the cache filled. For an access token expiring
-  at `e`:
+  Identity tokens carry a `jti` and are single use, so every exchange obtains a
+  new one and only one exchange per credential runs at a time. A caller who holds
+  a usable cached token never waits for it: while another process refreshes, or
+  during the retry pause after a failed refresh, the cached token is served. A
+  caller with no usable token waits at most `:exchange_timeout` (15 s). For an
+  access token expiring at `e`:
 
     * before `e - 120 s` the cached token is served;
-    * from `e - 120 s` to `e - 30 s` a new exchange is attempted, and if it
-      fails the cached token keeps serving while retries pause for 10 seconds;
+    * from `e - 120 s` to `e - 30 s` one caller exchanges and the others keep
+      the cached token; if the exchange fails the cached token keeps serving
+      while retries pause for 10 seconds;
     * from `e - 30 s` the cached token is unusable: exchange or fail.
+
+  The identity-token function is given `:identity_token_timeout` (10 s) and the
+  exchange request `:exchange_receive_timeout` (10 s); neither uses the client's
+  `:receive_timeout`.
 
   Tokens are cached per node, keyed by the settings and the identity-token
   source (the file path, the function, or `:cache_key` when given). Each new
@@ -22,12 +29,12 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
   """
 
   alias ReqManagedAgents.Config
-  alias ReqManagedAgents.Providers.ClaudeManagedAgents.BearerCredential
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.{Cache, Exchange}
 
   @advisory_seconds 120
   @mandatory_seconds 30
   @backoff_seconds 10
+  @poll_ms 25
 
   defstruct [
     :rule_id,
@@ -36,7 +43,10 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
     :workspace_id,
     :identity_token_file,
     :identity_token,
-    :cache_key
+    :cache_key,
+    exchange_timeout: 15_000,
+    identity_token_timeout: 10_000,
+    receive_timeout: 10_000
   ]
 
   @type identity_token :: (-> {:ok, String.t()} | {:error, term()})
@@ -51,21 +61,22 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
           workspace_id: String.t() | nil,
           identity_token_file: String.t() | nil,
           identity_token: identity_token() | nil,
-          cache_key: term()
+          cache_key: term(),
+          exchange_timeout: pos_integer(),
+          identity_token_timeout: pos_integer(),
+          receive_timeout: pos_integer()
         }
   @type reason ::
           :identity_token_unreadable
           | :identity_token_invalid
           | :identity_token_unavailable
+          | :identity_token_timeout
+          | :exchange_timeout
           | :exchange_rejected
           | :exchange_failed
           | :exchange_invalid_response
-  @type http :: %{
-          optional(atom()) => term(),
-          base_url: String.t(),
-          req_options: keyword(),
-          receive_timeout: timeout()
-        }
+  @type http :: %{optional(atom()) => term(), base_url: String.t(), req_options: keyword()}
+  @type clock :: integer() | (-> integer())
 
   @doc false
   # `:none` when no federation setting is present; an error when some are
@@ -80,6 +91,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
     file = setting(opts, :identity_token_file, "ANTHROPIC_IDENTITY_TOKEN_FILE")
     fun = Config.resolve(opts, :identity_token)
     cache_key = Config.resolve(opts, :cache_key)
+    exchange_timeout = Config.resolve(opts, :exchange_timeout, nil, 15_000)
+    identity_timeout = Config.resolve(opts, :identity_token_timeout, nil, 10_000)
+    receive_timeout = Config.resolve(opts, :exchange_receive_timeout, nil, 10_000)
 
     # The rule id switches federation on, so `federation_rule_id: nil` turns it off.
     cond do
@@ -87,6 +101,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
         :none
 
       not is_nil(fun) and not is_function(fun, 0) ->
+        {:error, :invalid}
+
+      not Enum.all?([exchange_timeout, identity_timeout, receive_timeout], &pos_integer?/1) ->
         {:error, :invalid}
 
       missing = missing(rule, org, file, fun) ->
@@ -101,10 +118,15 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
            workspace_id: workspace,
            identity_token_file: file,
            identity_token: fun,
-           cache_key: cache_key
+           cache_key: cache_key,
+           exchange_timeout: exchange_timeout,
+           identity_token_timeout: identity_timeout,
+           receive_timeout: receive_timeout
          }}
     end
   end
+
+  defp pos_integer?(value), do: is_integer(value) and value > 0
 
   # An exported-but-empty variable counts as unset, as in the official SDKs'
   # advice to unset rather than blank.
@@ -129,40 +151,61 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
   end
 
   @doc false
-  # An access token valid for a request made at `now` (Unix seconds), exchanging
-  # or refreshing it as the policy above requires.
-  @spec token(t(), http(), integer()) :: {:ok, String.t()} | {:error, reason()}
-  def token(%__MODULE__{} = federation, http, now) do
+  # An access token valid for a request at the time `clock` reports (Unix
+  # seconds; an integer is a fixed time), exchanging or refreshing as the
+  # policy above requires. Waits at most `exchange_timeout` milliseconds.
+  @spec token(t(), http(), clock()) :: {:ok, String.t()} | {:error, reason()}
+  def token(%__MODULE__{} = federation, http, clock) do
     key = cache_key(federation, http)
+    deadline = System.monotonic_time(:millisecond) + federation.exchange_timeout
+    serve(federation, http, key, clock, deadline)
+  end
 
-    case Cache.fetch(key) do
-      {%BearerCredential{} = credential, _retry_at}
-      when now < credential.expires_at - @advisory_seconds ->
-        {:ok, credential.access_token}
+  defp serve(federation, http, key, clock, deadline) do
+    now = now(clock)
+    entry = Cache.fetch(key)
 
-      _ ->
-        :global.trans(
-          {{__MODULE__, key}, self()},
-          fn -> refresh(federation, http, key, now) end,
-          [node()]
-        )
+    cond do
+      fresh?(entry, now) -> cached(entry)
+      paused?(entry, now) and usable?(entry, now) -> cached(entry)
+      true -> locked(federation, http, key, clock, entry, now, deadline)
     end
   end
 
-  # Runs under the per-credential lock.
-  defp refresh(federation, http, key, now) do
+  # Never waits on the lock: a busy lock serves a usable cached token, and a
+  # caller with none polls until the holder finishes or the deadline passes.
+  defp locked(federation, http, key, clock, entry, now, deadline) do
+    lock = {{__MODULE__, key}, self()}
+
+    cond do
+      :global.set_lock(lock, [node()], 0) ->
+        try do
+          refresh(federation, http, key, clock)
+        after
+          :global.del_lock(lock, [node()])
+        end
+
+      usable?(entry, now) ->
+        cached(entry)
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        {:error, :exchange_timeout}
+
+      true ->
+        Process.sleep(@poll_ms)
+        serve(federation, http, key, clock, deadline)
+    end
+  end
+
+  # Runs under the per-credential lock, with the clock read again.
+  defp refresh(federation, http, key, clock) do
+    now = now(clock)
     entry = Cache.fetch(key)
 
-    case entry do
-      {credential, _} when now < credential.expires_at - @advisory_seconds ->
-        {:ok, credential.access_token}
-
-      {credential, retry_at}
-      when retry_at > now and now < credential.expires_at - @mandatory_seconds ->
-        {:ok, credential.access_token}
-
-      _ ->
-        exchange(federation, http, key, entry, now)
+    cond do
+      fresh?(entry, now) -> cached(entry)
+      paused?(entry, now) and usable?(entry, now) -> cached(entry)
+      true -> exchange(federation, http, key, entry, now)
     end
   end
 
@@ -173,16 +216,29 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
         {:ok, credential.access_token}
 
       {:error, reason} ->
-        case entry do
-          {credential, _} when now < credential.expires_at - @mandatory_seconds ->
-            Cache.put(key, credential, now + @backoff_seconds, now)
-            {:ok, credential.access_token}
-
-          _ ->
-            {:error, reason}
+        if usable?(entry, now) do
+          {credential, _} = entry
+          Cache.put(key, credential, now + @backoff_seconds, now)
+          {:ok, credential.access_token}
+        else
+          {:error, reason}
         end
     end
   end
+
+  defp now(clock) when is_function(clock, 0), do: clock.()
+  defp now(clock) when is_integer(clock), do: clock
+
+  defp cached({credential, _}), do: {:ok, credential.access_token}
+
+  defp fresh?({credential, _}, now), do: now < credential.expires_at - @advisory_seconds
+  defp fresh?(nil, _), do: false
+
+  defp usable?({credential, _}, now), do: now < credential.expires_at - @mandatory_seconds
+  defp usable?(nil, _), do: false
+
+  defp paused?({_, retry_at}, now), do: retry_at > now
+  defp paused?(nil, _), do: false
 
   # One cache entry per credential. Without `:cache_key` the identity-token
   # source identifies it, so a fresh closure per client is a fresh entry.

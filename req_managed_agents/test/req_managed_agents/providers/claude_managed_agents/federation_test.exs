@@ -418,6 +418,77 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
     end
   end
 
+  describe "bounded waits" do
+    # An identity-token function that reports itself, then waits to be released.
+    defp gated_function do
+      parent = self()
+
+      fn ->
+        send(parent, {:in_function, self()})
+
+        receive do
+          :go -> {:ok, "gated-jwt"}
+        end
+      end
+    end
+
+    defp release do
+      assert_receive {:in_function, pid}, 2_000
+      send(pid, :go)
+    end
+
+    test "a slow function does not delay a caller holding a usable token", ctx do
+      stub_endpoint(ctx.exchanges)
+      f = fed(ctx.rule, nil, identity_token: gated_function(), identity_token_file: nil)
+
+      first = Task.async(fn -> Federation.token(f, http(), 1_000) end)
+      release()
+      assert {:ok, "sk-ant-oat01-token-1"} = Task.await(first)
+
+      # Inside the advisory window one caller refreshes and stalls in the function.
+      window = 1_000 + 3_600 - 100
+      refresher = Task.async(fn -> Federation.token(f, http(), window) end)
+      assert_receive {:in_function, stalled}, 2_000
+
+      {micros, result} = :timer.tc(fn -> Federation.token(f, http(), window) end)
+      assert result == {:ok, "sk-ant-oat01-token-1"}
+      assert micros < 200_000
+
+      send(stalled, :go)
+      assert {:ok, "sk-ant-oat01-token-2"} = Task.await(refresher)
+    end
+
+    test "a hung identity token function times out without an exchange", ctx do
+      Req.Test.stub(__MODULE__, fn _ -> flunk("exchanged without an identity token") end)
+
+      f =
+        fed(ctx.rule, nil,
+          identity_token: fn -> Process.sleep(:infinity) end,
+          identity_token_file: nil,
+          identity_token_timeout: 50
+        )
+
+      assert {:error, :identity_token_timeout} = Federation.token(f, http(), 1_000)
+    end
+
+    test "a caller with no usable token waits at most the exchange timeout", ctx do
+      stub_endpoint(ctx.exchanges)
+      gated = gated_function()
+      holder = fed(ctx.rule, nil, identity_token: gated, identity_token_file: nil)
+      waiter = %{holder | exchange_timeout: 100}
+
+      first = Task.async(fn -> Federation.token(holder, http(), 1_000) end)
+      assert_receive {:in_function, stalled}, 2_000
+
+      {micros, result} = :timer.tc(fn -> Federation.token(waiter, http(), 1_000) end)
+      assert result == {:error, :exchange_timeout}
+      assert micros < 1_000_000
+
+      send(stalled, :go)
+      assert {:ok, _} = Task.await(first)
+    end
+  end
+
   describe "refresh timing" do
     test "an expired cache re-exchanges before the request", ctx do
       stub_endpoint(ctx.exchanges)
