@@ -1,31 +1,48 @@
 defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Cache do
   @moduledoc false
-  # Owns the ETS table of exchanged access tokens. Readers and writers use the
-  # table directly; this process exists so the table outlives any caller.
+  # Owns the ETS table of exchange results. Readers and writers use the table
+  # directly; this process exists so the table outlives any caller.
   use GenServer
 
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.BearerCredential
 
   @table __MODULE__
 
+  defmodule Entry do
+    @moduledoc false
+    # What the last exchanges for one credential produced: the access token, if
+    # any, and the failure of the latest attempt with the time before which
+    # no new attempt is made. `failure` is a reason category, never a body.
+    defstruct credential: nil, retry_at: 0, failure: nil
+
+    @type t :: %__MODULE__{
+            credential: BearerCredential.t() | nil,
+            retry_at: integer(),
+            failure: term()
+          }
+  end
+
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
-  @doc "The cached credential and the time before which refresh is not retried."
-  @spec fetch(term()) :: {BearerCredential.t(), integer()} | nil
+  @spec fetch(term()) :: Entry.t() | nil
   def fetch(key) do
     case :ets.lookup(@table, key) do
-      [{^key, credential, retry_at}] -> {credential, retry_at}
+      [{^key, entry}] -> entry
       [] -> nil
     end
   end
 
-  @doc "Stores an entry and drops every entry whose token expired at or before `now`."
-  @spec put(term(), BearerCredential.t(), integer(), integer()) :: :ok
-  def put(key, %BearerCredential{} = credential, retry_at, now) do
-    :ets.select_delete(@table, [{{:_, %{expires_at: :"$1"}, :_}, [{:"=<", :"$1", now}], [true]}])
-    :ets.insert(@table, {key, credential, retry_at})
+  @doc "Stores an entry and drops every entry that holds no live token and no pause at `now`."
+  @spec put(term(), Entry.t(), integer()) :: :ok
+  def put(key, %Entry{} = entry, now) do
+    for {stale, old} <- :ets.tab2list(@table), spent?(old, now), do: :ets.delete(@table, stale)
+    :ets.insert(@table, {key, entry})
     :ok
+  end
+
+  defp spent?(%Entry{credential: credential, retry_at: retry_at}, now) do
+    retry_at <= now and (credential == nil or credential.expires_at <= now)
   end
 
   @impl true

@@ -93,6 +93,7 @@ list of keys read anywhere in the library:
 | Workspace | `:workspace_id` | `:workspace_id` | `ANTHROPIC_WORKSPACE_ID` | `nil` |
 | Identity token file | `:identity_token_file` | `:identity_token_file` | `ANTHROPIC_IDENTITY_TOKEN_FILE` | *(this or `:identity_token`)* |
 | Identity token function | `:identity_token` | `:identity_token` | — | *(this or a file)* |
+| Exchange wait / identity token / exchange request timeouts (ms) | `:exchange_timeout`, `:identity_token_timeout`, `:exchange_receive_timeout` | same | — | `15_000`, `10_000`, `10_000` |
 | Federation cache key | `:cache_key` | `:cache_key` | — | `nil` (the token source) |
 | Base URL | `:base_url` | `:base_url` | — | `"https://api.anthropic.com"` |
 | Beta header | `:beta` | `:beta` | — | `"managed-agents-2026-04-01"` |
@@ -154,6 +155,13 @@ cached token keeps serving until 30 seconds before expiry (further exchange atte
 with `{:error, {:authentication_error, reason}}` where `reason` is one of
 `:identity_token_unreadable`, `:identity_token_invalid`, `:identity_token_unavailable`,
 `:exchange_rejected`, `:exchange_failed` or `:exchange_invalid_response`.
+A failed exchange is remembered for the same 10 seconds: callers with no usable token get
+that failure at once, without another exchange or another identity token, so a down
+endpoint or a rejecting rule costs one exchange per pause. A caller who holds a usable
+token never waits for a refresh. A caller with none waits at most `:exchange_timeout`
+(default 15 000 ms, then `:exchange_timeout`); the identity-token function gets
+`:identity_token_timeout` (10 000 ms, then `:identity_token_timeout`) and the exchange
+request `:exchange_receive_timeout` (10 000 ms).
 A transient retry of a Messages call reuses the cached token; exchanges are never
 retried or redirected. Errors and inspected structs never contain the identity token,
 the access token or the endpoint's response body.

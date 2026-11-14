@@ -4,6 +4,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
 
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Auth, Client, Federation}
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Cache
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Cache.Entry
 
   @env ~w(ANTHROPIC_API_KEY ANTHROPIC_BEARER_TOKEN_FILE ANTHROPIC_FEDERATION_RULE_ID
           ANTHROPIC_ORGANIZATION_ID ANTHROPIC_SERVICE_ACCOUNT_ID ANTHROPIC_WORKSPACE_ID
@@ -225,7 +226,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
     f = fed(ctx.rule, ctx.path)
     assert {:ok, _} = Federation.token(f, http(), 1_000)
 
-    {credential, _} =
+    %Entry{credential: credential} =
       Cache.fetch(
         {"https://api.anthropic.com", ctx.rule, "org-uuid", nil, nil, {:file, ctx.path}}
       )
@@ -269,11 +270,11 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
 
     assert {:ok, _} = Federation.token(first, http(), 1_000)
     key = {"https://api.anthropic.com", ctx.rule, "org-uuid", nil, nil, {:file, ctx.path}}
-    assert {_, _} = Cache.fetch(key)
+    assert %Entry{} = Cache.fetch(key)
 
     # Not yet expired: kept.
     assert {:ok, _} = Federation.token(other, http(), 2_000)
-    assert {_, _} = Cache.fetch(key)
+    assert %Entry{} = Cache.fetch(key)
 
     third = fed(ctx.rule <> "-third", ctx.path)
     assert {:ok, _} = Federation.token(third, http(), 1_000 + 3_600 + 1)
@@ -520,6 +521,50 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
       assert {:ok, "sk-ant-oat01-token-1"} = Federation.token(f, http(), window + 15)
 
       assert {:error, :exchange_failed} = Federation.token(f, http(), 1_000 + 3_600 - 20)
+    end
+
+    test "a failure with no cached token is shared, spending one exchange", ctx do
+      attempts = counter()
+      calls = counter()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        :counters.add(attempts, 1, 1)
+        Plug.Conn.send_resp(conn, 503, "secret-body")
+      end)
+
+      fun = fn ->
+        :counters.add(calls, 1, 1)
+        {:ok, "jwt-#{count(calls)}"}
+      end
+
+      f = fed(ctx.rule, nil, identity_token: fun, identity_token_file: nil)
+
+      for _ <- 1..3 do
+        assert {:error, :exchange_failed} = Federation.token(f, http(), 1_000)
+      end
+
+      tasks = for _ <- 1..5, do: Task.async(fn -> Federation.token(f, http(), 1_001) end)
+      assert Enum.all?(Task.await_many(tasks), &(&1 == {:error, :exchange_failed}))
+
+      assert count(attempts) == 1
+      assert count(calls) == 1
+
+      # After the pause the next caller exchanges again.
+      assert {:error, _} = Federation.token(f, http(), 1_011)
+      assert count(attempts) == 2
+    end
+
+    test "a rejected exchange is shared the same way", ctx do
+      attempts = counter()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        :counters.add(attempts, 1, 1)
+        Plug.Conn.send_resp(conn, 401, "{}")
+      end)
+
+      f = fed(ctx.rule, ctx.path)
+      for _ <- 1..3, do: assert({:error, :exchange_rejected} = Federation.token(f, http(), 1_000))
+      assert count(attempts) == 1
     end
 
     test "an unreadable identity token file fails without calling the endpoint", ctx do

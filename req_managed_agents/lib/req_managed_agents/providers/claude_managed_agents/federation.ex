@@ -29,7 +29,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
   """
 
   alias ReqManagedAgents.Config
-  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.{Cache, Exchange}
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.{Cache, Cache.Entry, Exchange}
 
   @advisory_seconds 120
   @mandatory_seconds 30
@@ -167,7 +167,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
 
     cond do
       fresh?(entry, now) -> cached(entry)
-      paused?(entry, now) and usable?(entry, now) -> cached(entry)
+      paused?(entry, now) -> paused(entry, now)
       true -> locked(federation, http, key, clock, entry, now, deadline)
     end
   end
@@ -204,7 +204,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
 
     cond do
       fresh?(entry, now) -> cached(entry)
-      paused?(entry, now) and usable?(entry, now) -> cached(entry)
+      paused?(entry, now) -> paused(entry, now)
       true -> exchange(federation, http, key, entry, now)
     end
   end
@@ -212,33 +212,38 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
   defp exchange(federation, http, key, entry, now) do
     case Exchange.run(federation, http, now) do
       {:ok, credential} ->
-        Cache.put(key, credential, 0, now)
+        Cache.put(key, %Entry{credential: credential}, now)
         {:ok, credential.access_token}
 
       {:error, reason} ->
-        if usable?(entry, now) do
-          {credential, _} = entry
-          Cache.put(key, credential, now + @backoff_seconds, now)
-          {:ok, credential.access_token}
-        else
-          {:error, reason}
-        end
+        # The failure is shared: until `retry_at`, callers with no usable token
+        # get this reason without an exchange or a new identity token.
+        credential = entry && entry.credential
+        failed = %Entry{credential: credential, retry_at: now + @backoff_seconds, failure: reason}
+        Cache.put(key, failed, now)
+        if usable?(failed, now), do: cached(failed), else: {:error, reason}
     end
   end
 
   defp now(clock) when is_function(clock, 0), do: clock.()
   defp now(clock) when is_integer(clock), do: clock
 
-  defp cached({credential, _}), do: {:ok, credential.access_token}
+  defp cached(%Entry{credential: credential}), do: {:ok, credential.access_token}
 
-  defp fresh?({credential, _}, now), do: now < credential.expires_at - @advisory_seconds
+  defp fresh?(%Entry{credential: nil}, _), do: false
+  defp fresh?(%Entry{credential: c}, now), do: now < c.expires_at - @advisory_seconds
   defp fresh?(nil, _), do: false
 
-  defp usable?({credential, _}, now), do: now < credential.expires_at - @mandatory_seconds
+  defp usable?(%Entry{credential: nil}, _), do: false
+  defp usable?(%Entry{credential: c}, now), do: now < c.expires_at - @mandatory_seconds
   defp usable?(nil, _), do: false
 
-  defp paused?({_, retry_at}, now), do: retry_at > now
+  defp paused?(%Entry{retry_at: retry_at}, now), do: retry_at > now
   defp paused?(nil, _), do: false
+
+  # Inside a pause: the cached token if usable, otherwise the shared failure.
+  defp paused(%Entry{failure: failure} = entry, now),
+    do: if(usable?(entry, now), do: cached(entry), else: {:error, failure})
 
   # One cache entry per credential. Without `:cache_key` the identity-token
   # source identifies it, so a fresh closure per client is a fresh entry.
