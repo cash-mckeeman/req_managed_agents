@@ -281,6 +281,132 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
     assert Cache.fetch(key) == nil
   end
 
+  describe "credential safety" do
+    test "an exchange is neither retried nor redirected", ctx do
+      attempts = counter()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        :counters.add(attempts, 1, 1)
+        Plug.Conn.send_resp(conn, 503, "unavailable")
+      end)
+
+      retrying = [
+        plug: {Req.Test, __MODULE__},
+        retry: :transient,
+        retry_delay: 0,
+        max_retries: 3,
+        retry_log_level: false
+      ]
+
+      assert {:error, :exchange_failed} =
+               Federation.token(fed(ctx.rule, ctx.path), http(req_options: retrying), 1_000)
+
+      assert count(attempts) == 1
+    end
+
+    test "an exchange does not follow a redirect", ctx do
+      attempts = counter()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        :counters.add(attempts, 1, 1)
+
+        conn
+        |> Plug.Conn.put_resp_header("location", "https://other.example/steal")
+        |> Plug.Conn.send_resp(307, "")
+      end)
+
+      assert {:error, :exchange_failed} =
+               Federation.token(fed(ctx.rule, ctx.path), http(), 1_000)
+
+      assert count(attempts) == 1
+    end
+
+    test "a federated API call does not follow a redirect with the token", ctx do
+      attempts = counter()
+      parent = self()
+
+      Req.Test.stub(__MODULE__, fn
+        %{request_path: "/v1/oauth/token"} = conn ->
+          Req.Test.json(conn, %{access_token: "sk-ant-oat01-redirect", expires_in: 3600})
+
+        conn ->
+          :counters.add(attempts, 1, 1)
+          send(parent, {:api_host, conn.host})
+
+          conn
+          |> Plug.Conn.put_resp_header("location", "https://other.example/steal")
+          |> Plug.Conn.send_resp(307, "")
+      end)
+
+      assert {:error, {:http_error, 307, _}} = Client.get_session(client(ctx.rule, ctx.path), "s")
+      assert count(attempts) == 1
+      refute_received {:api_host, "other.example"}
+    end
+
+    test "a token scoped to one workspace is not served for another", ctx do
+      stub_endpoint(ctx.exchanges)
+      a = fed(ctx.rule, ctx.path, workspace_id: "wrkspc_a")
+      b = fed(ctx.rule, ctx.path, workspace_id: "wrkspc_b")
+
+      assert {:ok, "sk-ant-oat01-token-1"} = Federation.token(a, http(), 1_000)
+      assert {:ok, "sk-ant-oat01-token-2"} = Federation.token(b, http(), 1_000)
+      assert {:ok, "sk-ant-oat01-token-1"} = Federation.token(a, http(), 1_001)
+
+      assert_received {:exchange, %{"workspace_id" => "wrkspc_a"}, _}
+      assert_received {:exchange, %{"workspace_id" => "wrkspc_b"}, _}
+      assert count(ctx.exchanges) == 2
+    end
+
+    test "refresh starts 120 seconds before expiry, not before", ctx do
+      stub_endpoint(ctx.exchanges)
+      f = fed(ctx.rule, ctx.path)
+      expiry = 1_000 + 3_600
+
+      assert {:ok, "sk-ant-oat01-token-1"} = Federation.token(f, http(), 1_000)
+      assert {:ok, "sk-ant-oat01-token-1"} = Federation.token(f, http(), expiry - 121)
+      assert count(ctx.exchanges) == 1
+      assert {:ok, "sk-ant-oat01-token-2"} = Federation.token(f, http(), expiry - 119)
+    end
+
+    test "an identity token over 16 KiB is refused without an exchange", ctx do
+      Req.Test.stub(__MODULE__, fn _ -> flunk("exchanged an oversized identity token") end)
+      f = fed(ctx.rule, ctx.path)
+
+      File.write!(ctx.path, String.duplicate("a", 16_385))
+      assert {:error, :identity_token_invalid} = Federation.token(f, http(), 1_000)
+
+      oversized =
+        fed(ctx.rule <> "-fn", nil,
+          identity_token_file: nil,
+          identity_token: fn ->
+            {:ok, String.duplicate("a", 16_385)}
+          end
+        )
+
+      assert {:error, :identity_token_invalid} = Federation.token(oversized, http(), 1_000)
+    end
+
+    test "an identity token of exactly 16 KiB is accepted", ctx do
+      stub_endpoint(ctx.exchanges)
+      File.write!(ctx.path, String.duplicate("a", 16_384))
+      assert {:ok, _} = Federation.token(fed(ctx.rule, ctx.path), http(), 1_000)
+    end
+
+    test "429 is a transient failure, not a rejection, and is paused like one", ctx do
+      attempts = counter()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        :counters.add(attempts, 1, 1)
+        Plug.Conn.send_resp(conn, 429, "slow down")
+      end)
+
+      f = fed(ctx.rule, ctx.path)
+      assert {:error, :exchange_failed} = Federation.token(f, http(), 1_000)
+      assert {:error, :exchange_failed} = Federation.token(f, http(), 1_001)
+      assert count(attempts) == 1
+    end
+  end
+
   describe "credential selection" do
     test "an API key alongside federation settings is refused, naming both", ctx do
       error =

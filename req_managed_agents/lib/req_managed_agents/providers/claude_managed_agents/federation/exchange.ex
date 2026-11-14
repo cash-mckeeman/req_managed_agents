@@ -34,7 +34,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Exchange do
       end)
 
     case Task.yield(task, federation.identity_token_timeout) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {:ok, jwt}} -> validate(jwt)
+      {:ok, {:ok, jwt}} when is_binary(jwt) and byte_size(jwt) <= @jwt_limit -> validate(jwt)
+      {:ok, {:ok, _}} -> {:error, :identity_token_invalid}
       {:ok, _} -> {:error, :identity_token_unavailable}
       {:exit, _} -> {:error, :identity_token_unavailable}
       nil -> {:error, :identity_token_timeout}
@@ -42,25 +43,39 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Exchange do
   end
 
   # File.stat follows symlinks: projected-token volumes publish through them.
+  # The read is bounded, so an oversized file is never held in memory.
   defp identity_token(%Federation{identity_token_file: path}) do
-    with {:ok, %{type: :regular, size: size}} when size <= @jwt_limit <- File.stat(path),
-         {:ok, bytes} <- File.read(path) do
+    with {:ok, %{type: :regular}} <- File.stat(path),
+         {:ok, bytes} <- read_bounded(path) do
       validate(bytes)
     else
       {:ok, _} -> {:error, :identity_token_invalid}
+      {:error, :too_large} -> {:error, :identity_token_invalid}
       {:error, _} -> {:error, :identity_token_unreadable}
+    end
+  end
+
+  defp read_bounded(path) do
+    with {:ok, file} <- File.open(path, [:read, :binary]) do
+      try do
+        case IO.binread(file, @jwt_limit + 1) do
+          bytes when is_binary(bytes) and byte_size(bytes) <= @jwt_limit -> {:ok, bytes}
+          bytes when is_binary(bytes) -> {:error, :too_large}
+          _ -> {:error, :unreadable}
+        end
+      after
+        File.close(file)
+      end
     end
   end
 
   defp validate(jwt) when is_binary(jwt) do
     jwt = String.trim(jwt)
 
-    if byte_size(jwt) <= @jwt_limit and Regex.match?(~r/\A[\x21-\x7e]+\z/, jwt),
+    if Regex.match?(~r/\A[\x21-\x7e]+\z/, jwt),
       do: {:ok, jwt},
       else: {:error, :identity_token_invalid}
   end
-
-  defp validate(_), do: {:error, :identity_token_invalid}
 
   defp post(federation, http, jwt) do
     body =
