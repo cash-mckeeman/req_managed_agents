@@ -69,15 +69,18 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
           identity_token_timeout: pos_integer(),
           receive_timeout: pos_integer()
         }
+  @typedoc """
+  What is known of a failed exchange's response: the HTTP status (`nil` when there was
+  no response) and Anthropic's `request-id` header, never the body.
+  """
+  @type http_detail :: %{status: integer() | nil, request_id: String.t() | nil}
   @type reason ::
           :identity_token_unreadable
           | :identity_token_invalid
           | :identity_token_unavailable
           | :identity_token_timeout
           | :exchange_timeout
-          | :exchange_rejected
-          | :exchange_failed
-          | :exchange_invalid_response
+          | {:exchange_rejected | :exchange_failed | :exchange_invalid_response, http_detail()}
   @type http :: %{optional(atom()) => term(), base_url: String.t(), req_options: keyword()}
   @type clock :: integer() | (-> integer())
 

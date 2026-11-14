@@ -194,6 +194,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
     Req.Test.stub(__MODULE__, fn conn ->
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.put_resp_header("request-id", "req_011abc")
       |> Plug.Conn.send_resp(
         401,
         Jason.encode!(%{
@@ -207,14 +208,16 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
 
     log =
       capture_log(fn ->
-        assert {:error, {:authentication_error, :exchange_rejected}} = Client.get_session(c, "s")
+        assert {:error, {:authentication_error, reason}} = Client.get_session(c, "s")
+        assert reason == {:exchange_rejected, %{status: 401, request_id: "req_011abc"}}
         error = assert_raise Auth.Error, fn -> Client.headers(c) end
-        send(self(), {:message, Exception.message(error)})
+        send(self(), {:message, Exception.message(error), inspect(reason)})
       end)
 
-    assert_received {:message, message}
+    assert_received {:message, message, reason}
+    assert message =~ "exchange_rejected (HTTP 401, request-id req_011abc)"
 
-    for text <- [log, message, inspect(c)] do
+    for text <- [log, message, reason, inspect(c)] do
       refute text =~ "secret-identity-jwt"
       refute text =~ "sk-ant-oat01-leaked"
       refute text =~ "body-marker"
@@ -281,6 +284,55 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
     assert Cache.fetch(key) == nil
   end
 
+  describe "operator visibility" do
+    test "only an identifier-shaped request id is reported", ctx do
+      for {header, expected} <- [{"req_ok-1", "req_ok-1"}, {"bad id\"<x>", nil}, {nil, nil}] do
+        Req.Test.stub(__MODULE__, fn conn ->
+          conn = if header, do: Plug.Conn.put_resp_header(conn, "request-id", header), else: conn
+          Plug.Conn.send_resp(conn, 500, "secret-body")
+        end)
+
+        f = fed(ctx.rule <> "-#{expected}", ctx.path)
+
+        assert {:error, {:exchange_failed, %{status: 500, request_id: ^expected}}} =
+                 Federation.token(f, http(), 1_000)
+      end
+    end
+
+    test "an unreachable endpoint is reported without a status", ctx do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+
+      assert {:error, {:exchange_failed, %{status: nil, request_id: nil}}} =
+               Federation.token(fed(ctx.rule, ctx.path), http(), 1_000)
+    end
+
+    test "exchanges emit start and stop telemetry without identifiers or tokens", ctx do
+      stub_endpoint(ctx.exchanges)
+      parent = self()
+      id = "federation-telemetry-#{ctx.rule}"
+
+      :telemetry.attach_many(
+        id,
+        [
+          [:req_managed_agents, :federation, :exchange, :start],
+          [:req_managed_agents, :federation, :exchange, :stop]
+        ],
+        fn event, _measurements, metadata, _ -> send(parent, {:telemetry, event, metadata}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+
+      assert {:ok, _} = Federation.token(fed(ctx.rule, ctx.path), http(), 1_000)
+
+      assert_receive {:telemetry, [:req_managed_agents, :federation, :exchange, :start], start}
+      assert_receive {:telemetry, [:req_managed_agents, :federation, :exchange, :stop], stop}
+      assert Map.keys(start) == [:telemetry_span_context]
+      assert stop.result == :ok
+      refute inspect(stop) =~ "sk-ant"
+    end
+  end
+
   describe "credential safety" do
     test "an exchange is neither retried nor redirected", ctx do
       attempts = counter()
@@ -298,7 +350,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
         retry_log_level: false
       ]
 
-      assert {:error, :exchange_failed} =
+      assert {:error, {:exchange_failed, _}} =
                Federation.token(fed(ctx.rule, ctx.path), http(req_options: retrying), 1_000)
 
       assert count(attempts) == 1
@@ -315,7 +367,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
         |> Plug.Conn.send_resp(307, "")
       end)
 
-      assert {:error, :exchange_failed} =
+      assert {:error, {:exchange_failed, _}} =
                Federation.token(fed(ctx.rule, ctx.path), http(), 1_000)
 
       assert count(attempts) == 1
@@ -401,8 +453,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
       end)
 
       f = fed(ctx.rule, ctx.path)
-      assert {:error, :exchange_failed} = Federation.token(f, http(), 1_000)
-      assert {:error, :exchange_failed} = Federation.token(f, http(), 1_001)
+      assert {:error, {:exchange_failed, %{status: 429}}} = Federation.token(f, http(), 1_000)
+      assert {:error, {:exchange_failed, %{status: 429}}} = Federation.token(f, http(), 1_001)
       assert count(attempts) == 1
     end
   end
@@ -646,7 +698,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
       Req.Test.stub(__MODULE__, fn conn -> Plug.Conn.send_resp(conn, 503, "down") end)
       assert {:ok, "sk-ant-oat01-token-1"} = Federation.token(f, http(), window + 15)
 
-      assert {:error, :exchange_failed} = Federation.token(f, http(), 1_000 + 3_600 - 20)
+      assert {:error, {:exchange_failed, _}} = Federation.token(f, http(), 1_000 + 3_600 - 20)
     end
 
     test "a failure with no cached token is shared, spending one exchange", ctx do
@@ -666,11 +718,15 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
       f = fed(ctx.rule, nil, identity_token: fun, identity_token_file: nil)
 
       for _ <- 1..3 do
-        assert {:error, :exchange_failed} = Federation.token(f, http(), 1_000)
+        assert {:error, {:exchange_failed, _}} = Federation.token(f, http(), 1_000)
       end
 
       tasks = for _ <- 1..5, do: Task.async(fn -> Federation.token(f, http(), 1_001) end)
-      assert Enum.all?(Task.await_many(tasks), &(&1 == {:error, :exchange_failed}))
+
+      assert Enum.all?(
+               Task.await_many(tasks),
+               &match?({:error, {:exchange_failed, %{status: 503}}}, &1)
+             )
 
       assert count(attempts) == 1
       assert count(calls) == 1
@@ -689,7 +745,13 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
       end)
 
       f = fed(ctx.rule, ctx.path)
-      for _ <- 1..3, do: assert({:error, :exchange_rejected} = Federation.token(f, http(), 1_000))
+
+      for _ <- 1..3,
+          do:
+            assert(
+              {:error, {:exchange_rejected, %{status: 401}}} = Federation.token(f, http(), 1_000)
+            )
+
       assert count(attempts) == 1
     end
 

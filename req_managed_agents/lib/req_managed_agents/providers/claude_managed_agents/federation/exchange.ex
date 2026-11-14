@@ -1,7 +1,8 @@
 defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Exchange do
   @moduledoc false
-  # One RFC 7523 jwt-bearer exchange at POST /v1/oauth/token. Failures return
-  # a bare reason: the identity token, the access token and the response body
+  # One RFC 7523 jwt-bearer exchange at POST /v1/oauth/token. A failure returns
+  # a reason category and, for HTTP failures, the status and Anthropic's
+  # request id: the identity token, the access token and the response body
   # never appear in an error.
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.BearerCredential
   alias ReqManagedAgents.Providers.ClaudeManagedAgents.Federation
@@ -10,12 +11,28 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Exchange do
   # Anthropic rejects assertions above 16 KiB.
   @jwt_limit 16_384
 
+  @doc """
+  Telemetry: `[:req_managed_agents, :federation, :exchange, :start | :stop | :exception]`
+  (a `:telemetry.span/3`). The stop metadata is `%{result: :ok | reason_category}`;
+  no identifier or token is attached.
+  """
   @spec run(Federation.t(), Federation.http(), integer()) ::
           {:ok, BearerCredential.t()} | {:error, Federation.reason()}
   def run(%Federation{} = federation, http, now) do
+    :telemetry.span([:req_managed_agents, :federation, :exchange], %{}, fn ->
+      result = exchange(federation, http, now)
+      {result, %{result: outcome(result)}}
+    end)
+  end
+
+  defp outcome({:ok, _}), do: :ok
+  defp outcome({:error, {category, _detail}}), do: category
+  defp outcome({:error, category}), do: category
+
+  defp exchange(federation, http, now) do
     with {:ok, jwt} <- identity_token(federation),
-         {:ok, wire} <- post(federation, http, jwt) do
-      credential(wire, now)
+         {:ok, wire, detail} <- post(federation, http, jwt) do
+      credential(wire, now, detail)
     end
   end
 
@@ -105,27 +122,43 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Exchange do
       |> Req.merge(retry: false, redirect: false)
 
     case Req.request(request) do
-      {:ok, %Req.Response{status: 200, body: body}} when is_map(body) ->
-        {:ok, body}
+      {:ok, %Req.Response{status: 200, body: body} = response} when is_map(body) ->
+        {:ok, body, detail(response)}
 
-      {:ok, %Req.Response{status: 200}} ->
-        {:error, :exchange_invalid_response}
+      {:ok, %Req.Response{status: 200} = response} ->
+        {:error, {:exchange_invalid_response, detail(response)}}
 
-      {:ok, %Req.Response{status: status}} when status in 400..499 and status != 429 ->
-        {:error, :exchange_rejected}
+      {:ok, %Req.Response{status: status} = response} when status in 400..499 and status != 429 ->
+        {:error, {:exchange_rejected, detail(response)}}
 
-      _ ->
-        {:error, :exchange_failed}
+      {:ok, %Req.Response{} = response} ->
+        {:error, {:exchange_failed, detail(response)}}
+
+      {:error, _} ->
+        {:error, {:exchange_failed, %{status: nil, request_id: nil}}}
     end
   end
 
-  defp credential(%{"access_token" => token, "expires_in" => seconds}, now)
+  # Only the status and the request id (to find the attempt in the Console's
+  # authentication history). The id is shown in errors, so it is restricted
+  # to the characters of an identifier.
+  defp detail(%Req.Response{status: status} = response) do
+    request_id =
+      case Req.Response.get_header(response, "request-id") do
+        [id | _] -> if Regex.match?(~r/\A[A-Za-z0-9_-]{1,128}\z/, id), do: id
+        _ -> nil
+      end
+
+    %{status: status, request_id: request_id}
+  end
+
+  defp credential(%{"access_token" => token, "expires_in" => seconds}, now, detail)
        when is_integer(seconds) do
     case BearerCredential.new(%{"access_token" => token, "expires_at" => now + seconds}, now) do
       {:ok, credential} -> {:ok, credential}
-      {:error, _} -> {:error, :exchange_invalid_response}
+      {:error, _} -> {:error, {:exchange_invalid_response, detail}}
     end
   end
 
-  defp credential(_, _), do: {:error, :exchange_invalid_response}
+  defp credential(_, _, detail), do: {:error, {:exchange_invalid_response, detail}}
 end

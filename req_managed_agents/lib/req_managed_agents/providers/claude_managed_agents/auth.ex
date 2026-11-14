@@ -9,6 +9,12 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Auth do
     defexception [:reason]
     @type t :: %__MODULE__{reason: ReqManagedAgents.Providers.ClaudeManagedAgents.Auth.reason()}
     @impl true
+    def message(%__MODULE__{reason: {category, %{status: status, request_id: request_id}}}) do
+      http = if status, do: "HTTP #{status}", else: "no response"
+      id = if request_id, do: ", request-id #{request_id}", else: ""
+      "CMA authentication failed: #{category} (#{http}#{id})"
+    end
+
     def message(%__MODULE__{reason: reason}), do: "CMA authentication failed: #{reason}"
   end
 

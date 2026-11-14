@@ -154,7 +154,13 @@ settings. It is renewed from 120 seconds before expiry; if that exchange fails t
 cached token keeps serving until 30 seconds before expiry (further exchange attempts pause for 10 seconds after a failure, so a down endpoint does not spend an identity token per request), after which requests fail
 with `{:error, {:authentication_error, reason}}` where `reason` is one of
 `:identity_token_unreadable`, `:identity_token_invalid`, `:identity_token_unavailable`,
-`:exchange_rejected`, `:exchange_failed` or `:exchange_invalid_response`.
+`:identity_token_timeout`, `:exchange_timeout`, or `{category, %{status: status, request_id: id}}`
+with `category` one of `:exchange_rejected` (HTTP 4xx other than 429), `:exchange_failed`
+(429, 5xx, a redirect or no response; `status` is `nil` without one) or
+`:exchange_invalid_response`. The request id is Anthropic's `request-id` header, the key to
+the attempt in the Console's authentication history. Each exchange emits
+`[:req_managed_agents, :federation, :exchange, :start | :stop | :exception]` telemetry;
+the stop metadata is `%{result: :ok | category}`.
 A failed exchange is remembered for the same 10 seconds: callers with no usable token get
 that failure at once, without another exchange or another identity token, so a down
 endpoint or a rejecting rule costs one exchange per pause. A caller who holds a usable
