@@ -263,7 +263,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
     do: if(usable?(entry, now), do: cached(entry), else: {:error, failure})
 
   # One cache entry per credential. Without `:cache_key` the identity-token
-  # source identifies it, so a fresh closure per client is a fresh entry.
+  # source identifies it: closures from the same code with equal captured values
+  # are equal and share an entry, closures capturing different values do not.
   defp cache_key(federation, http) do
     source =
       cond do

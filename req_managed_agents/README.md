@@ -147,10 +147,11 @@ file hold a new token, so a file source must be rotated faster than the access t
 is refreshed; an unrotated file is presented again and rejected. Two cache keys over
 one file (for example two workspace ids) present the same token, as does a restart
 within the rotation period. The access-token cache is keyed on the settings and the identity-token source (file
-path or function). A fresh closure per `Client.new` is a fresh key, so it triggers its
-own exchange, spending a single-use identity token. Pass a stable function (`&Mod.fun/0`)
-or, to share one token across clients that build their own closures, a `:cache_key`
-(any term). Cache entries whose token has expired are dropped when a new entry is written.
+path or function). Closures built at the same code location with equal captured values
+are equal and share a key, but closures that capture differing values are distinct keys,
+and each new key is a separate exchange spending a single-use identity token. Pass a named
+function (`&Mod.fun/0`) or, to share one token across clients whose closures differ, a
+`:cache_key` (any term). Cache entries whose token has expired are dropped when a new entry is written.
 
 The access token is cached per node and shared by every client with the same
 settings. It is renewed from 120 seconds before expiry; if that exchange fails the
