@@ -45,7 +45,7 @@ Requires Elixir 1.20 or later.
 
 ```elixir
 def deps do
-  [{:req_managed_agents, "~> 0.15.0"}]
+  [{:req_managed_agents, "~> 0.16.0"}]
 end
 ```
 
@@ -55,7 +55,7 @@ users can skip these):
 ```elixir
 def deps do
   [
-    {:req_managed_agents, "~> 0.15.0"},
+    {:req_managed_agents, "~> 0.16.0"},
     {:ex_aws_auth, "~> 1.4"},
     {:aws_event_stream, "~> 0.1"}
   ]
@@ -67,7 +67,7 @@ Using `Providers.Local` with the **default chat_fun** (ReqLLM)? Add:
 ```elixir
 def deps do
   [
-    {:req_managed_agents, "~> 0.15.0"},
+    {:req_managed_agents, "~> 0.16.0"},
     {:req_llm, "~> 1.10"}
   ]
 end
