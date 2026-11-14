@@ -6,11 +6,11 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
   its `:federation` field.
 
   Identity tokens carry a `jti` and are single use, so every exchange obtains a
-  new one and only one exchange per credential runs at a time. A caller who holds
-  a usable cached token never waits for it: while another process refreshes, or
-  during the retry pause after a failed refresh, the cached token is served. A
-  caller with no usable token waits at most `:exchange_timeout` (15 s). For an
-  access token expiring at `e`:
+  new one and only one exchange per credential runs at a time. Only the caller
+  that performs a refresh waits for it. Every other caller holding a usable cached
+  token is served it at once, while another process refreshes and during the retry
+  pause after a failed refresh. A caller with no usable token waits at most
+  `:exchange_timeout`. For an access token expiring at `e`:
 
     * before `e - 120 s` the cached token is served;
     * from `e - 120 s` to `e - 30 s` one caller exchanges and the others keep

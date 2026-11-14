@@ -165,8 +165,8 @@ remembered for 10 seconds: callers with no usable token get that failure at once
 without another exchange or another identity token, so a down endpoint or a rejecting
 rule costs one exchange per pause.
 
-A caller who holds a usable token never waits for a refresh. A caller with none waits
-at most `:exchange_timeout` (default 15 000 ms, then `:exchange_timeout`). The
+Only the caller that performs a refresh waits for it; every other caller holding a usable
+token is served it at once. A caller with none waits at most `:exchange_timeout` (default 15 000 ms, then `:exchange_timeout`). The
 identity-token function gets `:identity_token_timeout` (10 000 ms, then
 `:identity_token_timeout`) and the exchange request `:exchange_receive_timeout`
 (10 000 ms), not the client's `:receive_timeout`.
