@@ -38,7 +38,7 @@ for answer in "503 0" "429 0" "000 6"; do
   check "hex.pm HTTP $code (curl exit $rc): nothing runs" 0 "$(ran .)"
 done
 check "a dry run needs no key" 0 "$(KEY=UNSET publish req_managed_agents lockstep 1 404)"
-check "a real run needs no key: workload identity signs the publish" 1 "$(KEY=UNSET publish req_managed_agents lockstep 0 404 >/dev/null; ran "hex.publish --yes")"
+check "a real run with no key still reaches hex.publish" 1 "$(KEY=UNSET publish req_managed_agents lockstep 0 404 >/dev/null; ran "hex.publish --yes")"
 for dry in true yes ""; do
   check "DRY_RUN='$dry': fails" 1 "$([ "$(publish req_managed_agents lockstep "$dry" 404)" -ne 0 ] && echo 1 || echo 0)"
   check "DRY_RUN='$dry': nothing runs" 0 "$(ran .)"
