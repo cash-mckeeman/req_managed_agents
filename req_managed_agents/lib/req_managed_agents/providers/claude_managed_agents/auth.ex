@@ -80,6 +80,12 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Auth do
   def describe({:incomplete_federation, missing}),
     do: "federation is missing #{Enum.join(missing, ", ")}"
 
+  def describe(:missing),
+    do:
+      "no credential source is configured; set ANTHROPIC_API_KEY, ANTHROPIC_BEARER_TOKEN_FILE, or" <>
+        " federation: ANTHROPIC_FEDERATION_RULE_ID switches federation on (with" <>
+        " ANTHROPIC_ORGANIZATION_ID and ANTHROPIC_IDENTITY_TOKEN_FILE or an :identity_token function)"
+
   def describe(reason), do: to_string(reason)
 
   defp disable_option(:federation), do: :federation_rule_id

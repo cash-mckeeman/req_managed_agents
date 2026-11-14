@@ -576,6 +576,21 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
                )
     end
 
+    test "no source at all explains what switches federation on", ctx do
+      System.put_env("ANTHROPIC_ORGANIZATION_ID", "org-uuid")
+      System.put_env("ANTHROPIC_IDENTITY_TOKEN_FILE", ctx.path)
+
+      error = assert_raise ArgumentError, fn -> Client.new([]) end
+
+      for fragment <- [
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_BEARER_TOKEN_FILE",
+            "ANTHROPIC_FEDERATION_RULE_ID switches federation on"
+          ] do
+        assert error.message =~ fragment
+      end
+    end
+
     test "incomplete federation names what is missing", ctx do
       error = assert_raise ArgumentError, fn -> Client.new(federation_rule_id: ctx.rule) end
       assert error.message =~ "organization_id"
