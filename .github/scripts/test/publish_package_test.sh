@@ -72,5 +72,7 @@ publish req_managed_agents lockstep 0 404 >/dev/null
 check "an RMA lockstep run: five calls, none at a floor" 5 "$(grep -c . "$d/calls")"
 check "an RMA lockstep run: every call in its directory" 5 "$(grep -c 'cwd=/req_managed_agents ' "$d/calls")"
 publish req_managed_agents_host patch 0 404 >/dev/null
-check "a real host patch: no call sees a key" "" "$(KEY=UNSET publish req_managed_agents_host patch 0 404 >/dev/null; cat "$d/keyed")"
+# An ambient key (the default KEY here) would beat the job's workload identity.
+check "a real host patch with an ambient key: no mix call sees it" "" "$(KEY=ambient publish req_managed_agents_host patch 0 404 >/dev/null; cat "$d/keyed")"
+check "a real lockstep run with an ambient key: hex.publish does not see it" "" "$(KEY=ambient publish req_managed_agents lockstep 0 404 >/dev/null; cat "$d/keyed")"
 exit $fail

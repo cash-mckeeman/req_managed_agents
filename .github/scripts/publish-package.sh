@@ -13,6 +13,10 @@ cd "$pkg"
 case "${DRY_RUN-}" in 0|1) ;; *) echo "publish-package: DRY_RUN must be 0 or 1, not '${DRY_RUN-}'" >&2; exit 1 ;; esac
 case "${KIND-}" in lockstep|patch) ;; *) echo "publish-package: KIND must be lockstep or patch, not '${KIND-}'" >&2; exit 1 ;; esac
 
+# An ambient key would take precedence over the job's workload identity, so no
+# mix call below may see one.
+unset HEX_API_KEY
+
 # A plain assignment, so set -e stops on an on-hex error. Inside `[ ... ]` the
 # error would read as "not on Hex" and the publish would go ahead.
 on_hex="$(bash "$here/on-hex.sh" "$pkg" "$VERSION")"
