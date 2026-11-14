@@ -135,6 +135,18 @@ jobs:
     env:
       DRY_RUN: "0"
     steps:
+      # Wrong guard outputs would skip both publish steps and still go green.
+      - name: the guard job produced a publish plan
+        env:
+          PACKAGES: ${{ needs.guard.outputs.packages }}
+          KIND: ${{ needs.guard.outputs.kind }}
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          bad=0
+          [ -n "$PACKAGES" ] || { echo "::error::the guard job published no packages output"; bad=1; }
+          [ -n "$KIND" ] || { echo "::error::the guard job published no kind output"; bad=1; }
+          [ -n "$VERSION" ] || { echo "::error::the guard job published no version output"; bad=1; }
+          exit $bad
       - uses: actions/checkout@v7
       - uses: erlef/setup-beam@v1
         with:

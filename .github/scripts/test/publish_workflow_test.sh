@@ -34,7 +34,7 @@ for pkg in req_managed_agents req_managed_agents_host; do
   check "publish $pkg runs only for a planned package" \
     "        if: contains(format(' {0} ', needs.guard.outputs.packages), ' $pkg ')" "$(jstep publish "publish $pkg" if)"
 done
-check "the version check can fail" 1 "$(lines "          exit \$bad")"
+check "the version check can fail" 1 "$(job guard | grep -cxF "          exit \$bad")"
 check "no step carries a Hex key" 0 "$(grep -c 'HEX_API_KEY' "$WF")"
 check "no line reads a secret" 0 "$(grep -v '^ *#' "$WF" | grep -c 'secrets')"
 check "id-token: write appears once in the file" 1 "$(grep -c 'id-token:' "$WF")"
@@ -55,4 +55,14 @@ check "the Hex guard precedes both publishes in the publish job" 1 "$(before pub
 check "a dry run always ends in the verdict step" "        if: always() && env.DRY_RUN == '1'" "$(jstep guard 'dry-run verdict' if)"
 check "the verdict fails on any guard failure" 1 "$(lines "          case \"\$OUTCOMES\" in *failure*) exit 1 ;; esac")"
 check "reachability walks main's first-parent history" 1 "$(lines "        run: git rev-list --first-parent origin/main | grep -x \"\$GITHUB_SHA\" > /dev/null")"
+
+# The publish job's first step refuses an empty plan; run its script as the runner would.
+check "the publish job's first step is the plan check" "      - name: the guard job produced a publish plan" "$(job publish | awk '/^    steps:/ {f=1; next} f && /^      - / {print; exit}')"
+plan_run="$(job publish | awk '/name: the guard job produced a publish plan/ {f=1; next} f && /^        run: \|/ {g=1; next} g && /^      - / {exit} g {sub(/^          /, ""); print}')"
+plan() { ( PACKAGES="$1" KIND="$2" VERSION="$3" bash -c "$plan_run" >/dev/null 2>&1 ); echo $?; }
+check "a full plan passes" 0 "$(plan 'req_managed_agents req_managed_agents_host' lockstep 0.17.0)"
+check "an empty packages output fails" 1 "$(plan '' lockstep 0.17.0)"
+check "an empty kind output fails" 1 "$(plan 'req_managed_agents' '' 0.17.0)"
+check "an empty version output fails" 1 "$(plan 'req_managed_agents' patch '')"
+check "the plan check names each missing output" 3 "$(printf '%s\n' "$plan_run" | grep -c '::error::the guard job published no')"
 exit $fail
