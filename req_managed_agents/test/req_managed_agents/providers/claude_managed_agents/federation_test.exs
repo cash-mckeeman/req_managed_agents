@@ -683,6 +683,46 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
     end
   end
 
+  describe "cache sweep" do
+    defp credential(expires_at) do
+      %ReqManagedAgents.Providers.ClaudeManagedAgents.BearerCredential{
+        access_token: "sk-ant-oat01-sweep",
+        expires_at: expires_at
+      }
+    end
+
+    test "an entry written after the snapshot survives the sweep of its stale predecessor", ctx do
+      key = {:sweep, ctx.rule}
+      Cache.put(key, %Entry{credential: credential(100), issued_at: 0}, 0)
+      snapshot = :ets.tab2list(Cache)
+
+      # Another process replaces the entry between the snapshot and the delete.
+      fresh = %Entry{credential: credential(10_000), issued_at: 5_000}
+      :ets.insert(Cache, {key, fresh})
+
+      assert :ok = Cache.sweep(snapshot, 5_000)
+      assert Cache.fetch(key) == fresh
+    end
+
+    test "a sweep drops spent entries but keeps live tokens and paused failures", ctx do
+      spent = {:sweep, ctx.rule, :spent}
+      live = {:sweep, ctx.rule, :live}
+      paused = {:sweep, ctx.rule, :paused}
+
+      Cache.put(spent, %Entry{credential: credential(100), issued_at: 0}, 0)
+      Cache.put(live, %Entry{credential: credential(10_000), issued_at: 0}, 0)
+      Cache.put(paused, %Entry{retry_at: 5_010, failure: {:exchange_failed, %{}}}, 5_000)
+      Cache.put({:sweep, ctx.rule, :trigger}, %Entry{}, 5_005)
+
+      assert Cache.fetch(spent) == nil
+      assert %Entry{} = Cache.fetch(live)
+      assert %Entry{failure: {:exchange_failed, _}} = Cache.fetch(paused)
+
+      Cache.put({:sweep, ctx.rule, :trigger}, %Entry{}, 5_011)
+      assert Cache.fetch(paused) == nil
+    end
+  end
+
   describe "slow exchanges" do
     # A clock the endpoint can advance, to stand in for an exchange that takes
     # `elapsed` seconds.

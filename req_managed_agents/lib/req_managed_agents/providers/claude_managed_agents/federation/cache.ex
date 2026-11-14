@@ -37,8 +37,18 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Cache do
   @doc "Stores an entry and drops every entry that holds no live token and no pause at `now`."
   @spec put(term(), Entry.t(), integer()) :: :ok
   def put(key, %Entry{} = entry, now) do
-    for {stale, old} <- :ets.tab2list(@table), spent?(old, now), do: :ets.delete(@table, stale)
+    sweep(:ets.tab2list(@table), now)
     :ets.insert(@table, {key, entry})
+    :ok
+  end
+
+  @doc false
+  # Deletes the spent objects of `snapshot`. Each is removed as the exact object
+  # that was read, so an entry another process wrote for the same key since the
+  # snapshot survives.
+  @spec sweep([{term(), Entry.t()}], integer()) :: :ok
+  def sweep(snapshot, now) do
+    for {_, old} = object <- snapshot, spent?(old, now), do: :ets.delete_object(@table, object)
     :ok
   end
 
