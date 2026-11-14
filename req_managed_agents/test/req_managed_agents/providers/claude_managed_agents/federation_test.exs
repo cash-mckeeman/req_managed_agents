@@ -693,6 +693,22 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
       assert count(attempts) == 1
     end
 
+    test "a short-lived token is not re-exchanged on every call", ctx do
+      stub_endpoint(ctx.exchanges, expires_in: 60)
+      f = fed(ctx.rule, ctx.path)
+
+      assert {:ok, "sk-ant-oat01-token-1"} = Federation.token(f, http(), 1_000)
+
+      for offset <- [0, 5, 20, 29],
+          do: assert({:ok, "sk-ant-oat01-token-1"} = Federation.token(f, http(), 1_000 + offset))
+
+      assert count(ctx.exchanges) == 1
+
+      # Refresh begins 30 s before expiry; the token serves until 15 s before.
+      assert {:ok, "sk-ant-oat01-token-2"} = Federation.token(f, http(), 1_000 + 31)
+      assert count(ctx.exchanges) == 2
+    end
+
     test "an unreadable identity token file fails without calling the endpoint", ctx do
       Req.Test.stub(__MODULE__, fn _ -> flunk("exchanged without an identity token") end)
       f = fed(ctx.rule, ctx.path <> ".missing")

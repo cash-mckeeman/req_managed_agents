@@ -11,12 +11,13 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Cache do
   defmodule Entry do
     @moduledoc false
     # What the last exchanges for one credential produced: the access token, if
-    # any, and the failure of the latest attempt with the time before which
+    # any with the time it was obtained, and the failure of the latest attempt with the time before which
     # no new attempt is made. `failure` is a reason category, never a body.
-    defstruct credential: nil, retry_at: 0, failure: nil
+    defstruct credential: nil, issued_at: nil, retry_at: 0, failure: nil
 
     @type t :: %__MODULE__{
             credential: BearerCredential.t() | nil,
+            issued_at: integer() | nil,
             retry_at: integer(),
             failure: term()
           }

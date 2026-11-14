@@ -18,6 +18,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
       while retries pause for 10 seconds;
     * from `e - 30 s` the cached token is unusable: exchange or fail.
 
+  The 120 s and 30 s margins shrink to half and a quarter of the token's
+  lifetime when that is shorter (a 60 s token refreshes from 30 s before expiry).
+
   The identity-token function is given `:identity_token_timeout` (10 s) and the
   exchange request `:exchange_receive_timeout` (10 s); neither uses the client's
   `:receive_timeout`.
@@ -212,14 +215,19 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
   defp exchange(federation, http, key, entry, now) do
     case Exchange.run(federation, http, now) do
       {:ok, credential} ->
-        Cache.put(key, %Entry{credential: credential}, now)
+        Cache.put(key, %Entry{credential: credential, issued_at: now}, now)
         {:ok, credential.access_token}
 
       {:error, reason} ->
         # The failure is shared: until `retry_at`, callers with no usable token
         # get this reason without an exchange or a new identity token.
-        credential = entry && entry.credential
-        failed = %Entry{credential: credential, retry_at: now + @backoff_seconds, failure: reason}
+        failed = %Entry{
+          credential: entry && entry.credential,
+          issued_at: entry && entry.issued_at,
+          retry_at: now + @backoff_seconds,
+          failure: reason
+        }
+
         Cache.put(key, failed, now)
         if usable?(failed, now), do: cached(failed), else: {:error, reason}
     end
@@ -231,12 +239,18 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
   defp cached(%Entry{credential: credential}), do: {:ok, credential.access_token}
 
   defp fresh?(%Entry{credential: nil}, _), do: false
-  defp fresh?(%Entry{credential: c}, now), do: now < c.expires_at - @advisory_seconds
+  defp fresh?(%Entry{credential: c} = entry, now), do: now < c.expires_at - advisory(entry)
   defp fresh?(nil, _), do: false
 
   defp usable?(%Entry{credential: nil}, _), do: false
-  defp usable?(%Entry{credential: c}, now), do: now < c.expires_at - @mandatory_seconds
+  defp usable?(%Entry{credential: c} = entry, now), do: now < c.expires_at - mandatory(entry)
   defp usable?(nil, _), do: false
+
+  # Short tokens scale the windows to their lifetime, so one of 60 s is not
+  # refreshed on every call.
+  defp advisory(entry), do: min(@advisory_seconds, div(lifetime(entry), 2))
+  defp mandatory(entry), do: min(@mandatory_seconds, div(lifetime(entry), 4))
+  defp lifetime(%Entry{credential: c, issued_at: issued}), do: c.expires_at - issued
 
   defp paused?(%Entry{retry_at: retry_at}, now), do: retry_at > now
   defp paused?(nil, _), do: false
