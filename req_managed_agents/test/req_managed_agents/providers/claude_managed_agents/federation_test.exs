@@ -837,6 +837,15 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
                  defaults.receive_timeout
     end
 
+    test "a client built with no timeout options gets the documented defaults", ctx do
+      assert %Federation{
+               exchange_timeout: 30_000,
+               identity_token_timeout: 10_000,
+               connect_timeout: 5_000,
+               receive_timeout: 10_000
+             } = client(ctx.rule, ctx.path).federation
+    end
+
     test "timeout options are read from Client.new", ctx do
       client =
         client(ctx.rule, ctx.path,

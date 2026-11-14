@@ -102,10 +102,17 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
     file = setting(opts, :identity_token_file, "ANTHROPIC_IDENTITY_TOKEN_FILE")
     fun = Config.resolve(opts, :identity_token)
     cache_key = Config.resolve(opts, :cache_key)
-    exchange_timeout = Config.resolve(opts, :exchange_timeout, nil, 30_000)
-    identity_timeout = Config.resolve(opts, :identity_token_timeout, nil, 10_000)
-    connect_timeout = Config.resolve(opts, :exchange_connect_timeout, nil, 5_000)
-    receive_timeout = Config.resolve(opts, :exchange_receive_timeout, nil, 10_000)
+    defaults = %__MODULE__{}
+    exchange_timeout = Config.resolve(opts, :exchange_timeout, nil, defaults.exchange_timeout)
+
+    identity_timeout =
+      Config.resolve(opts, :identity_token_timeout, nil, defaults.identity_token_timeout)
+
+    connect_timeout =
+      Config.resolve(opts, :exchange_connect_timeout, nil, defaults.connect_timeout)
+
+    receive_timeout =
+      Config.resolve(opts, :exchange_receive_timeout, nil, defaults.receive_timeout)
 
     # The rule id switches federation on, so `federation_rule_id: nil` turns it off.
     cond do
