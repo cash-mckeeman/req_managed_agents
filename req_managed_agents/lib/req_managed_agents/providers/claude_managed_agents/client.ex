@@ -10,7 +10,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
   @behaviour ReqManagedAgents.Providers.ClaudeManagedAgents.Client.Behaviour
 
   alias ReqManagedAgents.Config
-  alias ReqManagedAgents.Providers.ClaudeManagedAgents.Auth
+  alias ReqManagedAgents.Providers.ClaudeManagedAgents.{Auth, Federation}
 
   @base_url "https://api.anthropic.com"
   @beta "managed-agents-2026-04-01"
@@ -24,6 +24,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
   defstruct [
     :api_key,
     :bearer_token_file,
+    :federation,
     base_url: @base_url,
     beta: @beta,
     files_beta: @files_beta,
@@ -36,6 +37,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
   @type t :: %__MODULE__{
           api_key: String.t() | nil,
           bearer_token_file: String.t() | nil,
+          federation: Federation.t() | nil,
           base_url: String.t(),
           beta: String.t(),
           files_beta: String.t(),
@@ -49,26 +51,39 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
   Build a client. Resolves `:api_key` from the option, then
   `Application.get_env(:req_managed_agents, :api_key)`, then `ANTHROPIC_API_KEY`.
   Alternatively resolve `:bearer_token_file` from the option, application env or
-  `ANTHROPIC_BEARER_TOKEN_FILE`. Select exactly one source; explicit nil disables
-  a source. Other keys fall back to application env, then defaults.
+  `ANTHROPIC_BEARER_TOKEN_FILE`. Alternatively use Anthropic workload identity
+  federation: `:federation_rule_id`, `:organization_id`, optional `:service_account_id`
+  and `:workspace_id`, and an identity token from `:identity_token_file` or from
+  `:identity_token`, a zero-arity function returning `{:ok, jwt} | {:error, reason}`.
+  Each falls back to application env, then to `ANTHROPIC_FEDERATION_RULE_ID`,
+  `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID`, `ANTHROPIC_WORKSPACE_ID`
+  and `ANTHROPIC_IDENTITY_TOKEN_FILE` (`:identity_token` has no variable).
+  Select exactly one source; explicit nil disables a source, and a source
+  set alongside federation settings raises rather than winning silently. Other keys
+  fall back to application env, then defaults.
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
-    {key, path} =
+    {key, path, federation} =
       case Auth.resolve(opts) do
         {:ok, {:api_key, key}} ->
-          {key, nil}
+          {key, nil, nil}
 
         {:ok, {:bearer_file, path}} ->
-          {nil, path}
+          {nil, path, nil}
+
+        {:ok, {:federation, federation}} ->
+          {nil, nil, federation}
 
         {:error, reason} ->
-          raise ArgumentError, "invalid CMA authentication configuration: #{reason}"
+          raise ArgumentError,
+                "invalid CMA authentication configuration: #{Auth.describe(reason)}"
       end
 
     %__MODULE__{
       api_key: key,
       bearer_token_file: path,
+      federation: federation,
       base_url: Config.resolve(opts, :base_url, nil, @base_url),
       beta: Config.resolve(opts, :beta, nil, @beta),
       anthropic_version: Config.resolve(opts, :anthropic_version, nil, @anthropic_version),

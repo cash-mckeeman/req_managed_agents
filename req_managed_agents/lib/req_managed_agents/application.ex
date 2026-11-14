@@ -5,7 +5,8 @@ defmodule ReqManagedAgents.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      {Finch, name: ReqManagedAgents.StreamFinch}
+      {Finch, name: ReqManagedAgents.StreamFinch},
+      ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Cache
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: ReqManagedAgents.Supervisor)

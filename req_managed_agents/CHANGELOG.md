@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- Claude Managed Agents authenticates with Anthropic workload identity federation. `Client.new/1`
+  reads `:federation_rule_id`, `:organization_id`, `:service_account_id`, `:workspace_id`,
+  `:identity_token_file` and `:identity_token` (a zero-arity function returning
+  `{:ok, jwt} | {:error, reason}`), falling back to the official SDK variables
+  `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID`,
+  `ANTHROPIC_WORKSPACE_ID` and `ANTHROPIC_IDENTITY_TOKEN_FILE`. Each exchange uses a fresh identity
+  token; the access token is cached and renewed 120 seconds before expiry.
+
+### Changed
+
+- An API key or bearer file configured together with federation settings raises an
+  `ArgumentError` naming the conflicting sources. The message for the existing
+  key-plus-bearer-file conflict now names both sources as well.
+
 ## v0.16.0 (2026-11-14)
 
 ### Added

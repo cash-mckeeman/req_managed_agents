@@ -53,12 +53,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.History.Request do
          (is_integer(client.receive_timeout) and client.receive_timeout > 0))
   end
 
-  defp valid_auth?(client) do
-    match?(
-      {:ok, _},
-      Auth.resolve(api_key: client.api_key, bearer_token_file: client.bearer_token_file)
-    )
-  end
+  defp valid_auth?(client), do: Auth.valid?(client)
 
   defp prior(nil), do: {:ok, nil}
   defp prior(%Capture{provider: :managed} = capture), do: Capture.parse(capture)

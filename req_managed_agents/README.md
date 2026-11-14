@@ -87,6 +87,12 @@ list of keys read anywhere in the library:
 | --- | --- | --- | --- | --- |
 | Anthropic API key | `:api_key` | `:api_key` | `ANTHROPIC_API_KEY` | *(one auth source required)* |
 | Anthropic bearer file | `:bearer_token_file` | `:bearer_token_file` | `ANTHROPIC_BEARER_TOKEN_FILE` | *(one auth source required)* |
+| Federation rule | `:federation_rule_id` | `:federation_rule_id` | `ANTHROPIC_FEDERATION_RULE_ID` | *(one auth source required)* |
+| Organization | `:organization_id` | `:organization_id` | `ANTHROPIC_ORGANIZATION_ID` | *(required with federation)* |
+| Service account | `:service_account_id` | `:service_account_id` | `ANTHROPIC_SERVICE_ACCOUNT_ID` | `nil` |
+| Workspace | `:workspace_id` | `:workspace_id` | `ANTHROPIC_WORKSPACE_ID` | `nil` |
+| Identity token file | `:identity_token_file` | `:identity_token_file` | `ANTHROPIC_IDENTITY_TOKEN_FILE` | *(this or `:identity_token`)* |
+| Identity token function | `:identity_token` | `:identity_token` | — | *(this or a file)* |
 | Base URL | `:base_url` | `:base_url` | — | `"https://api.anthropic.com"` |
 | Beta header | `:beta` | `:beta` | — | `"managed-agents-2026-04-01"` |
 | Files beta header | `:files_beta` | `:files_beta` | — | `"files-api-2025-04-14"` |
@@ -109,6 +115,48 @@ reads the current file, including transient retries. Invalid files or tokens
 with 30 seconds or less remaining fail before dispatch with
 `{:error, {:authentication_error, reason}}`. Bearer requests do not follow redirects.
 
+
+#### Workload identity federation
+
+Instead of a static key, a client can exchange an identity-provider JWT for a
+short-lived Anthropic access token
+([Workload Identity Federation](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation)).
+The setting names match the official Anthropic SDKs, so one environment serves both:
+
+```elixir
+# ANTHROPIC_FEDERATION_RULE_ID, ANTHROPIC_ORGANIZATION_ID and
+# ANTHROPIC_IDENTITY_TOKEN_FILE set in the environment:
+client = ReqManagedAgents.Providers.ClaudeManagedAgents.Client.new()
+
+# Or fetch a fresh identity token yourself on every exchange:
+client =
+  ReqManagedAgents.Providers.ClaudeManagedAgents.Client.new(
+    federation_rule_id: "fdrl_...",
+    organization_id: "00000000-0000-0000-0000-000000000000",
+    workspace_id: "wrkspc_...",
+    identity_token: fn -> MyIdp.fetch_token() end
+  )
+```
+
+`:identity_token` is a zero-arity function returning `{:ok, jwt} | {:error, reason}`.
+Identity tokens carrying a `jti` are single use, so the library obtains a new one
+for every exchange (rereading the file, or calling the function) and never presents
+a token twice. Pass a stable function: the access-token cache is keyed on it.
+
+The access token is cached per node and shared by every client with the same
+settings. It is renewed from 120 seconds before expiry; if that exchange fails the
+cached token keeps serving until 30 seconds before expiry, after which requests fail
+with `{:error, {:authentication_error, reason}}` where `reason` is one of
+`:identity_token_unreadable`, `:identity_token_invalid`, `:identity_token_unavailable`,
+`:exchange_rejected`, `:exchange_failed` or `:exchange_invalid_response`.
+A transient retry of a Messages call reuses the cached token; exchanges are never
+retried or redirected. Errors and inspected structs never contain the identity token,
+the access token or the endpoint's response body.
+
+Federation is one more auth source: an API key or bearer file configured alongside
+any federation setting raises an `ArgumentError` naming both, instead of one silently
+winning. Pass `api_key: nil` or `federation_rule_id: nil` to disable a source.
+`ANTHROPIC_IDENTITY_TOKEN` (a literal token) and configuration profiles are not read.
 
 `Providers.ClaudeManagedAgents.Client.new/1` resolves the Anthropic keys; `AWS.SigV4.from_env/1`
 resolves the AWS keys (it still works called with no args — `opts` just gives
