@@ -150,7 +150,7 @@ or, to share one token across clients that build their own closures, a `:cache_k
 
 The access token is cached per node and shared by every client with the same
 settings. It is renewed from 120 seconds before expiry; if that exchange fails the
-cached token keeps serving until 30 seconds before expiry, after which requests fail
+cached token keeps serving until 30 seconds before expiry (further exchange attempts pause for 10 seconds after a failure, so a down endpoint does not spend an identity token per request), after which requests fail
 with `{:error, {:authentication_error, reason}}` where `reason` is one of
 `:identity_token_unreadable`, `:identity_token_invalid`, `:identity_token_unavailable`,
 `:exchange_rejected`, `:exchange_failed` or `:exchange_invalid_response`.
@@ -160,7 +160,10 @@ the access token or the endpoint's response body.
 
 Federation is one more auth source: an API key or bearer file configured alongside
 any federation setting raises an `ArgumentError` naming both, instead of one silently
-winning. Pass `api_key: nil` or `federation_rule_id: nil` to disable a source.
+winning. `ANTHROPIC_FEDERATION_RULE_ID` is what switches federation on, so an existing
+deployment that sets `ANTHROPIC_API_KEY` and also has that variable in its environment
+fails at `Client.new/1` with an error naming both; unset the variable, or pass
+`api_key: nil` or `federation_rule_id: nil` to choose one.
 `ANTHROPIC_IDENTITY_TOKEN` (a literal token) and configuration profiles are not read.
 
 `Providers.ClaudeManagedAgents.Client.new/1` resolves the Anthropic keys; `AWS.SigV4.from_env/1`

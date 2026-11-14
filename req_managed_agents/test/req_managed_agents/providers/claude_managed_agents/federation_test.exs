@@ -336,6 +336,21 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
       assert %Client{api_key: nil, federation: %Federation{}} = Client.new([api_key: nil] ++ opts)
     end
 
+    test "an existing API key client fails on a stray federation rule variable", ctx do
+      System.put_env("ANTHROPIC_FEDERATION_RULE_ID", ctx.rule)
+
+      error = assert_raise ArgumentError, fn -> Client.new(api_key: "k") end
+      assert error.message =~ "api_key"
+      assert error.message =~ "ANTHROPIC_FEDERATION_RULE_ID"
+
+      # Unsetting the variable restores the API key; so does disabling the rule.
+      assert %Client{api_key: "k", federation: nil} =
+               Client.new(api_key: "k", federation_rule_id: nil)
+
+      System.delete_env("ANTHROPIC_FEDERATION_RULE_ID")
+      assert %Client{api_key: "k", federation: nil} = Client.new(api_key: "k")
+    end
+
     test "the same conflict is found through the official environment variables", ctx do
       System.put_env("ANTHROPIC_API_KEY", "secret-env-key")
       System.put_env("ANTHROPIC_FEDERATION_RULE_ID", ctx.rule)
