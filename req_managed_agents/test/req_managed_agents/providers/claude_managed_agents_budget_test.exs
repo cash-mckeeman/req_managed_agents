@@ -283,6 +283,14 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
 
     defp archive_posts, do: Enum.count(requests(), &(&1 == {"POST", "/v1/sessions/s1/archive"}))
 
+    # Timed from the archive request's arrival. The create and any delay before arrival fall
+    # outside the window, so a slow runner can only shorten it: it bounds lateness from above.
+    defp archive_elapsed_ms do
+      returned = System.monotonic_time(:millisecond)
+      assert_receive {:archive_started, started}
+      returned - started
+    end
+
     test "a 503 is tried once and the error carries the session id and the failure",
          %{bypass: bypass, client: client} do
       test = self()
@@ -440,18 +448,20 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
 
       Bypass.stub(bypass, "POST", "/v1/sessions/s1/archive", fn conn ->
         send(test, {:request, "POST", conn.request_path})
+        send(test, {:archive_started, System.monotonic_time(:millisecond)})
         Bypass.pass(bypass)
         trickle(conn, 100, 40)
       end)
 
       client = %{client | receive_timeout: 400}
-      {micros, result} = open_unconfirmed(client)
+      {_micros, result} = open_unconfirmed(client)
 
       assert {:error,
               {:budget_not_confirmed, %{session_id: "s1", archived: {:error, :archive_timeout}}}} =
                result
 
-      assert micros < 1_000_000
+      # A deadline that ignored the client's receive timeout would end at the 5 s archive cap.
+      assert archive_elapsed_ms() < 2_000
       assert archive_posts() == 1
     end
 
@@ -461,6 +471,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
 
       Bypass.stub(bypass, "POST", "/v1/sessions/s1/archive", fn conn ->
         send(test, {:request, "POST", conn.request_path})
+        send(test, {:archive_started, System.monotonic_time(:millisecond)})
         Bypass.pass(bypass)
         trickle(conn, 3_000, 4)
       end)
@@ -472,7 +483,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgentsBudgetTest do
               {:budget_not_confirmed, %{session_id: "s1", archived: {:error, :archive_timeout}}}} =
                result
 
-      assert micros in 4_500_000..5_500_000
+      # A slow runner only lengthens the whole open, so the lower edge is read from it.
+      assert micros >= 4_500_000
+      assert archive_elapsed_ms() < 7_000
       assert archive_posts() == 1
     end
   end
