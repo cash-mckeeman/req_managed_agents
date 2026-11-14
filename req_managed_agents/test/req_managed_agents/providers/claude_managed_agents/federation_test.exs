@@ -233,6 +233,53 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
     refute inspect(credential) =~ "sk-ant-oat01-token-1"
   end
 
+  test "clients with fresh closures and the same cache key share one exchange", ctx do
+    stub_endpoint(ctx.exchanges)
+
+    clients =
+      for n <- 1..2 do
+        client(ctx.rule, nil,
+          identity_token_file: nil,
+          identity_token: fn -> {:ok, "closure-#{n}"} end,
+          cache_key: {:shared, ctx.rule}
+        )
+      end
+
+    for c <- clients, do: assert({:ok, _} = Client.get_session(c, "s"))
+    assert count(ctx.exchanges) == 1
+
+    # Without a cache key each closure is its own credential.
+    for n <- 1..2 do
+      c =
+        client(ctx.rule, nil,
+          identity_token_file: nil,
+          identity_token: fn -> {:ok, "closure-#{n}"} end
+        )
+
+      assert {:ok, _} = Client.get_session(c, "s")
+    end
+
+    assert count(ctx.exchanges) == 3
+  end
+
+  test "expired entries are dropped when a later entry is written", ctx do
+    stub_endpoint(ctx.exchanges)
+    first = fed(ctx.rule, ctx.path)
+    other = fed(ctx.rule <> "-later", ctx.path)
+
+    assert {:ok, _} = Federation.token(first, http(), 1_000)
+    key = {"https://api.anthropic.com", ctx.rule, "org-uuid", nil, nil, {:file, ctx.path}}
+    assert {_, _} = Cache.fetch(key)
+
+    # Not yet expired: kept.
+    assert {:ok, _} = Federation.token(other, http(), 2_000)
+    assert {_, _} = Cache.fetch(key)
+
+    third = fed(ctx.rule <> "-third", ctx.path)
+    assert {:ok, _} = Federation.token(third, http(), 1_000 + 3_600 + 1)
+    assert Cache.fetch(key) == nil
+  end
+
   describe "credential selection" do
     test "an API key alongside federation settings is refused, naming both", ctx do
       error =

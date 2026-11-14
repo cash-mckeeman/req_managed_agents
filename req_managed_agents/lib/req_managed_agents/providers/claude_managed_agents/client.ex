@@ -55,6 +55,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Client do
   federation: `:federation_rule_id`, `:organization_id`, optional `:service_account_id`
   and `:workspace_id`, and an identity token from `:identity_token_file` or from
   `:identity_token`, a zero-arity function returning `{:ok, jwt} | {:error, reason}`.
+  Pass a stable function or a `:cache_key` (any term): the access-token cache is keyed on it.
   Each falls back to application env, then to `ANTHROPIC_FEDERATION_RULE_ID`,
   `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID`, `ANTHROPIC_WORKSPACE_ID`
   and `ANTHROPIC_IDENTITY_TOKEN_FILE` (`:identity_token` has no variable).

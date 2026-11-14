@@ -93,6 +93,7 @@ list of keys read anywhere in the library:
 | Workspace | `:workspace_id` | `:workspace_id` | `ANTHROPIC_WORKSPACE_ID` | `nil` |
 | Identity token file | `:identity_token_file` | `:identity_token_file` | `ANTHROPIC_IDENTITY_TOKEN_FILE` | *(this or `:identity_token`)* |
 | Identity token function | `:identity_token` | `:identity_token` | — | *(this or a file)* |
+| Federation cache key | `:cache_key` | `:cache_key` | — | `nil` (the token source) |
 | Base URL | `:base_url` | `:base_url` | — | `"https://api.anthropic.com"` |
 | Beta header | `:beta` | `:beta` | — | `"managed-agents-2026-04-01"` |
 | Files beta header | `:files_beta` | `:files_beta` | — | `"files-api-2025-04-14"` |
@@ -141,7 +142,11 @@ client =
 `:identity_token` is a zero-arity function returning `{:ok, jwt} | {:error, reason}`.
 Identity tokens carrying a `jti` are single use, so the library obtains a new one
 for every exchange (rereading the file, or calling the function) and never presents
-a token twice. Pass a stable function: the access-token cache is keyed on it.
+a token twice. The access-token cache is keyed on the settings and the identity-token source (file
+path or function). A fresh closure per `Client.new` is a fresh key, so it triggers its
+own exchange, spending a single-use identity token. Pass a stable function (`&Mod.fun/0`)
+or, to share one token across clients that build their own closures, a `:cache_key`
+(any term). Cache entries whose token has expired are dropped when a new entry is written.
 
 The access token is cached per node and shared by every client with the same
 settings. It is renewed from 120 seconds before expiry; if that exchange fails the

@@ -20,8 +20,10 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Cache do
     end
   end
 
-  @spec put(term(), BearerCredential.t(), integer()) :: :ok
-  def put(key, %BearerCredential{} = credential, retry_at) do
+  @doc "Stores an entry and drops every entry whose token expired at or before `now`."
+  @spec put(term(), BearerCredential.t(), integer(), integer()) :: :ok
+  def put(key, %BearerCredential{} = credential, retry_at, now) do
+    :ets.select_delete(@table, [{{:_, %{expires_at: :"$1"}, :_}, [{:"=<", :"$1", now}], [true]}])
     :ets.insert(@table, {key, credential, retry_at})
     :ok
   end

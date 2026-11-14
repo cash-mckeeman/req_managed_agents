@@ -14,6 +14,11 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
     * from `e - 120 s` to `e - 30 s` a new exchange is attempted, and if it
       fails the cached token keeps serving while retries pause for 10 seconds;
     * from `e - 30 s` the cached token is unusable: exchange or fail.
+
+  Tokens are cached per node, keyed by the settings and the identity-token
+  source (the file path, the function, or `:cache_key` when given). Each new
+  key is a separate exchange that spends a single-use identity token. Entries
+  whose token has expired are dropped whenever a new entry is written.
   """
 
   alias ReqManagedAgents.Config
@@ -30,17 +35,23 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
     :service_account_id,
     :workspace_id,
     :identity_token_file,
-    :identity_token
+    :identity_token,
+    :cache_key
   ]
 
   @type identity_token :: (-> {:ok, String.t()} | {:error, term()})
+  @typedoc """
+  `:cache_key` is any term; clients sharing it, and the other settings, share one
+  cached access token even when each passes its own `:identity_token` closure.
+  """
   @type t :: %__MODULE__{
           rule_id: String.t(),
           organization_id: String.t(),
           service_account_id: String.t() | nil,
           workspace_id: String.t() | nil,
           identity_token_file: String.t() | nil,
-          identity_token: identity_token() | nil
+          identity_token: identity_token() | nil,
+          cache_key: term()
         }
   @type reason ::
           :identity_token_unreadable
@@ -68,6 +79,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
     workspace = setting(opts, :workspace_id, "ANTHROPIC_WORKSPACE_ID")
     file = setting(opts, :identity_token_file, "ANTHROPIC_IDENTITY_TOKEN_FILE")
     fun = Config.resolve(opts, :identity_token)
+    cache_key = Config.resolve(opts, :cache_key)
 
     cond do
       is_nil(rule) and is_nil(file) and is_nil(fun) ->
@@ -87,7 +99,8 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
            service_account_id: svc,
            workspace_id: workspace,
            identity_token_file: file,
-           identity_token: fun
+           identity_token: fun,
+           cache_key: cache_key
          }}
     end
   end
@@ -155,13 +168,13 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
   defp exchange(federation, http, key, entry, now) do
     case Exchange.run(federation, http, now) do
       {:ok, credential} ->
-        Cache.put(key, credential, 0)
+        Cache.put(key, credential, 0, now)
         {:ok, credential.access_token}
 
       {:error, reason} ->
         case entry do
           {credential, _} when now < credential.expires_at - @mandatory_seconds ->
-            Cache.put(key, credential, now + @backoff_seconds)
+            Cache.put(key, credential, now + @backoff_seconds, now)
             {:ok, credential.access_token}
 
           _ ->
@@ -170,11 +183,15 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
     end
   end
 
+  # One cache entry per credential. Without `:cache_key` the identity-token
+  # source identifies it, so a fresh closure per client is a fresh entry.
   defp cache_key(federation, http) do
     source =
-      if federation.identity_token,
-        do: {:function, federation.identity_token},
-        else: {:file, federation.identity_token_file}
+      cond do
+        federation.cache_key != nil -> {:key, federation.cache_key}
+        federation.identity_token -> {:function, federation.identity_token}
+        true -> {:file, federation.identity_token_file}
+      end
 
     {http.base_url, federation.rule_id, federation.organization_id, federation.service_account_id,
      federation.workspace_id, source}
