@@ -56,14 +56,28 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Auth do
 
   @doc false
   @spec describe(resolve_error()) :: String.t()
-  def describe({:conflicting, names}),
-    do:
-      "more than one credential source is configured (#{Enum.join(names, ", ")}); select exactly one"
+  def describe({:conflicting, names}) do
+    hints = Enum.map_join(names, " or ", &"`#{disable_option(&1)}: nil`")
+
+    federation =
+      if :federation in names,
+        do:
+          " Federation is switched on by ANTHROPIC_FEDERATION_RULE_ID (option :federation_rule_id);" <>
+            " to drop it, unset the variable (`unset ANTHROPIC_FEDERATION_RULE_ID`).",
+        else: ""
+
+    "more than one credential source is configured (#{Enum.join(names, ", ")}); select exactly one." <>
+      " Pass #{hints} to Client.new, or unset the variable behind the one you do not want." <>
+      federation
+  end
 
   def describe({:incomplete_federation, missing}),
     do: "federation is missing #{Enum.join(missing, ", ")}"
 
   def describe(reason), do: to_string(reason)
+
+  defp disable_option(:federation), do: :federation_rule_id
+  defp disable_option(name), do: name
 
   @doc false
   # True when a built client carries exactly one usable credential source.

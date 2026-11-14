@@ -297,6 +297,45 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
       refute error.message =~ "secret-static-key"
     end
 
+    test "the conflict message says what switched federation on and how to resolve it", ctx do
+      error =
+        assert_raise ArgumentError, fn ->
+          Client.new(
+            api_key: "secret-static-key",
+            federation_rule_id: ctx.rule,
+            organization_id: "org-uuid",
+            identity_token_file: ctx.path
+          )
+        end
+
+      for fragment <- [
+            "ANTHROPIC_FEDERATION_RULE_ID",
+            "`api_key: nil`",
+            "`federation_rule_id: nil`",
+            "unset ANTHROPIC_FEDERATION_RULE_ID"
+          ] do
+        assert error.message =~ fragment
+      end
+
+      refute error.message =~ "secret-static-key"
+      refute error.message =~ ctx.rule
+
+      # Both escape hatches work.
+      opts = [
+        federation_rule_id: ctx.rule,
+        organization_id: "org-uuid",
+        identity_token_file: ctx.path
+      ]
+
+      assert %Client{api_key: "k", federation: nil} =
+               Client.new(
+                 [api_key: "k", federation_rule_id: nil] ++
+                   Keyword.delete(opts, :federation_rule_id)
+               )
+
+      assert %Client{api_key: nil, federation: %Federation{}} = Client.new([api_key: nil] ++ opts)
+    end
+
     test "the same conflict is found through the official environment variables", ctx do
       System.put_env("ANTHROPIC_API_KEY", "secret-env-key")
       System.put_env("ANTHROPIC_FEDERATION_RULE_ID", ctx.rule)

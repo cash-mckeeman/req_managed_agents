@@ -81,8 +81,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
     fun = Config.resolve(opts, :identity_token)
     cache_key = Config.resolve(opts, :cache_key)
 
+    # The rule id switches federation on, so `federation_rule_id: nil` turns it off.
     cond do
-      is_nil(rule) and is_nil(file) and is_nil(fun) ->
+      is_nil(rule) ->
         :none
 
       not is_nil(fun) and not is_function(fun, 0) ->
