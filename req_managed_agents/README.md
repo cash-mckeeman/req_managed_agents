@@ -141,9 +141,12 @@ client =
 ```
 
 `:identity_token` is a zero-arity function returning `{:ok, jwt} | {:error, reason}`.
-Identity tokens carrying a `jti` are single use, so the library obtains a new one
-for every exchange (rereading the file, or calling the function) and never presents
-a token twice. The access-token cache is keyed on the settings and the identity-token source (file
+Identity tokens carrying a `jti` are single use. Every exchange presents a newly
+obtained token: the file is reread, or the function called. Rereading cannot make a
+file hold a new token, so a file source must be rotated faster than the access token
+is refreshed; an unrotated file is presented again and rejected. Two cache keys over
+one file (for example two workspace ids) present the same token, as does a restart
+within the rotation period. The access-token cache is keyed on the settings and the identity-token source (file
 path or function). A fresh closure per `Client.new` is a fresh key, so it triggers its
 own exchange, spending a single-use identity token. Pass a stable function (`&Mod.fun/0`)
 or, to share one token across clients that build their own closures, a `:cache_key`
