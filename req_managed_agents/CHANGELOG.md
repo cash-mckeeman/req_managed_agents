@@ -17,11 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ANTHROPIC_WORKSPACE_ID` and `ANTHROPIC_IDENTITY_TOKEN_FILE`. Each exchange uses a fresh identity
   token; the access token is cached and renewed 120 seconds before expiry.
 
-### Changed
+### Changed (breaking)
 
-- An API key or bearer file configured together with federation settings raises an
-  `ArgumentError` naming the conflicting sources. The message for the existing
-  key-plus-bearer-file conflict now names both sources as well.
+- `Client.new/1` raises an `ArgumentError` when an API key or bearer file is configured while
+  `ANTHROPIC_FEDERATION_RULE_ID` (or `:federation_rule_id`) is set. A deployment that sets
+  `ANTHROPIC_API_KEY` and also carries that variable in its environment, where the official SDKs
+  let the key win, now fails at client construction instead of choosing silently. The message names
+  both sources; unset the variable, or pass `api_key: nil` or `federation_rule_id: nil`.
+  The message for the existing key-plus-bearer-file conflict now names both sources as well.
 
 ## v0.16.0 (2026-11-14)
 
