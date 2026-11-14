@@ -21,9 +21,12 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
   The 120 s and 30 s margins shrink to half and a quarter of the token's
   lifetime when that is shorter (a 60 s token refreshes from 30 s before expiry).
 
-  The identity-token function is given `:identity_token_timeout` (10 s) and the
-  exchange request `:exchange_receive_timeout` (10 s); neither uses the client's
-  `:receive_timeout`.
+  The identity-token function is given `:identity_token_timeout` (10 s), and the
+  exchange request `:exchange_connect_timeout` (5 s) and `:exchange_receive_timeout`
+  (10 s); none uses the client's `:receive_timeout`. One refresh therefore takes at
+  most about 25 s, and the `:exchange_timeout` default (30 s) covers it, so a
+  waiter outlasts a holder that succeeds. When raising one of the three timeouts,
+  raise `:exchange_timeout` to at least their sum.
 
   Tokens are cached per node, keyed by the settings and the identity-token
   source (the file path, the function, or `:cache_key` when given). Each new
@@ -47,8 +50,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
     :identity_token_file,
     :identity_token,
     :cache_key,
-    exchange_timeout: 15_000,
+    exchange_timeout: 30_000,
     identity_token_timeout: 10_000,
+    connect_timeout: 5_000,
     receive_timeout: 10_000
   ]
 
@@ -67,6 +71,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
           cache_key: term(),
           exchange_timeout: pos_integer(),
           identity_token_timeout: pos_integer(),
+          connect_timeout: pos_integer(),
           receive_timeout: pos_integer()
         }
   @typedoc """
@@ -97,8 +102,9 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
     file = setting(opts, :identity_token_file, "ANTHROPIC_IDENTITY_TOKEN_FILE")
     fun = Config.resolve(opts, :identity_token)
     cache_key = Config.resolve(opts, :cache_key)
-    exchange_timeout = Config.resolve(opts, :exchange_timeout, nil, 15_000)
+    exchange_timeout = Config.resolve(opts, :exchange_timeout, nil, 30_000)
     identity_timeout = Config.resolve(opts, :identity_token_timeout, nil, 10_000)
+    connect_timeout = Config.resolve(opts, :exchange_connect_timeout, nil, 5_000)
     receive_timeout = Config.resolve(opts, :exchange_receive_timeout, nil, 10_000)
 
     # The rule id switches federation on, so `federation_rule_id: nil` turns it off.
@@ -109,7 +115,10 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
       not is_nil(fun) and not is_function(fun, 0) ->
         {:error, :invalid}
 
-      not Enum.all?([exchange_timeout, identity_timeout, receive_timeout], &pos_integer?/1) ->
+      not Enum.all?(
+        [exchange_timeout, identity_timeout, connect_timeout, receive_timeout],
+        &pos_integer?/1
+      ) ->
         {:error, :invalid}
 
       missing = missing(rule, org, file, fun) ->
@@ -127,6 +136,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
            cache_key: cache_key,
            exchange_timeout: exchange_timeout,
            identity_token_timeout: identity_timeout,
+           connect_timeout: connect_timeout,
            receive_timeout: receive_timeout
          }}
     end

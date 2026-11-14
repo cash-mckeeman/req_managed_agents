@@ -115,6 +115,7 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Exchange do
         base_url: http.base_url,
         url: "/v1/oauth/token",
         receive_timeout: federation.receive_timeout,
+        connect_options: [timeout: federation.connect_timeout],
         json: body
       ]
       |> Req.new()

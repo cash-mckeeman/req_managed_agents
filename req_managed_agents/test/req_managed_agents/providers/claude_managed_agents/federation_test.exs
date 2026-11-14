@@ -723,6 +723,57 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
     end
   end
 
+  describe "exchange timeouts" do
+    test "the exchange request carries the connect and receive timeouts", ctx do
+      parent = self()
+
+      adapter = fn request ->
+        send(parent, {:request_options, request.options})
+
+        {request,
+         Req.Response.new(
+           status: 200,
+           body: %{"access_token" => "sk-ant-oat01-timeouts", "expires_in" => 3600}
+         )}
+      end
+
+      f =
+        fed(ctx.rule, ctx.path, connect_timeout: 1_234, receive_timeout: 5_678)
+
+      assert {:ok, _} = Federation.token(f, http(req_options: [adapter: adapter]), 1_000)
+      assert_received {:request_options, options}
+      assert options.receive_timeout == 5_678
+      assert options.connect_options[:timeout] == 1_234
+    end
+
+    test "the defaults let a waiter outlast one holder's whole budget" do
+      defaults = %Federation{}
+
+      assert defaults.exchange_timeout >=
+               defaults.identity_token_timeout + defaults.connect_timeout +
+                 defaults.receive_timeout
+    end
+
+    test "timeout options are read from Client.new", ctx do
+      client =
+        client(ctx.rule, ctx.path,
+          exchange_timeout: 1,
+          identity_token_timeout: 2,
+          exchange_connect_timeout: 3,
+          exchange_receive_timeout: 4
+        )
+
+      assert %Federation{
+               exchange_timeout: 1,
+               identity_token_timeout: 2,
+               connect_timeout: 3,
+               receive_timeout: 4
+             } = client.federation
+
+      assert_raise ArgumentError, fn -> client(ctx.rule, ctx.path, exchange_timeout: 0) end
+    end
+  end
+
   describe "slow exchanges" do
     # A clock the endpoint can advance, to stand in for an exchange that takes
     # `elapsed` seconds.

@@ -93,7 +93,7 @@ list of keys read anywhere in the library:
 | Workspace | `:workspace_id` | `:workspace_id` | `ANTHROPIC_WORKSPACE_ID` | `nil` |
 | Identity token file | `:identity_token_file` | `:identity_token_file` | `ANTHROPIC_IDENTITY_TOKEN_FILE` | *(this or `:identity_token`)* |
 | Identity token function | `:identity_token` | `:identity_token` | — | *(this or a file)* |
-| Exchange wait / identity token / exchange request timeouts (ms) | `:exchange_timeout`, `:identity_token_timeout`, `:exchange_receive_timeout` | same | — | `15_000`, `10_000`, `10_000` |
+| Federation timeouts (ms): caller wait, identity token, connect, receive | `:exchange_timeout`, `:identity_token_timeout`, `:exchange_connect_timeout`, `:exchange_receive_timeout` | same | — | `30_000`, `10_000`, `5_000`, `10_000` |
 | Federation cache key | `:cache_key` | `:cache_key` | — | `nil` (the token source) |
 | Base URL | `:base_url` | `:base_url` | — | `"https://api.anthropic.com"` |
 | Beta header | `:beta` | `:beta` | — | `"managed-agents-2026-04-01"` |
@@ -166,10 +166,13 @@ without another exchange or another identity token, so a down endpoint or a reje
 rule costs one exchange per pause.
 
 Only the caller that performs a refresh waits for it; every other caller holding a usable
-token is served it at once. A caller with none waits at most `:exchange_timeout` (default 15 000 ms, then `:exchange_timeout`). The
-identity-token function gets `:identity_token_timeout` (10 000 ms, then
-`:identity_token_timeout`) and the exchange request `:exchange_receive_timeout`
-(10 000 ms), not the client's `:receive_timeout`.
+token is served it at once. A caller with none waits at most `:exchange_timeout`
+(30 000 ms, then `:exchange_timeout`). One refresh is bounded by the identity-token
+function's `:identity_token_timeout` (10 000 ms, then `:identity_token_timeout`) plus the
+exchange request's `:exchange_connect_timeout` (5 000 ms) and `:exchange_receive_timeout`
+(10 000 ms), about 25 s, which `:exchange_timeout` covers. None of them is the client's
+`:receive_timeout`. If you raise any of the three, raise `:exchange_timeout` to at least
+their sum.
 
 `reason` is one of `:identity_token_unreadable`, `:identity_token_invalid`,
 `:identity_token_unavailable`, `:identity_token_timeout`, `:exchange_timeout`, or
