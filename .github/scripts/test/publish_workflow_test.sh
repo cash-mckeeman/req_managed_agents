@@ -21,9 +21,12 @@ check "both jobs exist" 2 "$(for j in guard publish; do [ -n "$(job $j)" ] && ec
 check "a manual run is always a dry run" 1 "$(lines "      DRY_RUN: \${{ github.event_name == 'push' && '0' || '1' }}")"
 check "the publish job is never a dry run" 1 "$(job publish | grep -c '      DRY_RUN: "0"')"
 check "no other line sets DRY_RUN" 2 "$(grep -c 'DRY_RUN:' "$WF")"
-check "each guard may continue past a failure only in a dry run" 4 "$(job guard | grep -cxF "        continue-on-error: \${{ env.DRY_RUN == '1' }}")"
-check "no other step continues past a failure" 4 "$(grep -c 'continue-on-error:' "$WF")"
+check "each guard may continue past a failure only in a dry run" 5 "$(job guard | grep -cxF "        continue-on-error: \${{ env.DRY_RUN == '1' }}")"
+check "no other step continues past a failure" 5 "$(grep -c 'continue-on-error:' "$WF")"
 check "the publish job continues past nothing" 0 "$(job publish | grep -c 'continue-on-error')"
+# The Hex guard is a rehearsal guard too: its outcome is in the dry-run verdict.
+check "a rehearsal lists the Hex guard in its outcomes" 2 "$(grep -c 'OUTCOMES: hex=\${{ steps.hex.outcome }} plan=' "$WF")"
+check "the Hex guard step in the guard job is id hex" 1 "$(job guard | grep -c '        id: hex')"
 # No status function: a failed guard skips the rehearsal steps, and `needs` skips publish.
 for pkg in req_managed_agents req_managed_agents_host; do
   check "rehearse $pkg runs on a manual run only, after every guard passed" \
@@ -44,9 +47,10 @@ check "the publish job keeps contents: read" 1 "$(job publish | grep -cxF "     
 check "the guard job runs in no environment" 0 "$(job guard | grep -c 'environment:')"
 check "the publish job runs in prod, where hex.pm trusts it" 1 "$(job publish | grep -cxF "    environment: prod")"
 check "the publish job polls no checks" 0 "$(job publish | grep -c 'checks:')"
-for j in publish; do
+for j in guard publish; do
   check "$j runs the Hex version guard script" "        run: bash .github/scripts/hex-workload-identity.sh" "$(jstep $j 'hex supports workload identity' run)"
 done
+check "the Hex guard precedes the plan in the guard job" 1 "$(before guard 'hex supports workload identity' 'id: plan')"
 check "the Hex guard precedes both publishes in the publish job" 1 "$(before publish 'hex supports workload identity' 'name: publish req_managed_agents')"
 check "a dry run always ends in the verdict step" "        if: always() && env.DRY_RUN == '1'" "$(jstep guard 'dry-run verdict' if)"
 check "the verdict fails on any guard failure" 1 "$(lines "          case \"\$OUTCOMES\" in *failure*) exit 1 ;; esac")"

@@ -52,6 +52,10 @@ jobs:
         with:
           elixir-version: "1.20"
           otp-version: "29"
+      - name: hex supports workload identity
+        id: hex
+        continue-on-error: ${{ env.DRY_RUN == '1' }}
+        run: bash .github/scripts/hex-workload-identity.sh
       - id: plan
         name: resolve the publish set
         continue-on-error: ${{ env.DRY_RUN == '1' }}
@@ -93,7 +97,7 @@ jobs:
       - name: guard verdicts
         if: env.DRY_RUN == '1'
         env:
-          OUTCOMES: plan=${{ steps.plan.outcome }} versions=${{ steps.versions.outcome }} reachable=${{ steps.reachable.outcome }} ci_ok=${{ steps.ci_ok.outcome }}
+          OUTCOMES: hex=${{ steps.hex.outcome }} plan=${{ steps.plan.outcome }} versions=${{ steps.versions.outcome }} reachable=${{ steps.reachable.outcome }} ci_ok=${{ steps.ci_ok.outcome }}
         run: |
           echo "guards: $OUTCOMES" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: rehearse req_managed_agents
@@ -111,7 +115,7 @@ jobs:
       - name: dry-run verdict
         if: always() && env.DRY_RUN == '1'
         env:
-          OUTCOMES: plan=${{ steps.plan.outcome }} versions=${{ steps.versions.outcome }} reachable=${{ steps.reachable.outcome }} ci_ok=${{ steps.ci_ok.outcome }}
+          OUTCOMES: hex=${{ steps.hex.outcome }} plan=${{ steps.plan.outcome }} versions=${{ steps.versions.outcome }} reachable=${{ steps.reachable.outcome }} ci_ok=${{ steps.ci_ok.outcome }}
         run: |
           case "$OUTCOMES" in *failure*) exit 1 ;; esac
 
