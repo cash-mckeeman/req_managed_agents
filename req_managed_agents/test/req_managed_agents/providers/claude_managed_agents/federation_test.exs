@@ -723,6 +723,50 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
     end
   end
 
+  describe "refresh lock" do
+    test "an exchange that raises releases the lock to other callers", ctx do
+      attempts = counter()
+      parent = self()
+
+      Req.Test.stub(__MODULE__, fn
+        %{request_path: "/v1/oauth/token"} = conn ->
+          :counters.add(attempts, 1, 1)
+          if count(attempts) == 1, do: raise("boom")
+          Req.Test.json(conn, %{access_token: "sk-ant-oat01-after-raise", expires_in: 3600})
+      end)
+
+      f = fed(ctx.rule, ctx.path)
+
+      # The raising caller stays alive: a dead process would release the lock
+      # by itself, which is not what is under test.
+      raiser =
+        Task.async(fn ->
+          result =
+            try do
+              Federation.token(f, http(), 1_000)
+            rescue
+              error -> {:raised, error.message}
+            end
+
+          send(parent, {:raiser, result})
+
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      assert_receive {:raiser, {:raised, "boom"}}, 2_000
+
+      other = %{f | exchange_timeout: 500}
+
+      assert {:ok, "sk-ant-oat01-after-raise"} =
+               Task.await(Task.async(fn -> Federation.token(other, http(), 1_000) end))
+
+      send(raiser.pid, :stop)
+      Task.await(raiser)
+    end
+  end
+
   describe "exchange timeouts" do
     test "the exchange request carries the connect and receive timeouts", ctx do
       parent = self()
@@ -921,6 +965,17 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
       # Refresh begins 30 s before expiry; the token serves until 15 s before.
       assert {:ok, "sk-ant-oat01-token-2"} = Federation.token(f, http(), 1_000 + 31)
       assert count(ctx.exchanges) == 2
+    end
+
+    test "a short token is served through a failure until a quarter of its life remains", ctx do
+      stub_endpoint(ctx.exchanges, expires_in: 60)
+      f = fed(ctx.rule, ctx.path)
+      assert {:ok, "sk-ant-oat01-token-1"} = Federation.token(f, http(), 1_000)
+
+      # Expiry 1060: the advisory window opens at 1030 and the mandatory one at 1045.
+      Req.Test.stub(__MODULE__, fn conn -> Plug.Conn.send_resp(conn, 503, "down") end)
+      assert {:ok, "sk-ant-oat01-token-1"} = Federation.token(f, http(), 1_040)
+      assert {:error, {:exchange_failed, _}} = Federation.token(f, http(), 1_046)
     end
 
     test "an unreadable identity token file fails without calling the endpoint", ctx do

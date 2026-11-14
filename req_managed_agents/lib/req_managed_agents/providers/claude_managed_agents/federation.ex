@@ -213,7 +213,12 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
     end
   end
 
-  # Runs under the per-credential lock, with the clock read again.
+  # Runs under the per-credential lock, with the clock and the entry read again.
+  # Both re-reads are needed: the caller decided to refresh from a snapshot taken
+  # before it won the lock, and the previous holder may have finished in between,
+  # either with a fresh token (an exchange now would spend a second single-use
+  # identity token for nothing) or with a failure whose pause is running (an
+  # exchange now would defeat the pause).
   defp refresh(federation, http, key, clock) do
     now = now(clock)
     entry = Cache.fetch(key)
