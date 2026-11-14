@@ -790,6 +790,45 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
       assert options.connect_options[:timeout] == 1_234
     end
 
+    test "a caller's connect options keep the connect bound unless they set a timeout", ctx do
+      parent = self()
+
+      adapter = fn request ->
+        send(parent, {:connect_options, request.options.connect_options})
+
+        {request,
+         Req.Response.new(
+           status: 200,
+           body: %{"access_token" => "sk-ant-oat01-connect", "expires_in" => 3600}
+         )}
+      end
+
+      f = fed(ctx.rule, ctx.path, connect_timeout: 1_234)
+
+      assert {:ok, _} =
+               Federation.token(
+                 f,
+                 http(req_options: [adapter: adapter, connect_options: [protocols: [:http1]]]),
+                 1_000
+               )
+
+      assert_received {:connect_options, options}
+      assert options[:protocols] == [:http1]
+      assert options[:timeout] == 1_234
+
+      other = fed(ctx.rule <> "-explicit", ctx.path, connect_timeout: 1_234)
+
+      assert {:ok, _} =
+               Federation.token(
+                 other,
+                 http(req_options: [adapter: adapter, connect_options: [timeout: 99]]),
+                 1_000
+               )
+
+      assert_received {:connect_options, explicit}
+      assert explicit[:timeout] == 99
+    end
+
     test "the defaults let a waiter outlast one holder's whole budget" do
       defaults = %Federation{}
 

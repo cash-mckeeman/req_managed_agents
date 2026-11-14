@@ -115,12 +115,12 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Exchange do
         base_url: http.base_url,
         url: "/v1/oauth/token",
         receive_timeout: federation.receive_timeout,
-        connect_options: [timeout: federation.connect_timeout],
         json: body
       ]
       |> Req.new()
       |> Req.merge(http.req_options)
       |> Req.merge(retry: false, redirect: false)
+      |> Req.merge(connect_options: connect_options(federation, http))
 
     case Req.request(request) do
       {:ok, %Req.Response{status: 200, body: body} = response} when is_map(body) ->
@@ -138,6 +138,13 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation.Exchange do
       {:error, _} ->
         {:error, {:exchange_failed, %{status: nil, request_id: nil}}}
     end
+  end
+
+  # The caller's connect options are kept; the bound is added unless they set their own.
+  defp connect_options(federation, http) do
+    http.req_options
+    |> Keyword.get(:connect_options, [])
+    |> Keyword.put_new(:timeout, federation.connect_timeout)
   end
 
   # Only the status and the request id (to find the attempt in the Console's
