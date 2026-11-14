@@ -211,14 +211,21 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
     cond do
       fresh?(entry, now) -> cached(entry)
       paused?(entry, now) -> paused(entry, now)
-      true -> exchange(federation, http, key, entry, now)
+      true -> exchange(federation, http, key, entry, now, clock)
     end
   end
 
-  defp exchange(federation, http, key, entry, now) do
-    case Exchange.run(federation, http, now) do
+  defp exchange(federation, http, key, entry, now, clock) do
+    result = Exchange.run(federation, http, now)
+
+    # The exchange can take as long as its timeouts. The token's lifetime counts
+    # from `now` (the conservative reading), but the pause and the serve decision
+    # below must count from when the exchange ended.
+    ended = now(clock)
+
+    case result do
       {:ok, credential} ->
-        Cache.put(key, %Entry{credential: credential, issued_at: now}, now)
+        Cache.put(key, %Entry{credential: credential, issued_at: now}, ended)
         {:ok, credential.access_token}
 
       {:error, reason} ->
@@ -227,12 +234,12 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.Federation do
         failed = %Entry{
           credential: entry && entry.credential,
           issued_at: entry && entry.issued_at,
-          retry_at: now + @backoff_seconds,
+          retry_at: ended + @backoff_seconds,
           failure: reason
         }
 
-        Cache.put(key, failed, now)
-        if usable?(failed, now), do: cached(failed), else: {:error, reason}
+        Cache.put(key, failed, ended)
+        if usable?(failed, ended), do: cached(failed), else: {:error, reason}
     end
   end
 

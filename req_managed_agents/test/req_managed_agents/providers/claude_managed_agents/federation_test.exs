@@ -683,6 +683,52 @@ defmodule ReqManagedAgents.Providers.ClaudeManagedAgents.FederationTest do
     end
   end
 
+  describe "slow exchanges" do
+    # A clock the endpoint can advance, to stand in for an exchange that takes
+    # `elapsed` seconds.
+    defp slow_failure(ctx, elapsed) do
+      time = :atomics.new(1, [])
+      attempts = counter()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        :counters.add(attempts, 1, 1)
+        :atomics.add(time, 1, elapsed)
+        Plug.Conn.send_resp(conn, 503, "down")
+      end)
+
+      {time, attempts, fn -> :atomics.get(time, 1) end}
+    end
+
+    test "the pause runs from when a slow failed exchange ended", ctx do
+      {time, attempts, clock} = slow_failure(ctx, 12)
+      :atomics.put(time, 1, 1_000)
+      f = fed(ctx.rule, ctx.path)
+
+      assert {:error, {:exchange_failed, _}} = Federation.token(f, http(), clock)
+      # The exchange ended at 1012; the pause lasts to 1022.
+      assert clock.() == 1_012
+      :atomics.put(time, 1, 1_020)
+      assert {:error, {:exchange_failed, _}} = Federation.token(f, http(), clock)
+      assert count(attempts) == 1
+
+      :atomics.put(time, 1, 1_023)
+      assert {:error, {:exchange_failed, _}} = Federation.token(f, http(), clock)
+      assert count(attempts) == 2
+    end
+
+    test "a token that expired during a slow failed exchange is not served", ctx do
+      stub_endpoint(ctx.exchanges)
+      f = fed(ctx.rule, ctx.path)
+      assert {:ok, "sk-ant-oat01-token-1"} = Federation.token(f, http(), 1_000)
+
+      # Expiry is 4600. The refresh starts in the advisory window and the
+      # failure lands 80 s later, inside the mandatory margin.
+      {time, _, clock} = slow_failure(ctx, 80)
+      :atomics.put(time, 1, 4_500)
+      assert {:error, {:exchange_failed, _}} = Federation.token(f, http(), clock)
+    end
+  end
+
   describe "refresh timing" do
     test "an expired cache re-exchanges before the request", ctx do
       stub_endpoint(ctx.exchanges)
