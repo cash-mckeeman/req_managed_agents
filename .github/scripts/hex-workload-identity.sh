@@ -4,6 +4,7 @@
 # Older Hex would only fail later, at publish time.
 set -euo pipefail
 v="$(mix hex.info | sed -n 's/^Hex: *//p')"
+v="${v%%$'\n'*}" # the first Hex: line only; a later one must not vouch for it
 if printf '%s\n' "$v" | awk -F. '
   $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && ($1 > 2 || ($1 == 2 && $2 >= 6)) { ok = 1 }
   END { exit !ok }'; then

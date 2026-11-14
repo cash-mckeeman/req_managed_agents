@@ -18,6 +18,9 @@ check "Hex 2.10.1 is accepted (10 > 6, not a string compare)" 0 "$(guard $'Hex: 
 check "Hex 3.0.0 is accepted" 0 "$(guard $'Hex: 3.0.0\n')"
 check "Hex 2.6.0-dev is accepted" 0 "$(guard $'Hex: 2.6.0-dev\n')"
 check "extra hex.info lines are ignored" 0 "$(guard $'Hex:    2.6.1\nElixir: 1.20\n')"
+check "two Hex lines: the first decides (2.5.9 then 2.6.0)" 1 "$(guard $'Hex: 2.5.9\nHex: 2.6.0\n')"
+check "two Hex lines: the first decides (2.6.0 then 2.5.9)" 0 "$(guard $'Hex: 2.6.0\nHex: 2.5.9\n')"
+check "garbage is refused" 1 "$(guard $'Hex: banana\n')"
 check "no Hex line is refused" 1 "$(guard $'nothing\n')"
 check "empty output is refused" 1 "$(guard '')"
 exit $fail
