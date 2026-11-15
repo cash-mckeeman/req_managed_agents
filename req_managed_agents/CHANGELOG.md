@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- Claude Managed Agents authenticates with Anthropic workload identity federation. `Client.new/1`
+  reads `:federation_rule_id`, `:organization_id`, `:service_account_id`, `:workspace_id`,
+  `:identity_token_file` and `:identity_token` (a zero-arity function returning
+  `{:ok, jwt} | {:error, reason}`), falling back to the official SDK variables
+  `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID`,
+  `ANTHROPIC_WORKSPACE_ID` and `ANTHROPIC_IDENTITY_TOKEN_FILE`. Each exchange presents a newly
+  obtained identity token.
+  - The access token is cached per node. It is renewed 120 seconds before expiry (half the
+    lifetime for a token living under 240 seconds) and served until 30 seconds before expiry
+    (a quarter of the lifetime under 120 seconds) if a renewal fails. A failed exchange is shared for
+    10 seconds instead of repeated.
+  - `:cache_key` (any term) shares one cached token between clients whose `:identity_token`
+    closures differ; without it the key is the settings plus the file path or function.
+  - Timeouts: `:exchange_timeout` (a caller with no usable token waits at most this long, default
+    30 000 ms), `:identity_token_timeout` (10 000 ms), `:exchange_connect_timeout` (5 000 ms) and
+    `:exchange_receive_timeout` (10 000 ms). Only the caller that performs a refresh waits for it;
+    other callers holding a usable token are served it.
+  - Failures return `{:error, {:authentication_error, reason}}` with `reason` one of
+    `:identity_token_unreadable`, `:identity_token_invalid`, `:identity_token_unavailable`,
+    `:identity_token_timeout`, `:exchange_timeout`, or
+    `{:exchange_rejected | :exchange_failed | :exchange_invalid_response, %{status: status, request_id: id}}`.
+    Neither a token nor a response body appears in an error.
+  - Telemetry span `[:req_managed_agents, :federation, :exchange]` (`:start`, `:stop`,
+    `:exception`); the stop metadata is `%{result: :ok | category}`.
+
+### Changed (breaking)
+
+- `Client.new/1` raises an `ArgumentError` when an API key or bearer file is configured while
+  `ANTHROPIC_FEDERATION_RULE_ID` (or `:federation_rule_id`) is set. A deployment that sets
+  `ANTHROPIC_API_KEY` and also carries that variable in its environment, where the official SDKs
+  let the key win, now fails at client construction instead of choosing silently. The message names
+  both sources; unset the variable, or pass `api_key: nil` or `federation_rule_id: nil`.
+  The message for the existing key-plus-bearer-file conflict now names both sources as well.
+
 ## v0.16.0 (2026-11-14)
 
 ### Added

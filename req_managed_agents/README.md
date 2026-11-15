@@ -87,6 +87,14 @@ list of keys read anywhere in the library:
 | --- | --- | --- | --- | --- |
 | Anthropic API key | `:api_key` | `:api_key` | `ANTHROPIC_API_KEY` | *(one auth source required)* |
 | Anthropic bearer file | `:bearer_token_file` | `:bearer_token_file` | `ANTHROPIC_BEARER_TOKEN_FILE` | *(one auth source required)* |
+| Federation rule | `:federation_rule_id` | `:federation_rule_id` | `ANTHROPIC_FEDERATION_RULE_ID` | *(one auth source required)* |
+| Organization | `:organization_id` | `:organization_id` | `ANTHROPIC_ORGANIZATION_ID` | *(required with federation)* |
+| Service account | `:service_account_id` | `:service_account_id` | `ANTHROPIC_SERVICE_ACCOUNT_ID` | `nil` |
+| Workspace | `:workspace_id` | `:workspace_id` | `ANTHROPIC_WORKSPACE_ID` | `nil` |
+| Identity token file | `:identity_token_file` | `:identity_token_file` | `ANTHROPIC_IDENTITY_TOKEN_FILE` | *(this or `:identity_token`)* |
+| Identity token function | `:identity_token` | `:identity_token` | — | *(this or a file)* |
+| Federation timeouts (ms): caller wait, identity token, connect, receive | `:exchange_timeout`, `:identity_token_timeout`, `:exchange_connect_timeout`, `:exchange_receive_timeout` | same | — | `30_000`, `10_000`, `5_000`, `10_000` |
+| Federation cache key | `:cache_key` | `:cache_key` | — | `nil` (the token source) |
 | Base URL | `:base_url` | `:base_url` | — | `"https://api.anthropic.com"` |
 | Beta header | `:beta` | `:beta` | — | `"managed-agents-2026-04-01"` |
 | Files beta header | `:files_beta` | `:files_beta` | — | `"files-api-2025-04-14"` |
@@ -109,6 +117,85 @@ reads the current file, including transient retries. Invalid files or tokens
 with 30 seconds or less remaining fail before dispatch with
 `{:error, {:authentication_error, reason}}`. Bearer requests do not follow redirects.
 
+
+#### Workload identity federation
+
+Instead of a static key, a client can exchange an identity-provider JWT for a
+short-lived Anthropic access token
+([Workload Identity Federation](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation)).
+The setting names match the official Anthropic SDKs, so one environment serves both:
+
+```elixir
+# ANTHROPIC_FEDERATION_RULE_ID, ANTHROPIC_ORGANIZATION_ID and
+# ANTHROPIC_IDENTITY_TOKEN_FILE set in the environment:
+client = ReqManagedAgents.Providers.ClaudeManagedAgents.Client.new()
+
+# Or fetch a fresh identity token yourself on every exchange:
+client =
+  ReqManagedAgents.Providers.ClaudeManagedAgents.Client.new(
+    federation_rule_id: "fdrl_...",
+    organization_id: "00000000-0000-0000-0000-000000000000",
+    workspace_id: "wrkspc_...",
+    identity_token: fn -> MyIdp.fetch_token() end
+  )
+```
+
+`:identity_token` is a zero-arity function returning `{:ok, jwt} | {:error, reason}`.
+Identity tokens carrying a `jti` are single use. Every exchange presents a newly
+obtained token: the file is reread, or the function called. Rereading cannot make a
+file hold a new token, so a file source must be rotated faster than the access token
+is refreshed; an unrotated file is presented again and rejected. Two cache keys over
+one file (for example two workspace ids) present the same token, as does a restart
+within the rotation period.
+
+The access token is cached per node, keyed on the settings and the identity-token
+source (file path or function). Closures built at the same code location with equal
+captured values are equal and share a key, but closures that capture differing values
+are distinct keys, and each new key is a separate exchange spending a single-use
+identity token. Pass a named function (`&Mod.fun/0`) or, to share one token across
+clients whose closures differ, a `:cache_key` (any term). Cache entries that hold no
+live token and no pause are dropped when a new entry is written.
+
+The token is renewed from 120 seconds before expiry (half the lifetime, for a token
+living under 240 seconds). If that exchange fails, the cached token keeps serving until
+30 seconds before expiry (a quarter of the lifetime, for a token living under 120
+seconds), after which
+requests fail with `{:error, {:authentication_error, reason}}`. A failed exchange is
+remembered for 10 seconds: callers with no usable token get that failure at once,
+without another exchange or another identity token, so a down endpoint or a rejecting
+rule costs one exchange per pause.
+
+Only the caller that performs a refresh waits for it; every other caller holding a usable
+token is served it at once. A caller with none waits at most `:exchange_timeout`
+(30 000 ms, then `:exchange_timeout`). One refresh is bounded by the identity-token
+function's `:identity_token_timeout` (10 000 ms, then `:identity_token_timeout`) plus the
+exchange request's `:exchange_connect_timeout` (5 000 ms) and `:exchange_receive_timeout`
+(10 000 ms), about 25 s, which `:exchange_timeout` covers. None of them is the client's
+`:receive_timeout`. If you raise any of the three, raise `:exchange_timeout` to at least
+their sum.
+
+`reason` is one of `:identity_token_unreadable`, `:identity_token_invalid`,
+`:identity_token_unavailable`, `:identity_token_timeout`, `:exchange_timeout`, or
+`{category, %{status: status, request_id: id}}` with `category` one of
+`:exchange_rejected` (HTTP 4xx other than 429), `:exchange_failed` (429, 5xx, a redirect
+or no response; `status` is `nil` without one) or `:exchange_invalid_response`. The
+request id is Anthropic's `request-id` header, the key to the attempt in the Console's
+authentication history. Each exchange emits
+`[:req_managed_agents, :federation, :exchange, :start | :stop | :exception]` telemetry;
+the stop metadata is `%{result: :ok | category}`.
+
+A transient retry of a Messages call reuses the cached token; exchanges are never
+retried or redirected, and federated API calls do not follow redirects. Errors and
+inspected structs never contain the identity token, the access token or the endpoint's
+response body.
+
+Federation is one more auth source: an API key or bearer file configured alongside
+any federation setting raises an `ArgumentError` naming both, instead of one silently
+winning. `ANTHROPIC_FEDERATION_RULE_ID` is what switches federation on, so an existing
+deployment that sets `ANTHROPIC_API_KEY` and also has that variable in its environment
+fails at `Client.new/1` with an error naming both; unset the variable, or pass
+`api_key: nil` or `federation_rule_id: nil` to choose one.
+`ANTHROPIC_IDENTITY_TOKEN` (a literal token) and configuration profiles are not read.
 
 `Providers.ClaudeManagedAgents.Client.new/1` resolves the Anthropic keys; `AWS.SigV4.from_env/1`
 resolves the AWS keys (it still works called with no args — `opts` just gives
