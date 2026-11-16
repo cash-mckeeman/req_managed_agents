@@ -1,11 +1,11 @@
 # Contributing
 
-Thanks for contributing to `req_managed_agents` and `req_managed_agents_host`.
+Thanks for contributing to `aws_event_stream`, `req_managed_agents`, and
+`req_managed_agents_host`.
 
 ## Development
 
-Each package is its own Mix project; run these from `req_managed_agents/` or
-`req_managed_agents_host/`:
+Each package is its own Mix project; run these from its directory:
 
 ```sh
 mix deps.get
@@ -17,11 +17,13 @@ mix format            # formatting (CI enforces --check-formatted)
 
 All four are enforced in CI for each package a change touches. A change to
 `req_managed_agents` also runs `req_managed_agents_host`'s checks, against the changed code.
-`mix test` at the repository root fails on purpose.
+Codec changes also test the client and host. The codec supports Elixir 1.18+;
+the client and host require Elixir 1.20+. `mix test` at the repository root
+fails on purpose.
 
 ## Public-repo hygiene
 
-This repository is public and both packages are published to Hex, so treat every
+This repository is public and its packages are published to Hex, so treat every
 tracked file as something a consumer may read.
 
 An internal tracker id must not appear on any tracked surface — not source,

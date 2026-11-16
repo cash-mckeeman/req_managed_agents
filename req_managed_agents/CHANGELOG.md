@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- Workspace development uses the sibling `aws_event_stream` package. Published
+  dependencies retain the optional `~> 0.1` Hex requirement.
+
 ## v0.17.0 (2026-11-14)
 
 ### Added

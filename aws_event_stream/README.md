@@ -1,5 +1,8 @@
 # AWSEventStream
 
+The standalone `aws_event_stream` Hex package is maintained in this monorepo.
+Run its Mix commands from `aws_event_stream/`.
+
 Pure-Elixir codec for the AWS `vnd.amazon.eventstream` binary protocol.
 
 General-purpose and symmetric: encodes and decodes all header types, validates
