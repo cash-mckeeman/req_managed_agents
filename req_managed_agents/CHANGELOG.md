@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- Acceptance source attestation checks the local codec's inputs and loaded
+  modules, rejecting untracked codec source and stale or foreign codec builds.
+
 ### Changed
 
 - Workspace development uses the sibling `aws_event_stream` package. Published

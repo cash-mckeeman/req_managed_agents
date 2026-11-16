@@ -33,6 +33,79 @@ defmodule ReqManagedAgents.Acceptance.RuntimeSourceTest do
     script = Path.join(scratch, "runtime.exs")
     File.write!(script, script())
     assert probe(fixture, build, env, script, original, "fresh")["attested"]
+
+    codec_source = Path.join(fixture, "aws_event_stream/lib/aws_event_stream/header.ex")
+    codec_ebin = Path.join(build, "lib/aws_event_stream/ebin")
+    codec_old = Path.join(scratch, "old-codec/Elixir.AWSEventStream.Header.beam")
+    File.mkdir_p!(Path.dirname(codec_old))
+    File.cp!(Path.join(codec_ebin, Path.basename(codec_old)), codec_old)
+
+    File.write!(
+      codec_source,
+      Regex.replace(
+        ~r/end\s*\z/,
+        File.read!(codec_source),
+        "  def synthetic_revision, do: :changed\nend\n"
+      )
+    )
+
+    changed_codec = commit(fixture)
+    result = probe(fixture, build, env, script, changed_codec, "fresh")
+    assert result["disk_verified"]
+    refute result["attested"], "changed local codec accepted with stale BEAMs"
+    assert result["api_refused"]
+    assert result["native_requests"] == 0
+    compile!(fixture, env)
+    assert probe(fixture, build, env, script, changed_codec, "fresh")["attested"]
+
+    result = probe(fixture, build, env, script, changed_codec, "foreign_codec", [codec_old])
+    refute result["attested"], "foreign codec BEAM origin accepted"
+    assert result["api_refused"]
+    assert result["native_requests"] == 0
+
+    codec_target = Path.join(codec_ebin, Path.basename(codec_old))
+    codec_fresh = Path.join(scratch, "fresh-codec.beam")
+    File.cp!(codec_target, codec_fresh)
+    refute File.read!(codec_old) == File.read!(codec_fresh)
+    File.cp!(codec_old, codec_target)
+    result = probe(fixture, build, env, script, changed_codec, "loaded_old_codec", [codec_fresh])
+    refute result["attested"], "loaded old codec accepted after restoring its disk BEAM"
+    assert result["api_refused"]
+    assert result["native_requests"] == 0
+    File.cp!(codec_fresh, codec_target)
+
+    for path <- [
+          "aws_event_stream/mix.exs",
+          "aws_event_stream/config/config.exs",
+          "aws_event_stream/lib/codec_added_fixture.ex"
+        ] do
+      file = Path.join(fixture, path)
+      File.mkdir_p!(Path.dirname(file))
+      bytes = if File.regular?(file), do: File.read!(file), else: ""
+      File.write!(file, bytes <> "\n# additional compiled input\n")
+      revision = commit(fixture)
+      result = probe(fixture, build, env, script, revision, "fresh")
+      assert result["disk_verified"]
+      refute result["attested"], path
+      compile!(fixture, env)
+      assert probe(fixture, build, env, script, revision, "fresh")["attested"], path
+    end
+
+    hidden_codec = "aws_event_stream/lib/codec_ignored_fixture.ex"
+    exclude = Path.join(fixture, ".git/info/exclude")
+    File.write!(exclude, File.read!(exclude) <> "\n/" <> hidden_codec <> "\n")
+    File.write!(Path.join(fixture, hidden_codec), "defmodule CodecIgnoredFixture do\nend\n")
+    compile!(fixture, env)
+    revision = git(fixture, ["rev-parse", "HEAD"]) |> String.trim()
+    result = probe(fixture, build, env, script, revision, "ignored_codec")
+    assert result["helper_loaded"]
+    refute result["disk_verified"], "ignored local codec source omitted from inventory"
+    refute result["attested"]
+    assert result["api_refused"]
+    assert result["native_requests"] == 0
+    File.rm!(Path.join(fixture, hidden_codec))
+    compile!(fixture, env)
+    assert probe(fixture, build, env, script, revision, "fresh")["attested"]
     ebin = Path.join(build, "lib/req_managed_agents/ebin")
     old_dir = Path.join(scratch, "old-ebin")
     File.mkdir!(old_dir)
@@ -217,7 +290,7 @@ defmodule ReqManagedAgents.Acceptance.RuntimeSourceTest do
 
   defp probe(fixture, build, env, script, revision, mode, extra \\ []) do
     ebin = Path.join(build, "lib/req_managed_agents/ebin")
-    paths = beam_paths() ++ ["-pa", ebin]
+    paths = beam_paths() ++ ["-pa", Path.join(build, "lib/aws_event_stream/ebin"), "-pa", ebin]
 
     {output, status} =
       System.cmd(
@@ -234,6 +307,17 @@ defmodule ReqManagedAgents.Acceptance.RuntimeSourceTest do
   end
 
   defp beam_paths, do: Enum.flat_map(:code.get_path(), &["-pa", List.to_string(&1)])
+
+  defp compile!(fixture, env) do
+    {output, status} =
+      System.cmd(System.find_executable("mix"), ["compile", "--warnings-as-errors"],
+        cd: Path.join(fixture, "req_managed_agents"),
+        env: env,
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+  end
 
   defp commit(root) do
     git(root, ["add", "."])
@@ -292,7 +376,10 @@ defmodule ReqManagedAgents.Acceptance.RuntimeSourceTest do
     Mix.Project.in_project(:req_managed_agents, Path.join(root, "req_managed_agents"), fn _ ->
       module = ReqManagedAgents.Providers.ClaudeManagedAgents.Acceptance
       case mode do
-        mode when mode in ["foreign", "foreign_source"] -> Code.prepend_path(Path.dirname(hd(extra)))
+        "loaded_old_codec" ->
+          Code.ensure_loaded!(AWSEventStream.Header)
+          File.cp!(hd(extra), Path.join([Mix.Project.build_path(), "lib/aws_event_stream/ebin/Elixir.AWSEventStream.Header.beam"]))
+        mode when mode in ["foreign", "foreign_source", "foreign_codec"] -> Code.prepend_path(Path.dirname(hd(extra)))
         "loaded_old_new_disk" ->
           Code.ensure_loaded!(module)
           File.cp!(Enum.at(extra, 1), Path.join(Mix.Project.compile_path(), Atom.to_string(module) <> ".beam"))
@@ -304,7 +391,11 @@ defmodule ReqManagedAgents.Acceptance.RuntimeSourceTest do
           send(Process.whereis(:runtime_test_probe), :native_request)
           {request, Req.Response.new(status: 503, body: %{})}
         end})
-      helper_loaded = mode == "ignored_support" and Code.ensure_loaded?(AcceptanceUntrackedFixture) and apply(AcceptanceUntrackedFixture, :loaded?, [])
+      helper_loaded = case mode do
+        "ignored_support" -> Code.ensure_loaded?(AcceptanceUntrackedFixture) and apply(AcceptanceUntrackedFixture, :loaded?, [])
+        "ignored_codec" -> Code.ensure_loaded?(CodecIgnoredFixture)
+        _ -> false
+      end
       source = ReqManagedAgents.Acceptance.Source
       disk = match?({:ok, _}, source.verify(root, revision))
       attested = match?({:ok, _}, source.attest(revision))

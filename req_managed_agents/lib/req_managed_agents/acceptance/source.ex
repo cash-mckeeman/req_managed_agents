@@ -9,16 +9,23 @@ defmodule ReqManagedAgents.Acceptance.Source do
   import Bitwise, only: [band: 2]
   @root Path.expand("../../../..", __DIR__)
   @package Path.join(@root, "req_managed_agents")
-  @source_dirs Enum.map(
-                 Mix.Project.config()[:elixirc_paths] || ["lib"],
-                 &Path.expand(&1, @package)
-               )
-  @config_dirs [Path.join(@root, "config"), Path.join(@package, "config")]
+  @codec Path.join(@root, "aws_event_stream")
+  @local_codec Mix.Project.deps_paths()[:aws_event_stream] == @codec
+  @package_source_dirs Enum.map(
+                         Mix.Project.config()[:elixirc_paths] || ["lib"],
+                         &Path.expand(&1, @package)
+                       )
+  # Path dependencies compile in :prod; the codec's production inputs are lib/.
+  @source_dirs @package_source_dirs ++ if(@local_codec, do: [Path.join(@codec, "lib")], else: [])
+  @config_dirs [Path.join(@root, "config"), Path.join(@package, "config")] ++
+                 if(@local_codec, do: [Path.join(@codec, "config")], else: [])
   @config_paths Enum.flat_map(
                   @config_dirs,
                   &Path.wildcard(Path.join(&1, "**/*.{ex,exs}"), match_dot: true)
                 )
-  @metadata_paths for base <- [@root, @package, Path.join(@root, "req_managed_agents_host")],
+  @metadata_paths for base <-
+                        [@root, @package, Path.join(@root, "req_managed_agents_host")] ++
+                          if(@local_codec, do: [@codec], else: []),
                       name <- ["mix.exs", "mix.lock"],
                       do: Path.join(base, name)
   @input_paths (Enum.flat_map(
@@ -69,7 +76,8 @@ defmodule ReqManagedAgents.Acceptance.Source do
   defp current_build? do
     Path.expand(Mix.Project.project_file()) == Path.join(@package, "mix.exs") and
       Enum.map(Mix.Project.config()[:elixirc_paths] || ["lib"], &Path.expand(&1, @package)) ==
-        @source_dirs and
+        @package_source_dirs and
+      Mix.Project.deps_paths()[:aws_event_stream] == @codec == @local_codec and
       input_paths() == @input_paths and Enum.all?(@compiled_inputs, &current_input?/1) and
       current_modules?()
   end
@@ -100,9 +108,26 @@ defmodule ReqManagedAgents.Acceptance.Source do
            :file.consult(String.to_charlist(app_file)),
          modules when is_list(modules) <- Keyword.get(properties, :modules),
          true <- __MODULE__ in modules do
-      Enum.all?(modules, &current_module?(&1, compile_path))
+      Enum.all?(modules, &current_module?(&1, compile_path)) and current_codec_modules?()
     else
       _ -> false
+    end
+  end
+
+  defp current_codec_modules? do
+    if @local_codec do
+      compile_path = Path.join(Mix.Project.build_path(), "lib/aws_event_stream/ebin")
+      app_file = Path.join(compile_path, "aws_event_stream.app")
+
+      with {:ok, [{:application, :aws_event_stream, properties}]} <-
+             :file.consult(String.to_charlist(app_file)),
+           modules when is_list(modules) and modules != [] <- Keyword.get(properties, :modules) do
+        Enum.all?(modules, &current_module?(&1, compile_path))
+      else
+        _ -> false
+      end
+    else
+      true
     end
   end
 
@@ -172,7 +197,12 @@ defmodule ReqManagedAgents.Acceptance.Source do
   end
 
   defp compiled_inventory?(root, entries) do
-    dirs = ["lib", "req_managed_agents/lib", "req_managed_agents_host/lib"]
+    dirs = [
+      "lib",
+      "aws_event_stream/lib",
+      "req_managed_agents/lib",
+      "req_managed_agents_host/lib"
+    ]
 
     physical =
       Enum.flat_map(dirs, fn dir ->
