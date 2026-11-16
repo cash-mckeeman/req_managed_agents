@@ -64,7 +64,7 @@ defmodule ReqManagedAgents.MixProject do
       # Anthropic-only consumers skip them; AgentCore raises a clear error at
       # first use if they're missing (ReqManagedAgents.AgentCore.Deps).
       {:ex_aws_auth, "~> 1.4", optional: true},
-      {:aws_event_stream, "~> 0.1", optional: true},
+      codec_dependency(),
       # req_llm is optional: only the Local provider's DEFAULT chat_fun needs it.
       # Injected chat_funs (tests, Ollama, mimir lanes) work without it;
       # Local raises a clear error at first use if it's missing (Local.Deps).
@@ -73,6 +73,14 @@ defmodule ReqManagedAgents.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
+  end
+
+  defp codec_dependency do
+    case System.get_env("RMA_PUBLISH") do
+      "1" -> {:aws_event_stream, "~> 0.1", optional: true}
+      "floor" -> {:aws_event_stream, "== 0.1.0", optional: true}
+      _ -> {:aws_event_stream, path: "../aws_event_stream", optional: true}
+    end
   end
 
   defp dialyzer do
