@@ -1,26 +1,17 @@
 #!/usr/bin/env bash
-# publish-plan.sh <tag> <package>...   (the packages in publish order)
-# Prints the publish plan for a tag as step outputs. Exactly two tag forms:
-#   vX.Y.0             every package in the publish order: a lockstep minor
-#   <package>-vX.Y.Z   that package alone, Z > 0: a per-package patch
-# Anything else, pre-releases included, is rejected before anything runs.
+# Resolve package membership through the root Mix selector; publish order is
+# deliberately independent of release groups.
 set -euo pipefail
-tag="$1"; shift
-[ $# -gt 0 ] || { echo "publish-plan: empty publish order" >&2; exit 1; }
-num='(0|[1-9][0-9]*)'
-if [[ "$tag" =~ ^v${num}\.${num}\.${num}$ ]]; then
-  if [ "${BASH_REMATCH[3]}" != 0 ]; then
-    echo "publish-plan: $tag: a v* tag is a lockstep minor and ends in .0; tag a patch <package>-${tag}" >&2; exit 1
-  fi
-  echo "kind=lockstep"; echo "version=${tag#v}"; echo "packages=$*"
-elif [[ "$tag" =~ ^([a-z_]+)-v${num}\.${num}\.${num}$ ]]; then
-  pkg="${BASH_REMATCH[1]}"
-  if [ "${BASH_REMATCH[4]}" = 0 ]; then
-    echo "publish-plan: $tag: minors are lockstep; tag v${tag#*-v}" >&2; exit 1
-  fi
-  listed=false; for p in "$@"; do [ "$p" = "$pkg" ] && listed=true; done
-  [ "$listed" = true ] || { echo "publish-plan: $tag: $pkg is not in the publish order ($*)" >&2; exit 1; }
-  echo "kind=patch"; echo "version=${tag#*-v}"; echo "packages=$pkg"
+[ $# -eq 1 ] || { echo "usage: publish-plan.sh TAG" >&2; exit 1; }
+tag="$1"
+cd "$(dirname "$0")/../.."
+packages="$(mix release_packages "$tag")"
+[ -n "$packages" ] || { echo "publish-plan: empty release set" >&2; exit 1; }
+if [[ "$tag" = v* ]]; then
+  kind=lockstep
+  version="${tag#v}"
 else
-  echo "publish-plan: $tag is neither vX.Y.0 nor <package>-vX.Y.Z" >&2; exit 1
+  version="${tag#*-v}"
+  if [ "${tag%%-v*}" = aws_event_stream ]; then kind=independent; else kind=patch; fi
 fi
+printf 'kind=%s\nversion=%s\npackages=%s\n' "$kind" "$version" "$(tr '\n' ' ' <<<"$packages" | sed 's/ $//')"

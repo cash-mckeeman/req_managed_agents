@@ -11,7 +11,7 @@ check() { if [ "$2" = "$3" ]; then echo "ok: $1"; else echo "FAIL: $1 (want '$2'
 # mix also records, in its own file, any call that ran with a Hex key in the environment.
 # curl records its argv in its own file, so the sequence rows count only mix and elixir.
 d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
-mkdir -p "$d/bin" "$d/repo/req_managed_agents" "$d/repo/req_managed_agents_host"
+mkdir -p "$d/bin" "$d/repo/req_managed_agents" "$d/repo/req_managed_agents_host" "$d/repo/aws_event_stream"
 printf '#!/usr/bin/env bash\necho "$*" >> "$CURLS"; printf "%%s" "$FAKE_HTTP"; exit "${FAKE_CURL_RC:-0}"\n' > "$d/bin/curl"
 printf '#!/usr/bin/env bash\necho "mix cwd=${PWD##*/repo} RMA_PUBLISH=${RMA_PUBLISH:-} MIX_ENV=${MIX_ENV:-} $*" >> "$CALLS"\n[ -z "${HEX_API_KEY:-}" ] || echo "$*" >> "$KEYED"\n' > "$d/bin/mix"
 printf '#!/usr/bin/env bash\necho "elixir cwd=${PWD##*/repo} $*" >> "$CALLS"\n' > "$d/bin/elixir"
@@ -75,4 +75,10 @@ publish req_managed_agents_host patch 0 404 >/dev/null
 # An ambient key (the default KEY here) would beat the job's workload identity.
 check "a real host patch with an ambient key: no mix call sees it" "" "$(KEY=ambient publish req_managed_agents_host patch 0 404 >/dev/null; cat "$d/keyed")"
 check "a real lockstep run with an ambient key: hex.publish does not see it" "" "$(KEY=ambient publish req_managed_agents lockstep 0 404 >/dev/null; cat "$d/keyed")"
+check "a codec dry run checks its package" 0 "$(publish aws_event_stream independent 1 404)"
+check "a codec dry run never publishes" 0 "$(ran hex.publish)"
+check "a real codec run publishes only the codec" 'mix cwd=/aws_event_stream RMA_PUBLISH=1 MIX_ENV= hex.publish --yes' "$(publish aws_event_stream independent 0 404 >/dev/null; grep 'hex.publish' "$d/calls")"
+check "a codec already on Hex skips all work" 0 "$(publish aws_event_stream independent 0 200 >/dev/null; ran .)"
+check "a codec cannot join a family release" 1 "$([ "$(publish aws_event_stream lockstep 1 404)" -ne 0 ] && echo 1 || echo 0)"
+check "a family package cannot use independent release mode" 1 "$([ "$(publish req_managed_agents independent 1 404)" -ne 0 ] && echo 1 || echo 0)"
 exit $fail

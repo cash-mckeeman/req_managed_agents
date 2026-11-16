@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # publish-package.sh <package>, run from the repository root.
-# Env: KIND (lockstep|patch), VERSION, DRY_RUN (1|0). A real run publishes with the
+# Env: KIND (lockstep|patch|independent), VERSION, DRY_RUN (1|0). A real run publishes with the
 # job's workload identity, so no Hex key is passed.
 # Order: skip if already on Hex (a rerun after a partial failure is safe) ->
 # patch floor (host patches) -> suite against Hex deps -> tarball check -> publish.
@@ -11,7 +11,10 @@ cd "$pkg"
 # Anything but the two values the workflow emits is a mistake, and a mistaken
 # DRY_RUN must not fall through to a real publish.
 case "${DRY_RUN-}" in 0|1) ;; *) echo "publish-package: DRY_RUN must be 0 or 1, not '${DRY_RUN-}'" >&2; exit 1 ;; esac
-case "${KIND-}" in lockstep|patch) ;; *) echo "publish-package: KIND must be lockstep or patch, not '${KIND-}'" >&2; exit 1 ;; esac
+case "${KIND-}:$pkg" in
+  independent:aws_event_stream|lockstep:req_managed_agents|lockstep:req_managed_agents_host|patch:req_managed_agents|patch:req_managed_agents_host) ;;
+  *) echo "publish-package: invalid release kind/package: ${KIND-}:$pkg" >&2; exit 1 ;;
+esac
 
 # An ambient key would take precedence over the job's workload identity, so no
 # mix call below may see one.
