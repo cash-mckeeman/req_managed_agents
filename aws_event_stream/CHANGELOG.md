@@ -10,6 +10,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Non-string Bedrock `bytes` envelopes return malformed-payload results;
   exception frames retain their classification and raw body.
+- Timestamps outside the `DateTime` range return `invalid_headers` frame errors.
 
 ### Changed
 

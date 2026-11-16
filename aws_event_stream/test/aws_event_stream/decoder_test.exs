@@ -59,6 +59,30 @@ defmodule AWSEventStream.DecoderTest do
     assert {[{:error, {:invalid_prelude_crc, ^corrupt}}], <<>>} = Decoder.decode(corrupt)
   end
 
+  test "out-of-range timestamps yield invalid_headers and decoding continues" do
+    good = %Message{headers: [], payload: "next"}
+
+    for ms <- [-9_223_372_036_854_775_808, 9_223_372_036_854_775_807] do
+      headers = <<1, "t", 8, ms::signed-big-64>>
+      prelude = <<byte_size(headers) + 16::big-32, byte_size(headers)::big-32>>
+      body = prelude <> <<:erlang.crc32(prelude)::big-32>> <> headers
+      invalid = body <> <<:erlang.crc32(body)::big-32>>
+
+      assert {[{:error, {:invalid_headers, ^invalid}}, {:ok, ^good}], <<>>} =
+               Decoder.decode(invalid <> frame(good))
+
+      assert {[{:ok, ^good}], <<>>} = Decoder.decode(invalid <> frame(good), on_error: :skip)
+    end
+  end
+
+  test "timestamps at the DateTime limits remain valid" do
+    for ms <- [-377_705_116_800_000, 253_402_300_799_999] do
+      header = %Header{name: "t", type: :timestamp, value: DateTime.from_unix!(ms, :millisecond)}
+      message = %Message{headers: [header], payload: ""}
+      assert {[{:ok, ^message}], <<>>} = Decoder.decode(frame(message))
+    end
+  end
+
   test "a valid-CRC frame with an unknown header type surfaces :invalid_headers, does not crash" do
     # headers blob: name_len=1, name="x", type byte=10 (unknown), no value
     headers = <<1, "x", 10>>

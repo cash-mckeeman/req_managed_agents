@@ -38,8 +38,10 @@ defmodule AWSEventStream.Header do
   defp decode_value(6, <<len::big-16, v::binary-size(len), rest::binary>>), do: {v, rest}
   defp decode_value(7, <<len::big-16, v::binary-size(len), rest::binary>>), do: {v, rest}
 
-  defp decode_value(8, <<ms::signed-big-64, rest::binary>>),
-    do: {DateTime.from_unix!(ms, :millisecond), rest}
+  defp decode_value(8, <<ms::signed-big-64, rest::binary>>) do
+    {:ok, timestamp} = DateTime.from_unix(ms, :millisecond)
+    {timestamp, rest}
+  end
 
   defp decode_value(9, <<v::binary-16, rest::binary>>), do: {v, rest}
 

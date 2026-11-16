@@ -90,9 +90,8 @@ defmodule AWSEventStream.Decoder do
   defp safe_decode_headers(headers_bin) do
     {:ok, Header.decode_all(headers_bin)}
   rescue
-    # The only ways a malformed header blob fails to parse: an unknown type byte
-    # (no matching clause) or a value whose declared length runs past the bytes.
-    # Rescue exactly those so a genuine code bug in Header.decode_all still crashes loudly.
+    # Unknown/truncated values fail clause matching; invalid timestamps fail the
+    # DateTime result match. Keep unrelated exceptions visible.
     _ in [FunctionClauseError, MatchError] -> :error
   end
 end
