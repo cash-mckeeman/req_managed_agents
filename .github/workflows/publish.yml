@@ -1,8 +1,7 @@
 name: Publish to Hex
 
-# A tag publishes. vX.Y.0 releases every package in the root mix.exs's publish
-# order (a lockstep minor); <package>-vX.Y.Z releases that package alone (a
-# patch). A manual run rehearses a tag: every guard runs, nothing publishes.
+# A tag publishes the release group selected by mix release_packages.
+# Codec tags are independent; global minors release RMA and host together. A manual run rehearses a tag: every guard runs, nothing publishes.
 #
 # Two jobs. `guard` runs on a tag and on a manual run, holds no environment and
 # no OIDC token, and does the guards and, on a manual run, the dry-run publish
@@ -60,13 +59,7 @@ jobs:
         name: resolve the publish set
         continue-on-error: ${{ env.DRY_RUN == '1' }}
         run: |
-          order="$(mix publish_order | tr '\n' ' ' | sed 's/ $//')"
-          if [ "$order" != "req_managed_agents req_managed_agents_host" ]; then
-            echo "::error::mix publish_order is '$order'; this workflow's publish steps are req_managed_agents, then req_managed_agents_host"
-            exit 1
-          fi
-          read -r -a packages <<<"$order"
-          bash .github/scripts/publish-plan.sh "$TAG" "${packages[@]}" >> "$GITHUB_OUTPUT"
+          bash .github/scripts/publish-plan.sh "$TAG" >> "$GITHUB_OUTPUT"
       - id: versions
         name: each selected package's @version equals the tag's
         continue-on-error: ${{ env.DRY_RUN == '1' }}
@@ -100,6 +93,12 @@ jobs:
           OUTCOMES: hex=${{ steps.hex.outcome }} plan=${{ steps.plan.outcome }} versions=${{ steps.versions.outcome }} reachable=${{ steps.reachable.outcome }} ci_ok=${{ steps.ci_ok.outcome }}
         run: |
           echo "guards: $OUTCOMES" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: rehearse aws_event_stream
+        if: github.event_name != 'push' && contains(format(' {0} ', steps.plan.outputs.packages), ' aws_event_stream ')
+        env:
+          KIND: ${{ steps.plan.outputs.kind }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: bash .github/scripts/publish-package.sh aws_event_stream
       - name: rehearse req_managed_agents
         if: github.event_name != 'push' && contains(format(' {0} ', steps.plan.outputs.packages), ' req_managed_agents ')
         env:
@@ -154,6 +153,12 @@ jobs:
           otp-version: "29"
       - name: hex supports workload identity
         run: bash .github/scripts/hex-workload-identity.sh
+      - name: publish aws_event_stream
+        if: contains(format(' {0} ', needs.guard.outputs.packages), ' aws_event_stream ')
+        env:
+          KIND: ${{ needs.guard.outputs.kind }}
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: bash .github/scripts/publish-package.sh aws_event_stream
       - name: publish req_managed_agents
         if: contains(format(' {0} ', needs.guard.outputs.packages), ' req_managed_agents ')
         env:

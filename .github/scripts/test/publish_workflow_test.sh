@@ -28,7 +28,7 @@ check "the publish job continues past nothing" 0 "$(job publish | grep -c 'conti
 check "a rehearsal lists the Hex guard in its outcomes" 2 "$(grep -c 'OUTCOMES: hex=\${{ steps.hex.outcome }} plan=' "$WF")"
 check "the Hex guard step in the guard job is id hex" 1 "$(job guard | grep -c '        id: hex')"
 # No status function: a failed guard skips the rehearsal steps, and `needs` skips publish.
-for pkg in req_managed_agents req_managed_agents_host; do
+for pkg in aws_event_stream req_managed_agents req_managed_agents_host; do
   check "rehearse $pkg runs on a manual run only, after every guard passed" \
     "        if: github.event_name != 'push' && contains(format(' {0} ', steps.plan.outputs.packages), ' $pkg ')" "$(jstep guard "rehearse $pkg" if)"
   check "publish $pkg runs only for a planned package" \
@@ -65,4 +65,25 @@ check "an empty packages output fails" 1 "$(plan '' lockstep 0.17.0)"
 check "an empty kind output fails" 1 "$(plan 'req_managed_agents' '' 0.17.0)"
 check "an empty version output fails" 1 "$(plan 'req_managed_agents' patch '')"
 check "the plan check names each missing output" 3 "$(printf '%s\n' "$plan_run" | grep -c '::error::the guard job published no')"
+version_run="$(job guard | awk '/name: each selected package/ {f=1; next} f && /^        run: \|/ {g=1; next} g && /^      - / {exit} g {sub(/^          /, ""); print}')"
+version_check() { (PACKAGES=aws_event_stream VERSION="$1" bash -c "$version_run" >/dev/null 2>&1); echo $?; }
+check "matching codec metadata permits the selected release" 0 "$(version_check 0.2.1)"
+check "mismatched codec metadata prevents the selected release" 1 "$(version_check 0.2.0)"
+workflow=$(ruby "$(dirname "$0")/workflow_json.rb" "$WF") || exit 1
+d=$(mktemp -d)
+trap 'rm -rf "$d"' EXIT
+mkdir -p "$d/.github/scripts"
+cat > "$d/.github/scripts/publish-package.sh" <<'STUB'
+printf '%s\n' "$*" >> "$CALLS"
+STUB
+for binding in 'guard rehearse' 'publish publish'; do
+  read -r target action <<<"$binding"
+  for pkg in aws_event_stream req_managed_agents req_managed_agents_host; do
+    command=$(jq -er --arg job "$target" --arg name "$action $pkg" \
+      '.jobs[$job].steps[] | select(.name == $name) | .run' <<<"$workflow") || exit 1
+    : > "$d/calls"
+    (cd "$d" && CALLS="$d/calls" bash -e -o pipefail -c "$command") || exit 1
+    check "$action invokes the selected $pkg publisher" "$pkg" "$(cat "$d/calls")"
+  done
+done
 exit $fail

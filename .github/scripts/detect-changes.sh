@@ -20,28 +20,39 @@ else
   paths="$(cat)"
 fi
 
-rma=false rmah=false root=false any=false
+codec=false rma=false rmah=false root=false any=false
 while IFS= read -r p; do
   [ -n "$p" ] || continue
   any=true
   case "$p" in
+    aws_event_stream/*) codec=true; rma=true; rmah=true ;;
     req_managed_agents/*) rma=true; rmah=true ;;
     req_managed_agents_host/*) rmah=true ;;
-    mix.exs|.gitignore|LICENSE|.github/*|.hygiene/*|.githooks/*) rma=true; rmah=true; root=true ;;
+    mix.exs|.gitignore|LICENSE|.github/*|.hygiene/*|.githooks/*) codec=true; rma=true; rmah=true; root=true ;;
     README.md|CONTRIBUTING.md|.claude/*) ;;
-    *) echo "detect-changes: no rule for '$p'; selecting everything" >&2; rma=true; rmah=true; root=true ;;
+    *) echo "detect-changes: no rule for '$p'; selecting everything" >&2; codec=true; rma=true; rmah=true; root=true ;;
   esac
 done <<<"$paths"
 
 if [ "$any" = false ]; then
   [ "${1:-}" = --all ] || echo "detect-changes: no changed paths; selecting everything" >&2
-  rma=true; rmah=true; root=true
+  codec=true; rma=true; rmah=true; root=true
 fi
 
 packages="["; sep=""
+if [ "$codec" = true ]; then packages+="${sep}\"aws_event_stream\""; sep=","; fi
 if [ "$rma" = true ]; then packages+="${sep}\"req_managed_agents\""; sep=","; fi
 if [ "$rmah" = true ]; then packages+="${sep}\"req_managed_agents_host\""; fi
 packages+="]"
 echo "detect-changes: packages=$packages root=$root" >&2
 echo "packages=$packages"
 echo "root=$root"
+
+jq -cn --argjson packages "$packages" '
+  {include: [$packages[] as $package |
+    (if $package == "aws_event_stream" then
+       [{elixir:"1.18",otp:"27"},{elixir:"1.20",otp:"29",lint:true}]
+     else
+       [{elixir:"1.20",otp:"28"},{elixir:"1.20",otp:"29",lint:true}]
+     end)[] | . + {package:$package}]} | "matrix=\(tojson)"
+' -r
