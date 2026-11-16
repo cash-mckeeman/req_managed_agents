@@ -2,7 +2,7 @@ defmodule ReqManagedAgentsRoot.MixProject do
   use Mix.Project
 
   # Publish order. A package is published only while it is listed here.
-  @publish ~w(req_managed_agents req_managed_agents_host)
+  @publish ~w(aws_event_stream req_managed_agents req_managed_agents_host)
 
   def project do
     [app: :req_managed_agents_root, version: "0.0.0", aliases: aliases()]

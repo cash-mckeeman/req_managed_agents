@@ -1,10 +1,11 @@
 # Usage: elixir check_package.exs <tarball built by `mix hex.build`>
 #
 # Asserts what `mix hex.build` exiting 0 cannot: the tarball ships LICENSE,
-# and every requirement on a sibling package names the family minor
-# (~> X.Y.Z with X.Y this package's own minor) from Hex, never a path or git.
+# and sibling dependencies come from Hex. RMA and host share a minor;
+# aws_event_stream is independently versioned and has no consumer dependency.
 defmodule CheckPackage do
-  @siblings ~w(req_managed_agents req_managed_agents_host)
+  @family ~w(req_managed_agents req_managed_agents_host)
+  @siblings ["aws_event_stream" | @family]
 
   def main([tarball]) do
     outer =
@@ -40,7 +41,7 @@ defmodule CheckPackage do
     case failures do
       [] ->
         IO.puts(
-          "check_package: #{app} #{version}: LICENSE shipped; sibling requirements at the family minor"
+          "check_package: #{app} #{version}: LICENSE shipped; sibling dependency boundaries verified"
         )
 
       _ ->
@@ -77,7 +78,11 @@ defmodule CheckPackage do
       Map.has_key?(req, "path") or Map.has_key?(req, "git") ->
         ["#{name} is a path or git dependency"]
 
-      not family_minor?(req["requirement"], major, minor) ->
+      app == "aws_event_stream" and name in @family ->
+        ["codec cannot depend on #{name}"]
+
+      app in @family and name in @family and
+          not family_minor?(req["requirement"], major, minor) ->
         ["#{name} requirement #{inspect(req["requirement"])} is not ~> #{major}.#{minor}.Z"]
 
       true ->
