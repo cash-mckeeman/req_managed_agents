@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../../.." && pwd)"
+workflow=$(ruby "$root/.github/scripts/test/workflow_json.rb" "$root/.github/workflows/fixtures-watch.yml")
+jq -e '
+  .on.schedule == [{"cron":"0 6 * * 1"}] and (.on | has("workflow_dispatch")) and
+  .permissions == {"contents":"read","issues":"write"} and
+  .jobs.watch.env.GH_TOKEN == "${{ github.token }}" and
+  .jobs.watch.env.GITHUB_TOKEN == "${{ github.token }}" and
+  .jobs.watch.defaults.run["working-directory"] == "aws_event_stream"
+' <<<"$workflow" >/dev/null
+watch_dir=$(jq -er '.jobs.watch.defaults.run["working-directory"]' <<<"$workflow")
+watch_command=$(jq -er '.jobs.watch.steps[] | select(.name == "Check upstream vectors and report drift") | .run' <<<"$workflow")
 d="$(mktemp -d)"
 trap 'rm -rf "$d"' EXIT
 mkdir "$d/bin"
@@ -29,7 +39,8 @@ chmod +x "$d/bin/"*
 run_watch() {
   : > "$d/calls"; : > "$d/issues"; : > "$d/body"
   PATH="$d/bin:$PATH" EXPECTED_CODEC="$root/aws_event_stream" CALLS="$d/calls" ISSUES="$d/issues" BODY="$d/body" \
-    SYNC_CODE="$1" TEST_CODE="$2" EXISTING_ISSUE="$3" bash "$root/.github/scripts/watch-fixtures.sh" > "$d/output" 2>&1
+    SYNC_CODE="$1" TEST_CODE="$2" EXISTING_ISSUE="$3" \
+    bash -c 'cd "$1" && bash -e -o pipefail -c "$2"' _ "$root/$watch_dir" "$watch_command" > "$d/output" 2>&1
 }
 run_watch 0 0 ''
 if grep -q '^test$' "$d/calls"; then echo 'FAIL: unchanged fixtures ran tests' >&2; exit 1; fi
