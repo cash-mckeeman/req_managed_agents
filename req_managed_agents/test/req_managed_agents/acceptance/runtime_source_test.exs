@@ -58,7 +58,10 @@ defmodule ReqManagedAgents.Acceptance.RuntimeSourceTest do
     compile!(fixture, env)
     assert probe(fixture, build, env, script, changed_codec, "fresh")["attested"]
 
-    result = probe(fixture, build, env, script, changed_codec, "foreign_codec", [codec_old])
+    codec_foreign = Path.join(scratch, "foreign-codec/Elixir.AWSEventStream.Header.beam")
+    File.mkdir_p!(Path.dirname(codec_foreign))
+    File.cp!(Path.join(codec_ebin, Path.basename(codec_foreign)), codec_foreign)
+    result = probe(fixture, build, env, script, changed_codec, "foreign_codec", [codec_foreign])
     refute result["attested"], "foreign codec BEAM origin accepted"
     assert result["api_refused"]
     assert result["native_requests"] == 0
