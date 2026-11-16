@@ -1,0 +1,28 @@
+{
+  "source": {
+    "repo": "aws/aws-sdk-go-v2",
+    "path": "aws/protocol/eventstream/testdata",
+    "ref": "main",
+    "commit": "a4cd1c9dcbc1492cd27b72f2a21682d43dab7f40"
+  },
+  "files": {
+    "decoded/negative/corrupted_header_len": "4518eabc7bdd4739b1b17a0e03e1456d1959063f4f463d05263b006580c8c060",
+    "decoded/negative/corrupted_headers": "01262f7aa767828beb66e36575538ebc3d0195d1f554ca1309d625ad12743507",
+    "decoded/negative/corrupted_length": "4518eabc7bdd4739b1b17a0e03e1456d1959063f4f463d05263b006580c8c060",
+    "decoded/negative/corrupted_payload": "01262f7aa767828beb66e36575538ebc3d0195d1f554ca1309d625ad12743507",
+    "decoded/positive/all_headers": "27519a98037419753a3f246063304794a15b81311eaa4f157ec2b250f044e4fb",
+    "decoded/positive/empty_message": "435b227d2ca675c55cb4da1cbb2be2f23e2f5b4063789f8c99452e126e287691",
+    "decoded/positive/int32_header": "1b506c096049968571d20b5ae42ed9ff6070c4e90a31da026c7e787e79f69e90",
+    "decoded/positive/payload_no_headers": "079adf35ca0712a00c9dd737bd22ac58600640a750c122d9aedcf00d38c1659b",
+    "decoded/positive/payload_one_str_header": "e41e055fa3318e619e555d3aeb991923dd0d662b65f9fa4b978d211d99ab2021",
+    "encoded/negative/corrupted_header_len": "138ea682f2708aa2565f09552ca9a8e25c7d93d13ff2018f692fe4c73ed3c6c4",
+    "encoded/negative/corrupted_headers": "ebc0f905975472fe6a3e1858e3be6ea6ed21a26eafab1e9639d1a514b7e84d4a",
+    "encoded/negative/corrupted_length": "1d9393afc641522bd5d7f74e376e00befb1be5c5b2fbec20220fab2311b420a5",
+    "encoded/negative/corrupted_payload": "6462f01668c21b89af64dfd6975a818d9fd7be70602acb2cd71d10470ba78808",
+    "encoded/positive/all_headers": "113091d7857ed073b88ac9c3186a6e137cce278822ac4a1a81f00994cd7cf1c4",
+    "encoded/positive/empty_message": "2eb41f6defd4b8479fab0211da45a2f08f23ffe4f6b938b985fc580d578a8c1c",
+    "encoded/positive/int32_header": "2c25316b1e203f3ea542e1a90ae74047d01bee76838b2f9aa8fe32d1fb6de48f",
+    "encoded/positive/payload_no_headers": "49e0beab3d6cc9cf352d8b2a464536a1e214c0f2f4c9fe587f3af0d74759149c",
+    "encoded/positive/payload_one_str_header": "636480b8af343eea34d9915605a7e4d44ad96d85bc65f28c91292959a42a345a"
+  }
+}
