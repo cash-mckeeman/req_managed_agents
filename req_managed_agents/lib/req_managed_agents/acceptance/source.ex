@@ -114,8 +114,8 @@ defmodule ReqManagedAgents.Acceptance.Source do
     end
   end
 
-  defp current_codec_modules? do
-    if @local_codec do
+  if @local_codec do
+    defp current_codec_modules? do
       compile_path = Path.join(Mix.Project.build_path(), "lib/aws_event_stream/ebin")
       app_file = Path.join(compile_path, "aws_event_stream.app")
 
@@ -126,9 +126,9 @@ defmodule ReqManagedAgents.Acceptance.Source do
       else
         _ -> false
       end
-    else
-      true
     end
+  else
+    defp current_codec_modules?, do: true
   end
 
   defp current_module?(module, compile_path) do
