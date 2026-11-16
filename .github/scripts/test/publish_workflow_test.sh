@@ -69,4 +69,21 @@ version_run="$(job guard | awk '/name: each selected package/ {f=1; next} f && /
 version_check() { (PACKAGES=aws_event_stream VERSION="$1" bash -c "$version_run" >/dev/null 2>&1); echo $?; }
 check "matching codec metadata permits the selected release" 0 "$(version_check 0.2.1)"
 check "mismatched codec metadata prevents the selected release" 1 "$(version_check 0.2.0)"
+workflow=$(ruby "$(dirname "$0")/workflow_json.rb" "$WF") || exit 1
+d=$(mktemp -d)
+trap 'rm -rf "$d"' EXIT
+mkdir -p "$d/.github/scripts"
+cat > "$d/.github/scripts/publish-package.sh" <<'STUB'
+printf '%s\n' "$*" >> "$CALLS"
+STUB
+for binding in 'guard rehearse' 'publish publish'; do
+  read -r target action <<<"$binding"
+  for pkg in aws_event_stream req_managed_agents req_managed_agents_host; do
+    command=$(jq -er --arg job "$target" --arg name "$action $pkg" \
+      '.jobs[$job].steps[] | select(.name == $name) | .run' <<<"$workflow") || exit 1
+    : > "$d/calls"
+    (cd "$d" && CALLS="$d/calls" bash -e -o pipefail -c "$command") || exit 1
+    check "$action invokes the selected $pkg publisher" "$pkg" "$(cat "$d/calls")"
+  done
+done
 exit $fail
