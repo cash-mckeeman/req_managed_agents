@@ -22,7 +22,7 @@ defmodule ReqManagedAgentsRoot.MixProject do
   end
 
   defp refuse_root_test(_args) do
-    Mix.raise("run mix test from req_managed_agents/ or req_managed_agents_host/")
+    Mix.raise("run mix test from aws_event_stream/, req_managed_agents/ or req_managed_agents_host/")
   end
 
   defp publish_order(_args), do: Enum.each(@publish, &IO.puts/1)
