@@ -50,4 +50,14 @@ legs=$(jq -r '.include[] | [.package, .elixir, .otp] | join("/")' <<<"$matrix")
 check "codec and consumers retain their own compiler floors" "$(printf 'aws_event_stream/1.18/27\naws_event_stream/1.20/29\nreq_managed_agents/1.20/28\nreq_managed_agents/1.20/29\nreq_managed_agents_host/1.20/28\nreq_managed_agents_host/1.20/29')" "$legs"
 matrix=$(printf 'req_managed_agents_host/lib/x.ex\n' | bash "$SCRIPT" 2>/dev/null | sed -n 's/^matrix=//p')
 check "a host-only selection never adds a codec floor job" 'req_managed_agents_host req_managed_agents_host' "$(jq -r '[.include[].package] | join(" ")' <<<"$matrix")"
+workflow=$(ruby "$(dirname "$0")/workflow_json.rb" "$(dirname "$SCRIPT")/../workflows/ci.yml") || exit 1
+check "the test matrix consumes the selected package/compiler legs" \
+  '${{ fromJSON(needs.detect-changes.outputs.matrix).include }}' \
+  "$(jq -r '.jobs.test.strategy.matrix.include' <<<"$workflow")"
+check "setup-beam uses each selected Elixir version" '${{ matrix.elixir }}' \
+  "$(jq -r '.jobs.test.steps[] | select(.uses // "" | startswith("erlef/setup-beam@")) | .with["elixir-version"]' <<<"$workflow")"
+check "setup-beam uses each selected OTP version" '${{ matrix.otp }}' \
+  "$(jq -r '.jobs.test.steps[] | select(.uses // "" | startswith("erlef/setup-beam@")) | .with["otp-version"]' <<<"$workflow")"
+check "each matrix leg tests its selected package directory" '${{ matrix.package }}' \
+  "$(jq -r '.jobs.test.defaults.run["working-directory"]' <<<"$workflow")"
 exit $fail
