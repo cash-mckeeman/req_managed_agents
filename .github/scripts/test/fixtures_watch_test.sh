@@ -4,10 +4,12 @@ root="$(cd "$(dirname "$0")/../../.." && pwd)"
 workflow=$(ruby "$root/.github/scripts/test/workflow_json.rb" "$root/.github/workflows/fixtures-watch.yml")
 jq -e '
   .on.schedule == [{"cron":"0 6 * * 1"}] and (.on | has("workflow_dispatch")) and
-  .permissions == {"contents":"read","issues":"write"} and
-  .jobs.watch.env.GH_TOKEN == "${{ github.token }}" and
-  .jobs.watch.env.GITHUB_TOKEN == "${{ github.token }}" and
-  .jobs.watch.defaults.run["working-directory"] == "aws_event_stream"
+  (.jobs.watch.permissions // .permissions) == {"contents":"read","issues":"write"} and
+  (.jobs.watch as $job | $job.steps[] |
+    select(.name == "Check upstream vectors and report drift") |
+    (.env.GH_TOKEN // $job.env.GH_TOKEN // $job.env.GITHUB_TOKEN) == "${{ github.token }}" and
+    (.env.GITHUB_TOKEN // $job.env.GITHUB_TOKEN) == "${{ github.token }}" and
+    (. ["working-directory"] // $job.defaults.run["working-directory"]) == "aws_event_stream")
 ' <<<"$workflow" >/dev/null
 watch_dir=$(jq -er '.jobs.watch.defaults.run["working-directory"]' <<<"$workflow")
 watch_command=$(jq -er '.jobs.watch.steps[] | select(.name == "Check upstream vectors and report drift") | .run' <<<"$workflow")
