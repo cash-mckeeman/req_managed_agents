@@ -32,7 +32,7 @@ run_watch() {
     SYNC_CODE="$1" TEST_CODE="$2" EXISTING_ISSUE="$3" bash "$root/.github/scripts/watch-fixtures.sh" > "$d/output" 2>&1
 }
 run_watch 0 0 ''
-! grep -q '^test$' "$d/calls"
+if grep -q '^test$' "$d/calls"; then echo 'FAIL: unchanged fixtures ran tests' >&2; exit 1; fi
 [ ! -s "$d/issues" ]
 echo 'ok: unchanged fixtures do not test or open issues'
 run_watch 2 0 ''
@@ -43,7 +43,7 @@ grep -q 'upstream-fixtures-drift' "$d/issues"
 echo 'ok: drift tests the codec and creates a labeled issue'
 run_watch 2 1 42
 grep -q '^issue comment 42 ' "$d/issues"
-! grep -q '^issue create ' "$d/issues"
+if grep -q '^issue create ' "$d/issues"; then echo 'FAIL: existing drift issue duplicated' >&2; exit 1; fi
 grep -q 'FAILS' "$d/body"
 echo 'ok: codec failure updates the existing drift issue'
 if run_watch 1 0 ''; then echo 'FAIL: upstream sync failure passed' >&2; exit 1; fi
