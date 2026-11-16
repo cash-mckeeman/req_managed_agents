@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.2.1] - Unreleased
 
+### Fixed
+
+- Non-string Bedrock `bytes` envelopes return malformed-payload results;
+  exception frames retain their classification and raw body.
+
 ### Changed
 
 - Source now lives in the `aws_event_stream/` package of the

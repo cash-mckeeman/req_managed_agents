@@ -70,7 +70,7 @@ defmodule AWSEventStream.JSON do
   # Returns {:ok, map} or a {:malformed_payload, msg, reason} that propagates out of `with`.
   defp decode_payload(%Message{payload: payload} = msg) do
     case Jason.decode(payload) do
-      {:ok, %{"bytes" => b64}} ->
+      {:ok, %{"bytes" => b64}} when is_binary(b64) ->
         case Base.decode64(b64) do
           {:ok, raw} ->
             case Jason.decode(raw) do
@@ -82,6 +82,9 @@ defmodule AWSEventStream.JSON do
           :error ->
             {:malformed_payload, msg, :invalid_base64}
         end
+
+      {:ok, %{"bytes" => _}} ->
+        {:malformed_payload, msg, :invalid_base64}
 
       {:ok, map} when is_map(map) ->
         {:ok, map}

@@ -101,6 +101,26 @@ defmodule AWSEventStream.JSONTest do
     assert JSON.classify(m) == {:exception, "ValidationException", %{"raw" => ""}}
   end
 
+  test "non-string bytes envelopes are malformed events and preserve exception bodies" do
+    for bytes <- [nil, 42, true, [], %{}] do
+      payload = Jason.encode!(%{"bytes" => bytes})
+      event = msg([h(":message-type", "event"), h(":event-type", "chunk")], payload)
+      wire = event |> AWSEventStream.encode() |> IO.iodata_to_binary()
+      assert {[{:malformed_payload, ^event, :invalid_base64}], <<>>} = JSON.decode(wire)
+
+      exception =
+        msg(
+          [h(":message-type", "exception"), h(":exception-type", "ValidationException")],
+          payload
+        )
+
+      wire = exception |> AWSEventStream.encode() |> IO.iodata_to_binary()
+
+      assert {[{:exception, "ValidationException", %{"raw" => ^payload}}], <<>>} =
+               JSON.decode(wire)
+    end
+  end
+
   test "an error frame with an empty body still classifies as :error from headers" do
     m =
       msg(
